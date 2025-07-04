@@ -8,6 +8,10 @@
     "start": "next start",
     "lint": "next lint"
   },
+  "repository": {
+    "url": "https://github.com/Rudchyk/childbex.git",
+    "type": "git"
+  },
   "dependencies": {
     "@auth/sequelize-adapter": "^2.10.0",
     "@emotion/react": "^11.14.0",
