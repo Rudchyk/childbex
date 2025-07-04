@@ -3,6 +3,7 @@ import './globals.sass';
 import type { Metadata } from 'next';
 import { ThemeProvider } from '@/lib/modules/ThemeModule';
 import { NotificationsProvider } from '@/lib/modules/NotificationsModule';
+import { StoreProvider } from '@/lib/store/StoreProvider';
 import { Roboto } from 'next/font/google';
 
 export const metadata: Metadata = {
@@ -25,17 +26,19 @@ export default function RootLayout({
   return (
     <html lang="en" className={roboto.variable}>
       <body>
-        <ThemeProvider>
-          <NotificationsProvider
-            anchorOrigin={{
-              vertical: 'bottom', // 'top' | 'bottom'
-              horizontal: 'right', // 'left' | 'center' | 'right'
-            }}
-            maxSnack={3}
-          >
-            {children}
-          </NotificationsProvider>
-        </ThemeProvider>
+        <StoreProvider>
+          <ThemeProvider>
+            <NotificationsProvider
+              anchorOrigin={{
+                vertical: 'bottom', // 'top' | 'bottom'
+                horizontal: 'right', // 'left' | 'center' | 'right'
+              }}
+              maxSnack={3}
+            >
+              {children}
+            </NotificationsProvider>
+          </ThemeProvider>
+        </StoreProvider>
       </body>
     </html>
   );

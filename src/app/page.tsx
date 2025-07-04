@@ -1,9 +1,14 @@
 import { DefaultLayout } from '@/lib/layouts';
+import { APIHello } from './APIHello';
+import { Stack } from '@mui/material';
 
 export default function Page() {
   return (
     <DefaultLayout>
-      <p>Hello world!</p>
+      <Stack spacing={2}>
+        <p>Hello world!</p>
+        <APIHello />
+      </Stack>
     </DefaultLayout>
   );
 }
