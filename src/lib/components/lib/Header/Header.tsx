@@ -1,7 +1,7 @@
 'use client';
 
 import { AppBar, Toolbar, Typography, Stack } from '@mui/material';
-// import { AuthUser } from '@/lib/components';
+import { AuthUser } from '@/lib/components';
 import NextLink from 'next/link';
 import { ThemeSwitcher } from '@/lib/modules/ThemeModule';
 
@@ -23,7 +23,7 @@ export const Header = () => {
         </Typography>
         <Stack direction="row" spacing={1} alignItems="center">
           <ThemeSwitcher />
-          {/* <AuthUser /> */}
+          <AuthUser />
         </Stack>
       </Toolbar>
     </AppBar>
