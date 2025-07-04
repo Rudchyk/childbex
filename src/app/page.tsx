@@ -1,3 +1,9 @@
-export default function Home() {
-  return <p>Hello world!</p>;
+import { DefaultLayout } from '@/lib/layouts';
+
+export default function Page() {
+  return (
+    <DefaultLayout>
+      <p>Hello world!</p>
+    </DefaultLayout>
+  );
 }
