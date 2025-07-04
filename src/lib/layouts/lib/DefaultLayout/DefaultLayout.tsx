@@ -2,20 +2,22 @@
 
 import { ReactNode, FC } from 'react';
 import { Box, Container, ContainerProps } from '@mui/material';
-// import { Header } from '@/lib/components';
+import { Header } from '@/lib/components';
 
 export interface DefaultLayoutProps {
   children: ReactNode;
   ContainerProps?: ContainerProps;
+  isHeader?: boolean;
 }
 
 export const DefaultLayout: FC<DefaultLayoutProps> = ({
   children,
+  isHeader = true,
   ContainerProps,
 }) => {
   return (
     <>
-      {/* <Header /> */}
+      {isHeader && <Header />}
       <Container maxWidth="lg" component="main" {...ContainerProps}>
         <Box py={2}>{children}</Box>
       </Container>
