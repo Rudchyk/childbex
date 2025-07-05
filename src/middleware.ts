@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server';
 import { paths, publicPaths } from './lib/constants/paths';
 import { getToken } from 'next-auth/jwt';
 import { UserRoles } from './types';
+// import { UserModel } from './db/models/User.model';
 
 export default async function middleware(
   req: NextRequest
@@ -31,6 +32,14 @@ export default async function middleware(
     req,
     secret: process.env.NEXTAUTH_SECRET,
   });
+
+  // const user = await UserModel.findByPk(session?.id);
+
+  // if (session && !user) {
+  //   const signOutUrl = new URL('/api/auth/signout', req.url);
+  //   signOutUrl.searchParams.set('callbackUrl', req.nextUrl.pathname);
+  //   return NextResponse.redirect(signOutUrl);
+  // }
 
   if (session && [publicPaths.login].includes(pathname)) {
     return NextResponse.redirect(new URL('/', req.url));

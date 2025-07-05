@@ -22,7 +22,6 @@ import ShieldIcon from '@mui/icons-material/Shield';
 
 export const AuthUser = () => {
   const session = useSession();
-  console.table(session);
   const router = useRouter();
   const theme = useTheme();
   const { data } = session;

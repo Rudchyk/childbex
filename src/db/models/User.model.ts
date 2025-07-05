@@ -19,7 +19,8 @@ export class UserModel
   public role!: UserRoles;
 
   public async comparePassword(plainText: string): Promise<boolean> {
-    return bcrypt.compare(plainText, this.dataValues.password);
+    const hash = this.getDataValue('password');
+    return bcrypt.compare(plainText, hash);
   }
 
   public getPublic(): PublicUser {
@@ -57,10 +58,9 @@ UserModel.init(
     hooks: {
       beforeSave: async (user: UserModel) => {
         if (user.changed('password')) {
-          user.dataValues.password = await bcrypt.hash(
-            user.dataValues.password,
-            10
-          );
+          const password = user.getDataValue('password');
+          const hash = await bcrypt.hash(password, 10);
+          user.setDataValue('password', hash);
         }
       },
     },
