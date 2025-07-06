@@ -3,4 +3,8 @@ export * from './lib/Header/Header';
 export * from './lib/HomeButton/HomeButton';
 export * from './lib/FormUITextField/FormUITextField';
 export * from './lib/FormUIPasswordField/FormUIPasswordField';
+export * from './lib/FormUICheckbox/FormUICheckbox';
 export * from './lib/AuthUser/AuthUser';
+export * from './lib/UIDialog/UIDialog';
+export * from './lib/DialogForm/DialogForm';
+export * from './lib/DialogAreYouSure/DialogAreYouSure';

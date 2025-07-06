@@ -1,7 +1,7 @@
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth/auth.options';
 import { UserModel } from '@/db/models/User.model';
-import { Profile } from './Profile';
+import { Profile } from './_components/Profile';
 import { redirect } from 'next/navigation';
 import { syncDb } from '@/db';
 

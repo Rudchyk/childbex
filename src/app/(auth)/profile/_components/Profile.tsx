@@ -5,6 +5,7 @@ import { Chip, Grid, Stack, TextField, Typography } from '@mui/material';
 import {
   FC,
   FormEventHandler,
+  startTransition,
   useActionState,
   useEffect,
   useState,
@@ -19,6 +20,8 @@ import {
 import { format } from 'date-fns';
 import { EditProfileActionStates } from './EditProfileActionStates.enum';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
+import { DeleteProfile } from './DeleteProfile';
+import { ResetPasswordProfile } from './ResetPasswordProfile';
 import {
   EditProfileActionState,
   EditProfileData,
@@ -43,7 +46,9 @@ export const Profile: FC<ProfileProps> = ({ data }) => {
   const handleOnSubmitEditProfileForm: SubmitHandler<
     EditEmailProfileFormData | EditNameProfileFormData
   > = (data) => {
-    formAction({ id, data });
+    startTransition(() => {
+      formAction({ id, data });
+    });
   };
   const handleOnChangeEditNameProfileForm: FormEventHandler<HTMLFormElement> = (
     e
@@ -87,7 +92,17 @@ export const Profile: FC<ProfileProps> = ({ data }) => {
             <Chip label={role.toUpperCase()} />
           </Stack>
         </Grid>
-        <Grid size={6}></Grid>
+        <Grid size={6}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="end"
+            spacing={2}
+          >
+            <ResetPasswordProfile id={id} />
+            <DeleteProfile id={id} />
+          </Stack>
+        </Grid>
         {infoList.map(({ value, label }) => (
           <Grid size={6} key={label}>
             <TextField
