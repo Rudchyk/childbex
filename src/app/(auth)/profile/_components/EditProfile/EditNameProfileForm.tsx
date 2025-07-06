@@ -1,49 +1,55 @@
 'use client';
 
-import React, { FC } from 'react';
+import React, { FC, FormEventHandler } from 'react';
 import { SubmitHandler, SubmitErrorHandler, useForm } from 'react-hook-form';
 import { Box, IconButton, InputAdornment } from '@mui/material';
 import { FormUITextField } from '@/lib/components';
 import {
-  editEmailProfileFormSchema,
-  EditEmailProfileFormData,
-} from './profileForms.schemas';
+  editNameProfileFormSchema,
+  EditNameProfileFormData,
+} from './editProfileForms.schemas';
 import { yupResolver } from '@hookform/resolvers/yup';
 import SaveIcon from '@mui/icons-material/Save';
 
-export interface EditEmailProfileFormProps {
-  onSubmit: SubmitHandler<EditEmailProfileFormData>;
+export interface EditNameProfileFormProps {
+  onSubmit: SubmitHandler<EditNameProfileFormData>;
   loading?: boolean;
-  onError?: SubmitErrorHandler<EditEmailProfileFormData>;
+  onError?: SubmitErrorHandler<EditNameProfileFormData>;
+  onChange?: FormEventHandler<EditNameProfileFormData>;
   value: string;
 }
 
-export const EditEmailProfileForm: FC<EditEmailProfileFormProps> = ({
+export const EditNameProfileForm: FC<EditNameProfileFormProps> = ({
   onSubmit,
   onError,
+  onChange,
   loading,
   value,
 }) => {
-  const { handleSubmit, control, watch } = useForm<EditEmailProfileFormData>({
-    resolver: yupResolver(editEmailProfileFormSchema),
+  const { handleSubmit, control, watch } = useForm<EditNameProfileFormData>({
+    resolver: yupResolver(editNameProfileFormSchema),
     defaultValues: {
-      email: value,
+      name: value,
     },
   });
-  const { email } = watch();
+  const { name } = watch();
   return (
-    <Box component="form" onSubmit={handleSubmit(onSubmit, onError)}>
+    <Box
+      component="form"
+      onChange={onChange}
+      onSubmit={handleSubmit(onSubmit, onError)}
+    >
       <FormUITextField
-        name="email"
+        name="name"
         control={control}
-        label="Email"
+        label="Name"
         margin="normal"
         fullWidth
         slotProps={{
           input: {
             endAdornment: (
               <InputAdornment position="end">
-                {email !== value && (
+                {name !== value && (
                   <IconButton loading={loading} type="submit">
                     <SaveIcon />
                   </IconButton>

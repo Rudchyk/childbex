@@ -46,7 +46,7 @@ export const DeleteProfile: FC<DeleteProfileProps> = ({ id }) => {
     toggleOpen();
   }, [state]);
 
-  if (data?.user.role !== UserRoles.SUPER) {
+  if (data?.user.role === UserRoles.SUPER) {
     return null;
   }
 

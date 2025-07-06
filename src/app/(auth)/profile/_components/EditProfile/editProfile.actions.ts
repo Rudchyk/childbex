@@ -6,8 +6,7 @@ import {
   EditNameProfileFormData,
   editEmailProfileFormSchema,
   EditEmailProfileFormData,
-} from './profileForms.schemas';
-// import { decode } from 'next-auth/jwt';
+} from './editProfileForms.schemas';
 import { ValidationError } from 'yup';
 import { User, UserModel } from '@/db/models/User.model';
 import { EditProfileActionStates } from './EditProfileActionStates.enum';

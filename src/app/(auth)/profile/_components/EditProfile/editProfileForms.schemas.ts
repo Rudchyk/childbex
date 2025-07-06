@@ -12,12 +12,3 @@ export const editNameProfileFormSchema = Yup.object().shape({
 export type EditNameProfileFormData = Yup.InferType<
   typeof editNameProfileFormSchema
 >;
-
-export const changePasswordProfileFormSchema = Yup.object().shape({
-  email: Yup.string().email().required(),
-  password: Yup.string().required(),
-});
-
-export type ChangePasswordProfileFormData = Yup.InferType<
-  typeof changePasswordProfileFormSchema
->;

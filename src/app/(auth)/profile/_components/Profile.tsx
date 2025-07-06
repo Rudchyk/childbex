@@ -10,23 +10,19 @@ import {
   useEffect,
   useState,
 } from 'react';
-import { EditEmailProfileForm } from './EditEmailProfileForm';
-import { EditNameProfileForm } from './EditNameProfileForm';
+import { EditEmailProfileForm } from './EditProfile/EditEmailProfileForm';
+import { EditNameProfileForm } from './EditProfile/EditNameProfileForm';
 import { SubmitHandler } from 'react-hook-form';
-import {
-  EditEmailProfileFormData,
-  EditNameProfileFormData,
-} from './profileForms.schemas';
 import { format } from 'date-fns';
-import { EditProfileActionStates } from './EditProfileActionStates.enum';
+import { EditProfileActionStates } from './EditProfile/EditProfileActionStates.enum';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
-import { DeleteProfile } from './DeleteProfile';
-import { ResetPasswordProfile } from './ResetPasswordProfile';
+import { DeleteProfile } from './DeleteProfile/DeleteProfile';
+import { ChangePasswordProfile } from './ChangePasswordProfile/ChangePasswordProfile';
 import {
   EditProfileActionState,
   EditProfileData,
   editProfile,
-} from './editProfile.actions';
+} from './EditProfile/editProfile.actions';
 
 interface ProfileProps {
   data: PublicUser;
@@ -44,7 +40,7 @@ export const Profile: FC<ProfileProps> = ({ data }) => {
     status: EditProfileActionStates.IDLE,
   });
   const handleOnSubmitEditProfileForm: SubmitHandler<
-    EditEmailProfileFormData | EditNameProfileFormData
+    EditProfileData['data']
   > = (data) => {
     startTransition(() => {
       formAction({ id, data });
@@ -99,7 +95,7 @@ export const Profile: FC<ProfileProps> = ({ data }) => {
             justifyContent="end"
             spacing={2}
           >
-            <ResetPasswordProfile id={id} />
+            <ChangePasswordProfile id={id} />
             <DeleteProfile id={id} />
           </Stack>
         </Grid>
