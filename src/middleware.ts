@@ -36,14 +36,6 @@ export default async function middleware(
     if ([publicPaths.login].includes(pathname)) {
       return NextResponse.redirect(new URL('/', req.url));
     }
-
-    const res = await fetch(new URL(`/api/user-check/${session.id}`, req.url));
-
-    if (res.status !== 201) {
-      const signOutUrl = new URL('/api/auth/signout', req.url);
-      // signOutUrl.searchParams.set('callbackUrl', req.nextUrl.pathname);
-      return NextResponse.redirect(signOutUrl);
-    }
   } else {
     const loginUrl = new URL(publicPaths.login, req.url);
     return NextResponse.redirect(loginUrl);

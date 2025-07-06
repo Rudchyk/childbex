@@ -19,12 +19,30 @@ import { useRouter } from 'next/navigation';
 import BoltIcon from '@mui/icons-material/Bolt';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import ShieldIcon from '@mui/icons-material/Shield';
+import { useEffect } from 'react';
 
 export const AuthUser = () => {
   const session = useSession();
   const router = useRouter();
   const theme = useTheme();
   const { data } = session;
+  const checkHealth = async (id: string) => {
+    try {
+      const resp = await fetch(`/api/health/${id}`);
+      console.info('resp.status', resp.status);
+      if (resp.status !== 201) {
+        signOut({ callbackUrl: paths.login });
+      }
+    } catch (error) {
+      console.error('error', error);
+      signOut({ callbackUrl: paths.login });
+    }
+  };
+  useEffect(() => {
+    if (data) {
+      checkHealth(data.user.id);
+    }
+  }, [data]);
 
   if (!data) {
     return <CircularProgress size={15} color="inherit" />;
