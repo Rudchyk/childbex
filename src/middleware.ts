@@ -3,7 +3,6 @@ import type { NextRequest } from 'next/server';
 import { paths, publicPaths } from './lib/constants/paths';
 import { getToken } from 'next-auth/jwt';
 import { UserRoles } from './types';
-// import { UserModel } from './db/models/User.model';
 
 export default async function middleware(
   req: NextRequest
@@ -33,19 +32,19 @@ export default async function middleware(
     secret: process.env.NEXTAUTH_SECRET,
   });
 
-  // const user = await UserModel.findByPk(session?.id);
+  if (session) {
+    if ([publicPaths.login].includes(pathname)) {
+      return NextResponse.redirect(new URL('/', req.url));
+    }
 
-  // if (session && !user) {
-  //   const signOutUrl = new URL('/api/auth/signout', req.url);
-  //   signOutUrl.searchParams.set('callbackUrl', req.nextUrl.pathname);
-  //   return NextResponse.redirect(signOutUrl);
-  // }
+    const res = await fetch(new URL(`/api/user-check/${session.id}`, req.url));
 
-  if (session && [publicPaths.login].includes(pathname)) {
-    return NextResponse.redirect(new URL('/', req.url));
-  }
-
-  if (!session) {
+    if (res.status !== 201) {
+      const signOutUrl = new URL('/api/auth/signout', req.url);
+      // signOutUrl.searchParams.set('callbackUrl', req.nextUrl.pathname);
+      return NextResponse.redirect(signOutUrl);
+    }
+  } else {
     const loginUrl = new URL(publicPaths.login, req.url);
     return NextResponse.redirect(loginUrl);
   }

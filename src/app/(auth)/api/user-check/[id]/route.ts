@@ -8,7 +8,7 @@ export async function GET(
 ) {
   try {
     await syncDb();
-    const { id } = params;
+    const { id } = await params;
     const user = await UserModel.findByPk(id);
 
     if (!user) {
