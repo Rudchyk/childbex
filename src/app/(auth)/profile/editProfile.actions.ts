@@ -11,7 +11,6 @@ import {
 import { ValidationError } from 'yup';
 import { User, UserModel } from '@/db/models/User.model';
 import { EditProfileActionStates } from './EditProfileActionStates.enum';
-import { partial } from 'lodash';
 
 export interface EditProfileActionState {
   status: EditProfileActionStates;
