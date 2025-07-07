@@ -40,7 +40,6 @@ export const editProfile = async (
     if ('email' in data) {
       const { email } = await editEmailProfileFormSchema.validate(data);
       update.email = email;
-      await user.update('email', email);
     }
 
     if ('name' in data) {

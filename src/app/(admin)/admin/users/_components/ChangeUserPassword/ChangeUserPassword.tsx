@@ -4,15 +4,15 @@ import {
   changePasswordProfile,
   ChangePasswordProfileActionState,
   ChangePasswordProfileData,
-} from './changePasswordProfile.actions';
-import { ChangePasswordProfileActionStates } from './ChangePasswordProfileActionStates.enum';
-import { ChangePasswordProfileFormData } from './changePasswordProfile.schema';
+} from './changeUserPassword.actions';
+import { ChangePasswordProfileActionStates } from './ChangeUserPasswordActionStates.enum';
+import { ChangePasswordProfileFormData } from './changeUserPassword.schema';
 import { useToggle } from 'usehooks-ts';
 import { signOut } from 'next-auth/react';
 import { paths } from '@/lib/constants/paths';
 import { Button } from '@mui/material';
 import { DialogForm } from '@/lib/components';
-import { ChangePasswordProfileForm } from './ChangePasswordProfileForm';
+import { ChangePasswordProfileForm } from './ChangeUserPasswordForm';
 import { encode } from 'next-auth/jwt';
 import { SubmitHandler } from 'react-hook-form';
 
