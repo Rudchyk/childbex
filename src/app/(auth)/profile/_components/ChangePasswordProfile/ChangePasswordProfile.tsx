@@ -53,6 +53,10 @@ export const ChangePasswordProfile: FC<ChangePasswordProfileProps> = ({
       state.status === ChangePasswordProfileActionStates.OLD_PASSWORD_IS_WRONG
     ) {
       notifyError('Old password is wrong!');
+    } else if (
+      state.status === ChangePasswordProfileActionStates.INVALID_DATA
+    ) {
+      notifyError(`Failed validating your submission! ${state.message}`);
     } else if (state.status === ChangePasswordProfileActionStates.SUCCESS) {
       notifySuccess('Password updated successfully!');
       signOut({ callbackUrl: paths.login });

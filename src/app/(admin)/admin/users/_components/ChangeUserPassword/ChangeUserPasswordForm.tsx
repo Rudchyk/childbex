@@ -5,38 +5,30 @@ import { SubmitHandler, SubmitErrorHandler, useForm } from 'react-hook-form';
 import { Box } from '@mui/material';
 import { FormUIPasswordField } from '@/lib/components';
 import {
-  changePasswordProfileFormSchema,
-  ChangePasswordProfileFormData,
+  changeUserPasswordFormSchema,
+  ChangeUserPasswordFormData,
 } from './changeUserPassword.schema';
 import { yupResolver } from '@hookform/resolvers/yup';
 
-export interface ChangePasswordProfileFormProps {
-  onSubmit: SubmitHandler<ChangePasswordProfileFormData>;
+export interface ChangeUserPasswordFormProps {
+  onSubmit: SubmitHandler<ChangeUserPasswordFormData>;
   loading?: boolean;
-  onError?: SubmitErrorHandler<ChangePasswordProfileFormData>;
+  onError?: SubmitErrorHandler<ChangeUserPasswordFormData>;
 }
 
-export const ChangePasswordProfileForm: FC<ChangePasswordProfileFormProps> = ({
+export const ChangeUserPasswordForm: FC<ChangeUserPasswordFormProps> = ({
   onSubmit,
   onError,
 }) => {
-  const { handleSubmit, control } = useForm<ChangePasswordProfileFormData>({
-    resolver: yupResolver(changePasswordProfileFormSchema),
+  const { handleSubmit, control } = useForm<ChangeUserPasswordFormData>({
+    resolver: yupResolver(changeUserPasswordFormSchema),
     defaultValues: {
-      oldPassword: '',
       password: '',
       confirmPassword: '',
     },
   });
   return (
     <Box component="form" onSubmit={handleSubmit(onSubmit, onError)}>
-      <FormUIPasswordField
-        name="oldPassword"
-        control={control}
-        label="Old password"
-        margin="normal"
-        fullWidth
-      />
       <FormUIPasswordField
         name="password"
         control={control}

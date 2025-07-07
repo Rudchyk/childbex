@@ -1,38 +1,34 @@
 import { useNotifications } from '@/lib/modules/NotificationsModule';
 import { FC, startTransition, useActionState, useEffect } from 'react';
 import {
-  changePasswordProfile,
-  ChangePasswordProfileActionState,
-  ChangePasswordProfileData,
+  changeUserPassword,
+  ChangeUserPasswordActionState,
+  ChangeUserPasswordData,
 } from './changeUserPassword.actions';
-import { ChangePasswordProfileActionStates } from './ChangeUserPasswordActionStates.enum';
-import { ChangePasswordProfileFormData } from './changeUserPassword.schema';
+import { ChangeUserPasswordActionStates } from './ChangeUserPasswordActionStates.enum';
+import { ChangeUserPasswordFormData } from './changeUserPassword.schema';
 import { useToggle } from 'usehooks-ts';
-import { signOut } from 'next-auth/react';
-import { paths } from '@/lib/constants/paths';
 import { Button } from '@mui/material';
 import { DialogForm } from '@/lib/components';
-import { ChangePasswordProfileForm } from './ChangeUserPasswordForm';
+import { ChangeUserPasswordForm } from './ChangeUserPasswordForm';
 import { encode } from 'next-auth/jwt';
 import { SubmitHandler } from 'react-hook-form';
 
-interface ChangePasswordProfileProps {
+interface ChangeUserPasswordProps {
   id: string;
 }
 
-export const ChangePasswordProfile: FC<ChangePasswordProfileProps> = ({
-  id,
-}) => {
+export const ChangeUserPassword: FC<ChangeUserPasswordProps> = ({ id }) => {
   const { notifyError, notifySuccess, notifyWarning } = useNotifications();
   const [open, toggleOpen] = useToggle(false);
   const [state, formAction] = useActionState<
-    ChangePasswordProfileActionState,
-    ChangePasswordProfileData
-  >(changePasswordProfile, {
-    status: ChangePasswordProfileActionStates.IDLE,
+    ChangeUserPasswordActionState,
+    ChangeUserPasswordData
+  >(changeUserPassword, {
+    status: ChangeUserPasswordActionStates.IDLE,
   });
   const handleOnResetPassword: SubmitHandler<
-    ChangePasswordProfileFormData
+    ChangeUserPasswordFormData
   > = async (formData) => {
     const token = await encode({
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -45,17 +41,21 @@ export const ChangePasswordProfile: FC<ChangePasswordProfileProps> = ({
     });
   };
   useEffect(() => {
-    if (state.status === ChangePasswordProfileActionStates.USER_DO_NOT_EXIST) {
-      notifyWarning('Account do not exist!');
-    } else if (state.status === ChangePasswordProfileActionStates.FAILED) {
-      notifyError('Failed to update password');
-    } else if (
-      state.status === ChangePasswordProfileActionStates.OLD_PASSWORD_IS_WRONG
-    ) {
-      notifyError('Old password is wrong!');
-    } else if (state.status === ChangePasswordProfileActionStates.SUCCESS) {
-      notifySuccess('Password updated successfully!');
-      signOut({ callbackUrl: paths.login });
+    switch (state.status) {
+      case ChangeUserPasswordActionStates.USER_DO_NOT_EXIST:
+        notifyWarning('Account do not exist!');
+        break;
+      case ChangeUserPasswordActionStates.FAILED:
+        notifyError('Failed to update password');
+        break;
+      case ChangeUserPasswordActionStates.INVALID_DATA:
+        notifyError(`Failed validating your submission! ${state.message}`);
+        break;
+      case ChangeUserPasswordActionStates.SUCCESS:
+        notifySuccess('Password updated successfully!');
+        break;
+      default:
+        break;
     }
     toggleOpen();
   }, [state]);
@@ -69,7 +69,7 @@ export const ChangePasswordProfile: FC<ChangePasswordProfileProps> = ({
         title="Change password"
         open={open}
         onDialogClose={toggleOpen}
-        form={<ChangePasswordProfileForm onSubmit={handleOnResetPassword} />}
+        form={<ChangeUserPasswordForm onSubmit={handleOnResetPassword} />}
       />
     </>
   );

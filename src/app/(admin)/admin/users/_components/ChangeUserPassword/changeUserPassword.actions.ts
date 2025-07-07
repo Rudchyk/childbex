@@ -1,26 +1,26 @@
 'use server';
 
 import { syncDb } from '@/db';
-import { changePasswordProfileFormSchema } from './changeUserPassword.schema';
+import { changeUserPasswordFormSchema } from './changeUserPassword.schema';
 import { ValidationError } from 'yup';
 import { UserModel } from '@/db/models/User.model';
-import { ChangePasswordProfileActionStates } from './ChangeUserPasswordActionStates.enum';
+import { ChangeUserPasswordActionStates } from './ChangeUserPasswordActionStates.enum';
 import { decode } from 'next-auth/jwt';
 
-export interface ChangePasswordProfileActionState {
-  status: ChangePasswordProfileActionStates;
+export interface ChangeUserPasswordActionState {
+  status: ChangeUserPasswordActionStates;
   message?: string;
 }
 
-export interface ChangePasswordProfileData {
+export interface ChangeUserPasswordData {
   id: string;
   token: string;
 }
 
-export const changePasswordProfile = async (
-  _: ChangePasswordProfileActionState,
-  { id, token }: ChangePasswordProfileData
-): Promise<ChangePasswordProfileActionState> => {
+export const changeUserPassword = async (
+  _: ChangeUserPasswordActionState,
+  { id, token }: ChangeUserPasswordData
+): Promise<ChangeUserPasswordActionState> => {
   try {
     await syncDb();
 
@@ -28,7 +28,7 @@ export const changePasswordProfile = async (
 
     if (!user) {
       return {
-        status: ChangePasswordProfileActionStates.USER_DO_NOT_EXIST,
+        status: ChangeUserPasswordActionStates.USER_DO_NOT_EXIST,
       };
     }
 
@@ -36,28 +36,21 @@ export const changePasswordProfile = async (
       token,
       secret: process.env.NEXT_PUBLIC_SECRET || '',
     });
-    const { password, oldPassword } =
-      await changePasswordProfileFormSchema.validate(data);
-    const isPasswordChecked = await user.comparePassword(oldPassword);
-    if (!isPasswordChecked) {
-      return {
-        status: ChangePasswordProfileActionStates.OLD_PASSWORD_IS_WRONG,
-      };
-    }
+    const { password } = await changeUserPasswordFormSchema.validate(data);
 
     await user.update({ password });
 
-    return { status: ChangePasswordProfileActionStates.SUCCESS };
+    return { status: ChangeUserPasswordActionStates.SUCCESS };
   } catch (error) {
     if (error instanceof ValidationError) {
       return {
-        status: ChangePasswordProfileActionStates.INVALID_DATA,
+        status: ChangeUserPasswordActionStates.INVALID_DATA,
         message: error.message,
       };
     }
 
     return {
-      status: ChangePasswordProfileActionStates.FAILED,
+      status: ChangeUserPasswordActionStates.FAILED,
       message: (error as Error).message,
     };
   }
