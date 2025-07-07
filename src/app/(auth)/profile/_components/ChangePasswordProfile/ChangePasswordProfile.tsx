@@ -6,11 +6,15 @@ import {
   ChangePasswordProfileData,
 } from './changePasswordProfile.actions';
 import { ChangePasswordProfileActionStates } from './ChangePasswordProfileActionStates.enum';
+import { ChangePasswordProfileFormData } from './changePasswordProfile.schema';
 import { useToggle } from 'usehooks-ts';
 import { signOut } from 'next-auth/react';
 import { paths } from '@/lib/constants/paths';
 import { Button } from '@mui/material';
 import { DialogForm } from '@/lib/components';
+import { ChangePasswordProfileForm } from './ChangePasswordProfileForm';
+import { encode } from 'next-auth/jwt';
+import { SubmitHandler } from 'react-hook-form';
 
 interface ChangePasswordProfileProps {
   id: string;
@@ -27,10 +31,17 @@ export const ChangePasswordProfile: FC<ChangePasswordProfileProps> = ({
   >(changePasswordProfile, {
     status: ChangePasswordProfileActionStates.IDLE,
   });
-  const handleOnResetPassword = () => {
-    console.log(111);
+  const handleOnResetPassword: SubmitHandler<
+    ChangePasswordProfileFormData
+  > = async (formData) => {
+    const token = await encode({
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      //@ts-ignore
+      token: formData,
+      secret: process.env.NEXT_PUBLIC_SECRET || '',
+    });
     startTransition(() => {
-      formAction({ id, token: '' });
+      formAction({ id, token });
     });
   };
   useEffect(() => {
@@ -58,8 +69,7 @@ export const ChangePasswordProfile: FC<ChangePasswordProfileProps> = ({
         title="Reset password"
         open={open}
         onDialogClose={toggleOpen}
-        onButtonClick={handleOnResetPassword}
-        form={<></>}
+        form={<ChangePasswordProfileForm onSubmit={handleOnResetPassword} />}
       />
     </>
   );

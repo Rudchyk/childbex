@@ -12,15 +12,14 @@ export class UserModel
   extends Model<UserModelAttributes, UserModelCreationAttributes>
   implements UserModelAttributes
 {
-  public id!: string;
-  public email!: string;
-  public password!: string;
-  public name!: string;
-  public role!: UserRoles;
+  declare id: string;
+  declare email: string;
+  declare password: string;
+  declare name: string;
+  declare role: UserRoles;
 
-  public async comparePassword(plainText: string): Promise<boolean> {
-    const hash = this.getDataValue('password');
-    return bcrypt.compare(plainText, hash);
+  async comparePassword(plainText: string): Promise<boolean> {
+    return bcrypt.compare(plainText, this.password);
   }
 
   public getPublic(): PublicUser {
@@ -56,11 +55,9 @@ UserModel.init(
     tableName: 'users',
     paranoid: true,
     hooks: {
-      beforeSave: async (user: UserModel) => {
+      async beforeSave(user: UserModel) {
         if (user.changed('password')) {
-          const password = user.getDataValue('password');
-          const hash = await bcrypt.hash(password, 10);
-          user.setDataValue('password', hash);
+          user.password = await bcrypt.hash(user.password, 10);
         }
       },
     },
