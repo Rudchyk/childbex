@@ -1,4 +1,4 @@
-export enum RegisterActionStateEnum {
+export enum AddUserActionStates {
   IDLE = 'idle',
   SUCCESS = 'success',
   FAILED = 'failed',

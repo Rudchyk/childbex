@@ -2,12 +2,13 @@
 
 import React from 'react';
 import { SessionProvider } from 'next-auth/react';
-import { SessionHealthProvider } from './SessionHealthProvider';
+// import { SessionHealthProvider } from './SessionHealthProvider';
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   return (
     <SessionProvider>
-      <SessionHealthProvider>{children}</SessionHealthProvider>
+      {/* <SessionHealthProvider>{children}</SessionHealthProvider> */}
+      {children}
     </SessionProvider>
   );
 };

@@ -5,10 +5,59 @@ import { ToolbarButton, Toolbar } from '@mui/x-data-grid';
 import AddIcon from '@mui/icons-material/Add';
 import { useToggle } from 'usehooks-ts';
 import { DialogForm } from '@/lib/components';
+import { useNotifications } from '@/lib/modules/NotificationsModule';
+import { startTransition, useActionState, useEffect } from 'react';
+import { AddUserActionStates } from './AddUserActionStates.enum';
+import { addUser, AddUserActionState } from './addUser.actions';
+import { SubmitHandler } from 'react-hook-form';
+import { AddUserFormData } from './addUserForm.schema';
+import { encode } from 'next-auth/jwt';
+import { AddAccountForm } from './AddUserForm';
+import { useRouter } from 'next/navigation';
 
 export const AddUser = () => {
-  const [open, toggleOpen] = useToggle(false);
   const title = 'Add user';
+  const router = useRouter();
+  const { notifyError, notifySuccess, notifyWarning } = useNotifications();
+  const [open, toggleOpen] = useToggle(false);
+  const [state, formAction] = useActionState<AddUserActionState, string>(
+    addUser,
+    {
+      status: AddUserActionStates.IDLE,
+    }
+  );
+  const onSubmit: SubmitHandler<AddUserFormData> = async (formData) => {
+    const token = await encode({
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      //@ts-ignore
+      token: formData,
+      secret: process.env.NEXT_PUBLIC_SECRET || '',
+    });
+    startTransition(() => {
+      return formAction(token);
+    });
+  };
+  useEffect(() => {
+    switch (state.status) {
+      case AddUserActionStates.USER_EXISTS:
+        notifyWarning('User already exists!');
+        break;
+      case AddUserActionStates.FAILED:
+        notifyError('Failed to create user');
+        break;
+      case AddUserActionStates.INVALID_DATA:
+        notifyError(`Failed validating your submission! ${state.message}`);
+        break;
+      case AddUserActionStates.SUCCESS:
+        notifySuccess('Users created successfully!');
+        router.refresh();
+        break;
+      default:
+        break;
+    }
+    toggleOpen();
+  }, [state]);
+
   return (
     <>
       <Toolbar>
@@ -22,8 +71,7 @@ export const AddUser = () => {
         title={title}
         open={open}
         onDialogClose={toggleOpen}
-        // form={<AddAccountForm onSubmit={onSubmit} onError={onError} />}
-        form={<>1111</>}
+        form={<AddAccountForm onSubmit={onSubmit} />}
       />
     </>
   );

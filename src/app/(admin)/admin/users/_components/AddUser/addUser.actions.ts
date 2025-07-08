@@ -1,23 +1,22 @@
 'use server';
 
 import { sequelize } from '@/db';
-import { registerFormDateSchema } from './addUserForm.schema';
+import { addUserFormDataSchema } from './addUserForm.schema';
 import { decode } from 'next-auth/jwt';
 import { ValidationError } from 'yup';
 import { UserModel } from '@/db/models/User.model';
-import { EmailVerificationModel } from '@/db/models/EmailVerification.model';
-import { UserSettingsModel } from '@/db/models/UserSettings.model';
-import { RegisterActionStateEnum } from './AddUserActionState.enum';
+import { AddUserActionStates } from './AddUserActionStates.enum';
+import { omit } from 'lodash';
 
-export interface RegisterActionState {
-  status: RegisterActionStateEnum;
+export interface AddUserActionState {
+  status: AddUserActionStates;
   message?: string;
 }
 
-export const register = async (
-  _: RegisterActionState,
+export const addUser = async (
+  _: AddUserActionState,
   token: string
-): Promise<RegisterActionState> => {
+): Promise<AddUserActionState> => {
   try {
     await sequelize.sync();
     const payload =
@@ -25,9 +24,7 @@ export const register = async (
         token,
         secret: process.env.NEXT_PUBLIC_SECRET || '',
       })) || {};
-    const validated = await registerFormDateSchema
-      .noUnknown()
-      .validate(payload);
+    const validated = await addUserFormDataSchema.noUnknown().validate(payload);
     const user = await UserModel.findOne({
       where: {
         email: validated.email,
@@ -36,31 +33,25 @@ export const register = async (
 
     if (user) {
       return {
-        status: RegisterActionStateEnum.USER_EXISTS,
+        status: AddUserActionStates.USER_EXISTS,
       };
     }
-    const newUser = await UserModel.create(validated);
-    await UserSettingsModel.create({
-      user_id: newUser.id,
-      allow_extra_emails: validated.allowExtraEmails,
-      theme: 'dark',
-      locale: 'uk',
-    });
-    await EmailVerificationModel.create({
-      user_id: newUser.id,
-    });
 
-    return { status: RegisterActionStateEnum.SUCCESS };
+    const newUserCreationAttributes = omit(validated, 'confirmPassword');
+
+    await UserModel.create(newUserCreationAttributes);
+
+    return { status: AddUserActionStates.SUCCESS };
   } catch (error) {
     if (error instanceof ValidationError) {
       return {
-        status: RegisterActionStateEnum.INVALID_DATA,
+        status: AddUserActionStates.INVALID_DATA,
         message: error.message,
       };
     }
 
     return {
-      status: RegisterActionStateEnum.FAILED,
+      status: AddUserActionStates.FAILED,
       message: (error as Error).message,
     };
   }

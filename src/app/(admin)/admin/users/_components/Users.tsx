@@ -1,22 +1,13 @@
 'use client';
 
-import {
-  Chip,
-  Paper,
-  Stack,
-  Tooltip,
-  Typography,
-  useTheme,
-} from '@mui/material';
+import { Chip, Paper, Stack, Tooltip, Typography } from '@mui/material';
 import {
   DataGrid,
-  GridActionsCellItem,
   GridCellParams,
   GridColDef,
   GridRowId,
 } from '@mui/x-data-grid';
 import { FC, startTransition, useActionState, useEffect } from 'react';
-import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { AddUser } from './AddUser/AddUser';
 import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
@@ -32,6 +23,9 @@ import { UpdateUserActionStates } from './UpdateUser/UpdateUserActionStates.enum
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
+import { ChangeUserPassword } from './ChangeUserPassword/ChangeUserPassword';
+import { roleValues } from '@/lib/constants/roleValues';
+import { DeleteUser } from './DeleteUser/DeleteUser';
 
 interface UsersProps {
   data: PublicUser[];
@@ -42,10 +36,6 @@ export const Users: FC<UsersProps> = ({ data }) => {
     useNotifications();
   const session = useSession();
   const router = useRouter();
-  const theme = useTheme();
-  const handleOnDelete = (id: PublicUser['id']) => () => {
-    alert(`delete: ${id}`);
-  };
   const [state, formAction] = useActionState<
     UpdateUserActionState,
     UpdateUserData
@@ -165,9 +155,7 @@ export const Users: FC<UsersProps> = ({ data }) => {
       headerName: 'Role',
       width: 130,
       type: 'singleSelect',
-      valueOptions: Object.values(UserRoles).filter(
-        (item) => item !== UserRoles.SUPER
-      ),
+      valueOptions: roleValues,
       editable: true,
       renderCell: ({
         value,
@@ -183,22 +171,23 @@ export const Users: FC<UsersProps> = ({ data }) => {
         value ? format(value, 'dd/MM/yyyy, HH:mm:ss') : '',
     },
     {
+      field: 'changePassword',
+      headerName: 'Password',
+      flex: 1,
+      renderCell: ({ id, row }: GridCellParams<PublicUser, PublicUser['id']>) =>
+        row?.role !== UserRoles.SUPER && (
+          <ChangeUserPassword id={id as string} />
+        ),
+    },
+    {
       field: 'actions',
       type: 'actions',
       headerName: 'Actions',
       width: 100,
       getActions: ({ id, row }) => {
         const actions = [];
-        if (row.role !== UserRoles.SUPER) {
-          actions.push(
-            <GridActionsCellItem
-              key="delete"
-              onClick={handleOnDelete(id as PublicUser['id'])}
-              icon={<DeleteForeverIcon />}
-              label="Delete"
-              style={{ color: theme.palette.error.main }}
-            />
-          );
+        if (row.role !== UserRoles.SUPER || id !== session?.data?.user?.id) {
+          actions.push(<DeleteUser id={id as string} />);
         }
         return actions;
       },

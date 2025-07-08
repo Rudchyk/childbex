@@ -5,7 +5,7 @@ import { ThemeProvider } from '@/lib/modules/ThemeModule';
 import { NotificationsProvider } from '@/lib/modules/NotificationsModule';
 import { StoreProvider } from '@/lib/store/StoreProvider';
 import { Roboto } from 'next/font/google';
-import { AuthProvider } from '@/lib/auth/AuthProvider';
+import { Auth } from '@/lib/auth/Auth';
 
 export const metadata: Metadata = {
   title: 'Create Next App',
@@ -29,7 +29,7 @@ export default function RootLayout({
       <body>
         <StoreProvider>
           <ThemeProvider>
-            <AuthProvider>
+            <Auth>
               <NotificationsProvider
                 anchorOrigin={{
                   vertical: 'bottom', // 'top' | 'bottom'
@@ -39,7 +39,7 @@ export default function RootLayout({
               >
                 {children}
               </NotificationsProvider>
-            </AuthProvider>
+            </Auth>
           </ThemeProvider>
         </StoreProvider>
       </body>

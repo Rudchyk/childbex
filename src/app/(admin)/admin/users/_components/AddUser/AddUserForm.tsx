@@ -1,34 +1,22 @@
 'use client';
 
-import * as yup from 'yup';
 import { yupResolver } from '@hookform/resolvers/yup';
-import {
-  FormProvider,
-  SubmitErrorHandler,
-  SubmitHandler,
-  useForm,
-} from 'react-hook-form';
+import { SubmitErrorHandler, SubmitHandler, useForm } from 'react-hook-form';
 import { FC } from 'react';
 
-import { ExchangesSelect, FormTextField } from '@gui/components';
-import Grid from '@mui/material/Grid';
-
-const addAccountFormSchema = yup
-  .object()
-  .shape({
-    [PUBK_KEY]: yup.string().trim().required(),
-    [ECN_KEY]: yup.string().trim().required(),
-    [CLIENT_KEY]: yup.string().trim().required(),
-    [GUINAME_KEY]: yup.string().trim().required(),
-    [TRESS_WALLET_KEY]: yup.string().trim(),
-  })
-  .noUnknown();
-
-export type AddAccountFormData = yup.InferType<typeof addAccountFormSchema>;
+import {
+  FormUIPasswordField,
+  FormUITextField,
+  FormUISelect,
+} from '@/lib/components';
+import { addUserFormDataSchema, AddUserFormData } from './addUserForm.schema';
+import { UserRoles } from '@/types';
+import { Box } from '@mui/material';
+import { roleValues } from '@/lib/constants/roleValues';
 
 interface AddAccountFormProps {
-  onSubmit: SubmitHandler<AddAccountFormData>;
-  onError?: SubmitErrorHandler<AddAccountFormData>;
+  onSubmit: SubmitHandler<AddUserFormData>;
+  onError?: SubmitErrorHandler<AddUserFormData>;
 }
 
 export const AddAccountForm: FC<AddAccountFormProps> = ({
@@ -36,71 +24,58 @@ export const AddAccountForm: FC<AddAccountFormProps> = ({
   onError,
 }) => {
   const methods = useForm({
-    resolver: yupResolver(addAccountFormSchema),
+    resolver: yupResolver(addUserFormDataSchema),
     defaultValues: {
-      [PUBK_KEY]: '',
-      [ECN_KEY]: '',
-      [CLIENT_KEY]: '',
-      [GUINAME_KEY]: '',
-      [TRESS_WALLET_KEY]: '',
+      name: '',
+      email: '',
+      password: '',
+      confirmPassword: '',
+      role: UserRoles.USER,
     },
   });
   const { handleSubmit, control } = methods;
 
   return (
-    <FormProvider {...methods}>
-      <Grid
-        component="form"
-        container
-        spacing={2}
-        noValidate
-        onSubmit={handleSubmit(onSubmit, onError)}
-      >
-        <Grid item xs={12}>
-          <ExchangesSelect
-            fullWidth
-            control={control}
-            label="Exchange"
-            name={ECN_KEY}
-          />
-        </Grid>
-        <Grid item xs={12}>
-          <FormTextField
-            fullWidth
-            control={control}
-            label="Client"
-            name={CLIENT_KEY}
-            isCopy={true}
-          />
-        </Grid>
-        <Grid item xs={12}>
-          <FormTextField
-            fullWidth
-            control={control}
-            label="Guiname"
-            name={GUINAME_KEY}
-            isCopy={true}
-          />
-        </Grid>
-        <Grid item xs={12}>
-          <FormTextField
-            fullWidth
-            control={control}
-            label="PUBK"
-            name={PUBK_KEY}
-            isCopy={true}
-          />
-        </Grid>
-        <Grid item xs={12}>
-          <FormTextField
-            fullWidth
-            control={control}
-            label="Tress Wallet"
-            name={TRESS_WALLET_KEY}
-            isCopy={true}
-          />
-        </Grid>
-      </Grid>
-    </FormProvider>
+    <Box component="form" onSubmit={handleSubmit(onSubmit, onError)}>
+      <FormUITextField
+        name="name"
+        control={control}
+        label="Name"
+        margin="normal"
+        fullWidth
+      />
+      <FormUITextField
+        name="email"
+        control={control}
+        label="Email"
+        margin="normal"
+        fullWidth
+      />
+      <FormUISelect
+        name="role"
+        control={control}
+        label="Role"
+        margin="normal"
+        options={roleValues.map((item) => ({
+          value: item,
+          label: item.toUpperCase(),
+        }))}
+        fullWidth
+      />
+      <FormUIPasswordField
+        name="password"
+        control={control}
+        label="Password"
+        margin="normal"
+        fullWidth
+      />
+      <FormUIPasswordField
+        name="confirmPassword"
+        control={control}
+        label="Confirm Password"
+        margin="normal"
+        fullWidth
+      />
+    </Box>
   );
 };

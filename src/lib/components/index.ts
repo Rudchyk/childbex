@@ -8,3 +8,4 @@ export * from './lib/AuthUser/AuthUser';
 export * from './lib/UIDialog/UIDialog';
 export * from './lib/DialogForm/DialogForm';
 export * from './lib/DialogAreYouSure/DialogAreYouSure';
+export * from './lib/FormUISelect/FormUISelect';
