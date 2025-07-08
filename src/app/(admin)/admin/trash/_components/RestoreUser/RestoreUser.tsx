@@ -2,26 +2,26 @@ import { FC, startTransition, useActionState, useEffect } from 'react';
 import { Tooltip, useTheme } from '@mui/material';
 import { DialogAreYouSure } from '@/lib/components';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
-import { DeleteProfileActionStates } from './DeleteUserActionStates.enum';
-import { DeleteProfileActionState, deleteProfile } from './deleteUser.action';
+import { RestoreUserActionStates } from './RestoreUserActionStates.enum';
+import { RestoreUserActionState, restoreUser } from './restoreUser.action';
 import { useToggle } from 'usehooks-ts';
 import { useRouter } from 'next/navigation';
 import { GridActionsCellItem } from '@mui/x-data-grid';
-import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import RestoreIcon from '@mui/icons-material/Restore';
 
-interface DeleteUserProps {
+interface RestoreUserProps {
   id: string;
 }
 
-export const DeleteUser: FC<DeleteUserProps> = ({ id }) => {
+export const RestoreUser: FC<RestoreUserProps> = ({ id }) => {
   const { notifyError, notifySuccess, notifyWarning } = useNotifications();
   const [open, toggleOpen] = useToggle(false);
   const theme = useTheme();
   const router = useRouter();
-  const [state, formAction] = useActionState<DeleteProfileActionState, string>(
-    deleteProfile,
+  const [state, formAction] = useActionState<RestoreUserActionState, string>(
+    restoreUser,
     {
-      status: DeleteProfileActionStates.IDLE,
+      status: RestoreUserActionStates.IDLE,
     }
   );
   const handleOnDeleteProfile = () => {
@@ -30,14 +30,14 @@ export const DeleteUser: FC<DeleteUserProps> = ({ id }) => {
     });
   };
   useEffect(() => {
-    if (state.status === DeleteProfileActionStates.USER_DO_NOT_EXIST) {
+    if (state.status === RestoreUserActionStates.USER_DO_NOT_EXIST) {
       notifyWarning('User do not exist!');
-    } else if (state.status === DeleteProfileActionStates.FAILED) {
-      notifyError('Failed to delete user!');
-    } else if (state.status === DeleteProfileActionStates.UNABLE_TO_DELETE) {
-      notifyError('Unable to delete user!');
-    } else if (state.status === DeleteProfileActionStates.SUCCESS) {
-      notifySuccess('User was deleted successfully!');
+    } else if (state.status === RestoreUserActionStates.FAILED) {
+      notifyError('Failed to restore user!');
+    } else if (state.status === RestoreUserActionStates.UNABLE_TO_RESTORE) {
+      notifyError('Unable to restore user!');
+    } else if (state.status === RestoreUserActionStates.SUCCESS) {
+      notifySuccess('User was restored successfully!');
       router.refresh();
     }
     toggleOpen();
@@ -45,12 +45,12 @@ export const DeleteUser: FC<DeleteUserProps> = ({ id }) => {
 
   return (
     <>
-      <Tooltip title="Delete account">
+      <Tooltip title="Restore account">
         <GridActionsCellItem
           onClick={toggleOpen}
-          icon={<DeleteForeverIcon />}
-          label="Delete"
-          style={{ color: theme.palette.error.main }}
+          icon={<RestoreIcon />}
+          label="Restore"
+          style={{ color: theme.palette.primary.main }}
         />
       </Tooltip>
       <DialogAreYouSure

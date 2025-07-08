@@ -10,7 +10,7 @@ const Page = async () => {
 
   return (
     <Stack spacing={1}>
-      <Typography>Users</Typography>
+      <Typography variant="h1">Users</Typography>
       <Users data={publicUsers} />
     </Stack>
   );

@@ -4,4 +4,5 @@ export enum AddUserActionStates {
   FAILED = 'failed',
   USER_EXISTS = 'user_exists',
   INVALID_DATA = 'invalid_data',
+  USER_IN_TRASH = 'user_in_trash',
 }

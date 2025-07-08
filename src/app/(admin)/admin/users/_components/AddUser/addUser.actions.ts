@@ -4,6 +4,7 @@ import { sequelize } from '@/db';
 import { addUserFormDataSchema } from './addUserForm.schema';
 import { decode } from 'next-auth/jwt';
 import { ValidationError } from 'yup';
+import { ValidationError as SequelizeValidationError } from 'sequelize';
 import { UserModel } from '@/db/models/User.model';
 import { AddUserActionStates } from './AddUserActionStates.enum';
 import { omit } from 'lodash';
@@ -46,6 +47,18 @@ export const addUser = async (
     if (error instanceof ValidationError) {
       return {
         status: AddUserActionStates.INVALID_DATA,
+        message: error.message,
+      };
+    }
+    if (error instanceof SequelizeValidationError) {
+      if (error.name === 'SequelizeUniqueConstraintError') {
+        return {
+          status: AddUserActionStates.USER_IN_TRASH,
+          message: error.message,
+        };
+      }
+      return {
+        status: AddUserActionStates.FAILED,
         message: error.message,
       };
     }

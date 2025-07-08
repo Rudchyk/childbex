@@ -187,7 +187,7 @@ export const Users: FC<UsersProps> = ({ data }) => {
       getActions: ({ id, row }) => {
         const actions = [];
         if (row.role !== UserRoles.SUPER || id !== session?.data?.user?.id) {
-          actions.push(<DeleteUser id={id as string} />);
+          actions.push(<DeleteUser key={id} id={id as string} />);
         }
         return actions;
       },

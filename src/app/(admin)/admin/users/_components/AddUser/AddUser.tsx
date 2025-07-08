@@ -43,10 +43,13 @@ export const AddUser = () => {
         notifyWarning('User already exists!');
         break;
       case AddUserActionStates.FAILED:
-        notifyError('Failed to create user');
+        notifyError(`Failed to create user! ${state.message}`);
         break;
       case AddUserActionStates.INVALID_DATA:
         notifyError(`Failed validating your submission! ${state.message}`);
+        break;
+      case AddUserActionStates.USER_IN_TRASH:
+        notifyError(`User in trash, please, restore it!`);
         break;
       case AddUserActionStates.SUCCESS:
         notifySuccess('Users created successfully!');
