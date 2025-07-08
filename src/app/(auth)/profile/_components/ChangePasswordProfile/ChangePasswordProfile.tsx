@@ -66,7 +66,7 @@ export const ChangePasswordProfile: FC<ChangePasswordProfileProps> = ({
 
   return (
     <>
-      <Button color="warning" variant="contained" onClick={toggleOpen}>
+      <Button variant="contained" onClick={toggleOpen}>
         Change password
       </Button>
       <DialogForm

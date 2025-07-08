@@ -1,6 +1,6 @@
 import { FC, startTransition, useActionState, useEffect } from 'react';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { Fab, Tooltip } from '@mui/material';
+import { Button } from '@mui/material';
 import { DialogAreYouSure } from '@/lib/components';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
 import { DeleteProfileActionStates } from './DeleteProfileActionStates.enum';
@@ -52,11 +52,14 @@ export const DeleteProfile: FC<DeleteProfileProps> = ({ id }) => {
 
   return (
     <>
-      <Tooltip title="Delete account">
-        <Fab color="error" onClick={toggleOpen}>
-          <DeleteIcon />
-        </Fab>
-      </Tooltip>
+      <Button
+        color="error"
+        variant="contained"
+        startIcon={<DeleteIcon />}
+        onClick={toggleOpen}
+      >
+        Delete account
+      </Button>
       <DialogAreYouSure
         open={open}
         onDisagree={toggleOpen}
