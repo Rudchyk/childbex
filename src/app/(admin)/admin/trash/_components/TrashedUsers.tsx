@@ -9,7 +9,8 @@ import Grid3x3Icon from '@mui/icons-material/Grid3x3';
 import { PublicUser, UserRoles } from '@/types';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import { RestoreUser } from './RestoreUser/RestoreUser';
+import { TrashAction } from './TrashAction';
+import { TrashActionTypes } from './TrashActionTypes.enum';
 
 interface TrashedUsersProps {
   data: PublicUser[];
@@ -103,7 +104,9 @@ export const TrashedUsers: FC<TrashedUsersProps> = ({ data }) => {
       headerName: 'Actions',
       width: 100,
       getActions: ({ id }) => {
-        return [<RestoreUser key={id} id={id as string} />];
+        return Object.values(TrashActionTypes).map((type) => (
+          <TrashAction type={type} key={type} id={id as string} />
+        ));
       },
     },
   ];
