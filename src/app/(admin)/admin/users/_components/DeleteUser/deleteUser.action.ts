@@ -2,10 +2,10 @@
 
 import { syncDb } from '@/db';
 import { UserModel, UserRoles } from '@/db/models/User.model';
-import { DeleteProfileActionStates } from './DeleteUserActionStates.enum';
+import { DeleteUserActionStates } from './DeleteUserActionStates.enum';
 
 export interface DeleteProfileActionState {
-  status: DeleteProfileActionStates;
+  status: DeleteUserActionStates;
   message?: string;
 }
 
@@ -20,22 +20,22 @@ export const deleteProfile = async (
 
     if (!user) {
       return {
-        status: DeleteProfileActionStates.USER_DO_NOT_EXIST,
+        status: DeleteUserActionStates.USER_DO_NOT_EXIST,
       };
     }
 
     if (user.get('role') === UserRoles.SUPER) {
       return {
-        status: DeleteProfileActionStates.UNABLE_TO_DELETE,
+        status: DeleteUserActionStates.UNABLE_TO_DELETE,
       };
     }
 
     await user.destroy();
 
-    return { status: DeleteProfileActionStates.SUCCESS };
+    return { status: DeleteUserActionStates.SUCCESS };
   } catch (error) {
     return {
-      status: DeleteProfileActionStates.FAILED,
+      status: DeleteUserActionStates.FAILED,
       message: (error as Error).message,
     };
   }

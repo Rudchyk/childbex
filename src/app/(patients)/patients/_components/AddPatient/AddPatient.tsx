@@ -7,52 +7,45 @@ import { useToggle } from 'usehooks-ts';
 import { DialogForm } from '@/lib/components';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
 import { startTransition, useActionState, useEffect } from 'react';
-import { AddUserActionStates } from './AddUserActionStates.enum';
-import { addUser, AddUserActionState } from './addUser.actions';
+import { AddPatientActionStates } from './AddPatientActionStates.enum';
+import { addPatient, AddPatientActionState } from './addPatient.actions';
 import { SubmitHandler } from 'react-hook-form';
-import { AddUserFormData } from './addUserForm.schema';
-import { encode } from 'next-auth/jwt';
-import { AddUserForm } from './AddUserForm';
+import { AddPatientFormData } from './addPatientForm.schema';
+import { AddPatientForm } from './AddPatientForm';
 import { useRouter } from 'next/navigation';
 
-export const AddUser = () => {
-  const title = 'Add user';
+export const AddPatient = () => {
+  const title = 'Add patient';
   const router = useRouter();
   const { notifyError, notifySuccess, notifyWarning } = useNotifications();
   const [open, toggleOpen] = useToggle(false);
-  const [state, formAction] = useActionState<AddUserActionState, string>(
-    addUser,
-    {
-      status: AddUserActionStates.IDLE,
-    }
-  );
-  const onSubmit: SubmitHandler<AddUserFormData> = async (formData) => {
-    const token = await encode({
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      //@ts-ignore
-      token: formData,
-      secret: process.env.NEXT_PUBLIC_SECRET || '',
-    });
+  const [state, formAction] = useActionState<
+    AddPatientActionState,
+    AddPatientFormData
+  >(addPatient, {
+    status: AddPatientActionStates.IDLE,
+  });
+  const onSubmit: SubmitHandler<AddPatientFormData> = async (formData) => {
     startTransition(() => {
-      return formAction(token);
+      return formAction(formData);
     });
   };
   useEffect(() => {
     switch (state.status) {
-      case AddUserActionStates.USER_EXISTS:
-        notifyWarning('User already exists!');
+      case AddPatientActionStates.PATIENT_EXISTS:
+        notifyWarning('Patient already exists!');
         break;
-      case AddUserActionStates.FAILED:
-        notifyError(`Failed to create user! ${state.message}`);
+      case AddPatientActionStates.FAILED:
+        notifyError(`Failed to create patient! ${state.message}`);
         break;
-      case AddUserActionStates.INVALID_DATA:
+      case AddPatientActionStates.INVALID_DATA:
         notifyError(`Failed validating your submission! ${state.message}`);
         break;
-      case AddUserActionStates.USER_IN_TRASH:
-        notifyError(`User in trash, please, restore it!`);
+      case AddPatientActionStates.PATIENT_IN_TRASH:
+        notifyError(`Patient in trash, please, restore it!`);
         break;
-      case AddUserActionStates.SUCCESS:
-        notifySuccess('Users created successfully!');
+      case AddPatientActionStates.SUCCESS:
+        notifySuccess('Patient created successfully!');
         router.refresh();
         break;
       default:
@@ -74,7 +67,7 @@ export const AddUser = () => {
         title={title}
         open={open}
         onDialogClose={toggleOpen}
-        form={<AddUserForm onSubmit={onSubmit} />}
+        form={<AddPatientForm onSubmit={onSubmit} />}
       />
     </>
   );

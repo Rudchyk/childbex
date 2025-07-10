@@ -14,15 +14,12 @@ import { UserRoles } from '@/types';
 import { Box } from '@mui/material';
 import { roleValues } from '@/lib/constants/roleValues';
 
-interface AddAccountFormProps {
+interface AddUserFormProps {
   onSubmit: SubmitHandler<AddUserFormData>;
   onError?: SubmitErrorHandler<AddUserFormData>;
 }
 
-export const AddAccountForm: FC<AddAccountFormProps> = ({
-  onSubmit,
-  onError,
-}) => {
+export const AddUserForm: FC<AddUserFormProps> = ({ onSubmit, onError }) => {
   const methods = useForm({
     resolver: yupResolver(addUserFormDataSchema),
     defaultValues: {

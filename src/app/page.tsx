@@ -1,14 +1,12 @@
 import { DefaultLayout } from '@/lib/layouts';
-import { APIHello } from './APIHello';
-import { Stack } from '@mui/material';
+import { Home } from './Home';
 
 export default function Page() {
+  const { NODE_ENV } = process.env;
+
   return (
     <DefaultLayout>
-      <Stack spacing={2}>
-        <p>Hello world!</p>
-        <APIHello />
-      </Stack>
+      <Home nodeEnv={NODE_ENV} />
     </DefaultLayout>
   );
 }

@@ -1,4 +1,4 @@
-export enum DeleteProfileActionStates {
+export enum DeleteUserActionStates {
   IDLE = 'idle',
   SUCCESS = 'success',
   FAILED = 'failed',
