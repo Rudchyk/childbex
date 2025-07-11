@@ -1,7 +1,10 @@
-import { DataTypes, Model, Optional, Transaction } from 'sequelize';
+import { DataTypes, FindOptions, Model, Optional } from 'sequelize';
 import { sequelize } from '@/db';
 import { ExtendedPatient, PatientModelAttributes } from '@/types';
 import { UserModel } from './User.model';
+import path from 'path';
+import fs from 'fs';
+import { UPLOAD_ROOT } from '@/lib/constants/constants';
 
 export * from '@/types/lib/Patient.types';
 
@@ -17,24 +20,27 @@ export class PatientModel
   declare notes: string;
   declare creator_id: string;
 
-  static async findExtendedPatients(): Promise<ExtendedPatient[]> {
-    return await sequelize.transaction(
-      {
-        isolationLevel: Transaction.ISOLATION_LEVELS.SERIALIZABLE,
-        type: Transaction.TYPES.EXCLUSIVE,
-      },
-      async () => {
-        const result = await this.findAll({
-          include: [
-            {
-              model: UserModel,
-              as: 'creator',
-            },
-          ],
-        });
-        return result.map((r) => r.toJSON());
-      }
-    );
+  static async findExtendedPatients(
+    props?: FindOptions<PatientModelAttributes>
+  ): Promise<ExtendedPatient[]> {
+    const result = await this.findAll({
+      ...props,
+      include: [
+        {
+          model: UserModel,
+          as: 'creator',
+        },
+      ],
+    });
+    return result.map((r) => {
+      const patient = r.toJSON() as ExtendedPatient;
+      const imagesPath = path.join(UPLOAD_ROOT, patient.slug);
+      const imagesList = fs.readdirSync(imagesPath);
+      return {
+        ...patient,
+        images: imagesList.map((imageName) => path.join(imagesPath, imageName)),
+      };
+    });
   }
 }
 

@@ -8,4 +8,6 @@ export const paths = {
   admin: '/admin',
   adminUsers: '/admin/users',
   adminTrash: '/admin/trash',
+  adminTrashedUsers: '/admin/trash/users',
+  adminTrashedPatients: '/admin/trash/patients',
 };

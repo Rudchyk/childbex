@@ -12,7 +12,7 @@ import { AddPatient } from './AddPatient/AddPatient';
 import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
-import { Patient as IPatient, PublicUser } from '@/types';
+import { ExtendedPatient } from '@/types';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
 import {
   UpdatePatientData,
@@ -24,7 +24,7 @@ import { DeletePatient } from './DeletePatient/DeletePatient';
 import { useRouter } from 'next/navigation';
 
 interface PatientProps {
-  data: IPatient[];
+  data: ExtendedPatient[];
 }
 
 export const Patients: FC<PatientProps> = ({ data }) => {
@@ -38,12 +38,12 @@ export const Patients: FC<PatientProps> = ({ data }) => {
     status: UpdatePatientActionStates.IDLE,
   });
   const handleRowUpdate = async (
-    updatedRow: IPatient,
-    originalRow: IPatient,
+    updatedRow: ExtendedPatient,
+    originalRow: ExtendedPatient,
     params: {
       rowId: GridRowId;
     }
-  ): Promise<IPatient> => {
+  ): Promise<ExtendedPatient> => {
     const update: UpdatePatientData['data'] = {};
     const fieldsToUpdate: (keyof typeof update)[] = ['name', 'slug', 'notes'];
 
@@ -68,12 +68,14 @@ export const Patients: FC<PatientProps> = ({ data }) => {
     }
   };
 
-  const columns: GridColDef<IPatient>[] = [
+  const columns: GridColDef<ExtendedPatient>[] = [
     {
       field: 'id',
       headerName: 'ID',
       width: 50,
-      renderCell: ({ value }: GridCellParams<IPatient, IPatient['id']>) => (
+      renderCell: ({
+        value,
+      }: GridCellParams<ExtendedPatient, ExtendedPatient['id']>) => (
         <Stack justifyContent="center" alignItems="center" height="100%">
           <Tooltip title={value}>
             <IconButton onClick={() => copyToClipboard(value)}>
@@ -95,11 +97,30 @@ export const Patients: FC<PatientProps> = ({ data }) => {
       flex: 1,
       editable: true,
     },
+
+    {
+      field: 'creator',
+      headerName: 'Creator',
+      flex: 1,
+      renderCell: ({
+        value,
+      }: GridCellParams<ExtendedPatient, ExtendedPatient['creator']>) => (
+        <Tooltip title={value?.email}>
+          <span>{value?.name}</span>
+        </Tooltip>
+      ),
+    },
+    {
+      field: 'images',
+      headerName: 'Images',
+      flex: 1,
+      valueFormatter: (value: ExtendedPatient['images']) => value?.length || 0,
+    },
     {
       field: 'createdAt',
       headerName: 'Created At',
       flex: 1,
-      valueFormatter: (value: PublicUser['createdAt']) =>
+      valueFormatter: (value: ExtendedPatient['createdAt']) =>
         value ? format(value, 'dd/MM/yyyy, HH:mm:ss') : '',
     },
     {

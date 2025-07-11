@@ -13,6 +13,7 @@ export type PatientModelAttributes = Patient &
   ModelTimestamps &
   ModelSoftDeleted;
 
-export interface ExtendedPatient extends Patient {
+export interface ExtendedPatient extends PatientModelAttributes {
   creator: User;
+  images?: string[];
 }

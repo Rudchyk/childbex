@@ -1,21 +1,40 @@
-import { syncDb } from '@/db';
-import { TrashedUsers } from './_components/TrashedUsers';
-import { UserModel } from '@/db/models/User.model';
-import { Stack, Typography } from '@mui/material';
-import { Op } from 'sequelize';
+import { JSX } from 'react';
+import List from '@mui/material/List';
+import ListItem from '@mui/material/ListItem';
+import ListItemButton from '@mui/material/ListItemButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import PeopleIcon from '@mui/icons-material/People';
+import NextLink from 'next/link';
+import { paths } from '@/lib/constants/paths';
+import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
 
-const Page: React.FC = async () => {
-  await syncDb();
-  const users = await UserModel.findAll({
-    paranoid: false,
-    where: { deletedAt: { [Op.ne]: null } },
-  });
-  const publicUsers = users.map((user) => user.getPublic());
+const Page: React.FC = (): JSX.Element => {
+  const links = [
+    {
+      href: paths.adminTrashedUsers,
+      label: 'Users',
+      icon: <PeopleIcon />,
+    },
+    {
+      href: paths.adminTrashedPatients,
+      label: 'Patients',
+      icon: <LocalHospitalIcon />,
+    },
+  ];
   return (
-    <Stack spacing={1}>
-      <Typography variant="h1">Trash</Typography>
-      <TrashedUsers data={publicUsers} />
-    </Stack>
+    <nav>
+      <List>
+        {links.map(({ href, icon, label }) => (
+          <ListItem key={label + href} disablePadding>
+            <ListItemButton LinkComponent={NextLink} href={href}>
+              <ListItemIcon>{icon}</ListItemIcon>
+              <ListItemText primary={label} />
+            </ListItemButton>
+          </ListItem>
+        ))}
+      </List>
+    </nav>
   );
 };
 

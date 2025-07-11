@@ -2,19 +2,23 @@ import { FC, startTransition, useActionState, useEffect } from 'react';
 import { Tooltip, useTheme } from '@mui/material';
 import { DialogAreYouSure } from '@/lib/components';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
-import { TrashActionStates } from './TrashActionStates.enum';
-import { TrashActionState, trash, TrashData } from './trash.action';
+import { TrashedPatientsActionStates } from './TrashedPatientsActionStates.enum';
+import {
+  TrashedPatientsActionState,
+  TrashedPatientsData,
+  trashedPatients,
+} from './trashedPatients.action';
 import { useToggle } from 'usehooks-ts';
 import { useRouter } from 'next/navigation';
 import { GridActionsCellItem } from '@mui/x-data-grid';
 import RestoreIcon from '@mui/icons-material/Restore';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
-import { TrashActionTypes } from './TrashActionTypes.enum';
+import { TrashedPatientsActionTypes } from './TrashedPatientsActionTypes.enum';
 import { startCase } from 'lodash';
 
 interface TrashActionProps {
   id: string;
-  type: TrashActionTypes;
+  type: TrashedPatientsActionTypes;
 }
 
 export const TrashAction: FC<TrashActionProps> = ({ id, type }) => {
@@ -22,12 +26,12 @@ export const TrashAction: FC<TrashActionProps> = ({ id, type }) => {
   const [open, toggleOpen] = useToggle(false);
   const theme = useTheme();
   const router = useRouter();
-  const [state, formAction] = useActionState<TrashActionState, TrashData>(
-    trash,
-    {
-      status: TrashActionStates.IDLE,
-    }
-  );
+  const [state, formAction] = useActionState<
+    TrashedPatientsActionState,
+    TrashedPatientsData
+  >(trashedPatients, {
+    status: TrashedPatientsActionStates.IDLE,
+  });
   const handleOnDeleteProfile = () => {
     startTransition(() => {
       formAction({ id, type });
@@ -35,20 +39,20 @@ export const TrashAction: FC<TrashActionProps> = ({ id, type }) => {
   };
   const getIcon = () => {
     switch (type) {
-      case TrashActionTypes.RESTORE:
+      case TrashedPatientsActionTypes.RESTORE:
         return <RestoreIcon />;
-      case TrashActionTypes.DELETE:
+      case TrashedPatientsActionTypes.DELETE:
         return <DeleteForeverIcon />;
       default:
         return <></>;
     }
   };
   useEffect(() => {
-    if (state.status === TrashActionStates.USER_DO_NOT_EXIST) {
+    if (state.status === TrashedPatientsActionStates.PATIENT_DO_NOT_EXIST) {
       notifyWarning('User do not exist!');
-    } else if (state.status === TrashActionStates.FAILED) {
+    } else if (state.status === TrashedPatientsActionStates.FAILED) {
       notifyError(`Failed to ${type} user!`);
-    } else if (state.status === TrashActionStates.SUCCESS) {
+    } else if (state.status === TrashedPatientsActionStates.SUCCESS) {
       notifySuccess(`User was ${type}d successfully!`);
       router.refresh();
     }
@@ -65,7 +69,7 @@ export const TrashAction: FC<TrashActionProps> = ({ id, type }) => {
           style={{
             color:
               theme.palette[
-                type === TrashActionTypes.DELETE ? 'error' : 'primary'
+                type === TrashedPatientsActionTypes.DELETE ? 'error' : 'primary'
               ].main,
           }}
         />

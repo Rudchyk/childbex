@@ -7,6 +7,8 @@ export default async function Page() {
   await syncDb();
   const patients = await PatientModel.findExtendedPatients();
 
+  console.log('patients', patients);
+
   return (
     <Stack spacing={1}>
       <Typography variant="h1">Patients</Typography>

@@ -9,9 +9,12 @@ import { ValidationError } from 'yup';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
 import { PatientModel } from '@/db/models/Patient.model';
 import { AddPatientActionStates } from './AddPatientActionStates.enum';
-import { toSlugIfCyr } from '@/lib/utils';
+import { toSlugIfCyr, untar, unzip } from '@/lib/utils';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth/auth.options';
+import path from 'path';
+import fs from 'fs';
+import { ARCHIVES_ROOT, UPLOAD_ROOT } from '@/lib/constants/constants';
 
 export interface AddPatientActionState {
   status: AddPatientActionStates;
@@ -34,8 +37,9 @@ export const addPatient = async (
     }
 
     const validated = await addPatientFormDataSchema.validate(data);
-    const { name, slug: validatedSlug, notes } = validated;
+    const { name, slug: validatedSlug, notes, archive } = validated;
     const slug = validatedSlug || toSlugIfCyr(name);
+
     const existedPatient = await PatientModel.findOne({
       where: {
         slug: slug,
@@ -46,6 +50,25 @@ export const addPatient = async (
       return {
         status: AddPatientActionStates.PATIENT_EXISTS,
       };
+    }
+
+    if (archive) {
+      const ext = path.extname(archive.name).toLowerCase();
+      if (!fs.existsSync(ARCHIVES_ROOT)) {
+        fs.mkdirSync(ARCHIVES_ROOT, { recursive: true });
+      }
+      const archiveFile = path.join(ARCHIVES_ROOT, slug + ext);
+      fs.writeFileSync(archiveFile, Buffer.from(await archive.arrayBuffer()));
+      const destDir = path.join(UPLOAD_ROOT, slug);
+      fs.mkdirSync(destDir, { recursive: true });
+      switch (ext) {
+        case '.zip':
+          await unzip(archiveFile, destDir);
+          break;
+        default:
+          await untar(archiveFile, destDir); // .tgz / .tar
+          break;
+      }
     }
 
     await PatientModel.create({

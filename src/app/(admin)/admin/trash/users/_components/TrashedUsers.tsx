@@ -10,7 +10,7 @@ import { PublicUser, UserRoles } from '@/types';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { TrashAction } from './TrashAction';
-import { TrashActionTypes } from './TrashActionTypes.enum';
+import { TrashedUsersActionTypes } from './TrashedUsersActionTypes.enum';
 
 interface TrashedUsersProps {
   data: PublicUser[];
@@ -104,7 +104,7 @@ export const TrashedUsers: FC<TrashedUsersProps> = ({ data }) => {
       headerName: 'Actions',
       width: 100,
       getActions: ({ id }) => {
-        return Object.values(TrashActionTypes).map((type) => (
+        return Object.values(TrashedUsersActionTypes).map((type) => (
           <TrashAction type={type} key={type} id={id as string} />
         ));
       },

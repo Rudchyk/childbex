@@ -1,4 +1,4 @@
-export enum TrashActionTypes {
+export enum TrashedPatientsActionTypes {
   RESTORE = 'restore',
   DELETE = 'delete',
 }

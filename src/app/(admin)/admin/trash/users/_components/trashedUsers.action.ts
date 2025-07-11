@@ -2,24 +2,24 @@
 
 import { syncDb } from '@/db';
 import { UserModel } from '@/db/models/User.model';
-import { TrashActionStates } from './TrashActionStates.enum';
-import { TrashActionTypes } from './TrashActionTypes.enum';
+import { TrashedUsersActionStates } from './TrashedUsersActionStates.enum';
+import { TrashedUsersActionTypes } from './TrashedUsersActionTypes.enum';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
 
-export interface TrashActionState {
-  status: TrashActionStates;
+export interface TrashedUsersActionState {
+  status: TrashedUsersActionStates;
   message?: string;
 }
 
-export interface TrashData {
+export interface TrashedUsersData {
   id: string;
-  type: TrashActionTypes;
+  type: TrashedUsersActionTypes;
 }
 
-export const trash = async (
-  _: TrashActionState,
-  data: TrashData
-): Promise<TrashActionState> => {
+export const trashedUsers = async (
+  _: TrashedUsersActionState,
+  data: TrashedUsersData
+): Promise<TrashedUsersActionState> => {
   try {
     await syncDb();
     const { id, type } = data;
@@ -28,25 +28,25 @@ export const trash = async (
 
     if (!user) {
       return {
-        status: TrashActionStates.USER_DO_NOT_EXIST,
+        status: TrashedUsersActionStates.USER_DO_NOT_EXIST,
       };
     }
 
     switch (type) {
-      case TrashActionTypes.DELETE:
+      case TrashedUsersActionTypes.DELETE:
         await user.destroy({ force: true });
         break;
-      case TrashActionTypes.RESTORE:
+      case TrashedUsersActionTypes.RESTORE:
         await user.restore();
         break;
       default:
         throw new Error('Action does not exist!');
     }
 
-    return { status: TrashActionStates.SUCCESS };
+    return { status: TrashedUsersActionStates.SUCCESS };
   } catch (error) {
     return {
-      status: TrashActionStates.FAILED,
+      status: TrashedUsersActionStates.FAILED,
       message: (error as Error | SequelizeValidationError).message,
     };
   }
