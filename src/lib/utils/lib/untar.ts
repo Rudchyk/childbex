@@ -1,17 +1,8 @@
 'use server';
 
-import { IMAGE_RX } from '@/lib/constants/constants';
-import path from 'path';
-import sanitize from 'sanitize-filename';
-import * as tar from 'tar';
+import tar from 'tar-fs';
+import fs from 'fs';
 
 export async function untar(src: string, dest: string) {
-  await tar.x({
-    file: src,
-    cwd: dest,
-    filter: (p) => IMAGE_RX.test(p),
-    onentry: (e) => {
-      e.path = sanitize(path.basename(e.path));
-    },
-  });
+  fs.createReadStream(src).pipe(tar.extract(dest));
 }

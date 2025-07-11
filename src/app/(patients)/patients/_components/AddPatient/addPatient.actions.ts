@@ -9,11 +9,12 @@ import { ValidationError } from 'yup';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
 import { PatientModel } from '@/db/models/Patient.model';
 import { AddPatientActionStates } from './AddPatientActionStates.enum';
-import { toSlugIfCyr, untar, unzip } from '@/lib/utils';
+import { toSlugIfCyr, untar } from '@/lib/utils';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth/auth.options';
 import path from 'path';
 import fs from 'fs';
+import tar from 'tar-fs';
 import { ARCHIVES_ROOT, UPLOAD_ROOT } from '@/lib/constants/constants';
 
 export interface AddPatientActionState {
@@ -63,12 +64,13 @@ export const addPatient = async (
       fs.mkdirSync(destDir, { recursive: true });
       switch (ext) {
         case '.zip':
-          await unzip(archiveFile, destDir);
+          // await unzip(archiveFile, destDir);
           break;
         default:
           await untar(archiveFile, destDir); // .tgz / .tar
           break;
       }
+      tar.pack(destDir).pipe(fs.createWriteStream(`${slug}.tar`));
     }
 
     await PatientModel.create({

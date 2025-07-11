@@ -11,6 +11,7 @@
 !.yarn/versions
 tmp
 data/archives
+public/uploads
 
 # testing
 /coverage
