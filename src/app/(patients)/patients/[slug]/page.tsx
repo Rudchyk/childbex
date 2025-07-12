@@ -1,5 +1,6 @@
-import { DefaultLayout } from '@/lib/layouts';
-import { Stack } from '@mui/material';
+import { PatientModel } from '@/db/models/Patient.model';
+import { Stack, Typography } from '@mui/material';
+import { notFound } from 'next/navigation';
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -7,11 +8,16 @@ interface PageProps {
 
 export default async function Page({ params }: PageProps) {
   const { slug } = await params;
+  const patient = await PatientModel.findExtendedPatient(slug);
+
+  if (!patient) {
+    return notFound();
+  }
+
   return (
-    <DefaultLayout>
-      <Stack spacing={2}>
-        <p>Hello from patient {slug}</p>
-      </Stack>
-    </DefaultLayout>
+    <Stack spacing={2}>
+      <Typography variant="h1">{patient?.name}</Typography>
+      <p>Hello from patient {slug}</p>
+    </Stack>
   );
 }

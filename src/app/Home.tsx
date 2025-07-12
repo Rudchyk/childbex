@@ -7,6 +7,7 @@ import NextLink from 'next/link';
 import { Alert, Stack, Theme, Tooltip } from '@mui/material';
 import { FC } from 'react';
 import BiotechIcon from '@mui/icons-material/Biotech';
+import { paths } from '@/lib/constants/paths';
 
 interface HomeProps {
   nodeEnv?: string;
@@ -16,7 +17,7 @@ export const Home: FC<HomeProps> = ({ nodeEnv }) => {
   const items = [
     {
       label: 'Patients',
-      href: '/patients',
+      href: paths.patients,
       icon: <PeopleIcon />,
       height: 150,
       colorKey: 'primary' as keyof Theme['palette'],
@@ -24,7 +25,7 @@ export const Home: FC<HomeProps> = ({ nodeEnv }) => {
 
     {
       label: 'Test',
-      href: '/test',
+      href: paths.test,
       icon: <BiotechIcon />,
       height: 80,
       colorKey: 'warning' as keyof Theme['palette'],

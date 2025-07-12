@@ -1,6 +1,6 @@
 'use client';
 
-import { Paper, Stack, Tooltip } from '@mui/material';
+import { Paper, Stack, Tooltip, Typography } from '@mui/material';
 import {
   DataGrid,
   GridCellParams,
@@ -27,6 +27,8 @@ import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import { paths } from '@/lib/constants/paths';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import NextLink from 'next/link';
 
 interface PatientProps {
   data: ExtendedPatient[];
@@ -102,6 +104,32 @@ export const Patients: FC<PatientProps> = ({ data }) => {
       headerName: 'Slug',
       flex: 1,
       editable: true,
+      renderCell: ({
+        value,
+        row,
+      }: GridCellParams<ExtendedPatient, ExtendedPatient['slug']>) => (
+        <Stack
+          direction="row"
+          justifyContent="flex-start"
+          spacing={1}
+          alignItems="center"
+          height="100%"
+        >
+          <Tooltip title={value}>
+            <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+              {value}
+            </Typography>
+          </Tooltip>
+          <IconButton
+            size="small"
+            LinkComponent={NextLink}
+            target="_blank"
+            href={`${paths.patients}/${row.slug}`}
+          >
+            <OpenInNewIcon />
+          </IconButton>
+        </Stack>
+      ),
     },
 
     {

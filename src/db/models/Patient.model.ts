@@ -42,6 +42,34 @@ export class PatientModel
       };
     });
   }
+
+  static async findExtendedPatient(
+    slug: PatientModelAttributes['slug']
+  ): Promise<ExtendedPatient | undefined> {
+    const result = await this.findOne({
+      where: {
+        slug,
+      },
+      include: [
+        {
+          model: UserModel,
+          as: 'creator',
+        },
+      ],
+    });
+
+    if (!result) {
+      return;
+    }
+
+    const imagesPath = path.join(UPLOAD_ROOT, slug);
+    const imagesList = fs.readdirSync(imagesPath);
+
+    return {
+      ...(result.toJSON() as ExtendedPatient),
+      images: imagesList.map((imageName) => path.join(imagesPath, imageName)),
+    };
+  }
 }
 
 PatientModel.init(
