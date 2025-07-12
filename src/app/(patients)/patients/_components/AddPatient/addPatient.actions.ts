@@ -88,7 +88,7 @@ export const addPatient = async (
           break;
       }
       fs.unlinkSync(tmp);
-      await packArchive(destDir, path.join(ARCHIVES_ROOT, slug + ext));
+      await packArchive(destDir, path.join(ARCHIVES_ROOT, slug + '.tgz'));
     }
 
     await PatientModel.create({

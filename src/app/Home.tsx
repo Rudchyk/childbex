@@ -4,9 +4,9 @@ import Masonry from '@mui/lab/Masonry';
 import PeopleIcon from '@mui/icons-material/People';
 import Paper from '@mui/material/Paper';
 import NextLink from 'next/link';
-import CrueltyFreeIcon from '@mui/icons-material/CrueltyFree';
 import { Alert, Stack, Theme, Tooltip } from '@mui/material';
 import { FC } from 'react';
+import BiotechIcon from '@mui/icons-material/Biotech';
 
 interface HomeProps {
   nodeEnv?: string;
@@ -25,7 +25,7 @@ export const Home: FC<HomeProps> = ({ nodeEnv }) => {
     {
       label: 'Test',
       href: '/test',
-      icon: <CrueltyFreeIcon />,
+      icon: <BiotechIcon />,
       height: 80,
       colorKey: 'warning' as keyof Theme['palette'],
     },
