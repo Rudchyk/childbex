@@ -2,13 +2,14 @@ import * as Yup from 'yup';
 import { InferType } from 'yup';
 
 const MAX_SIZE = 500 * 1024 * 1024; // 500 MB
-const ALLOWED_EXT = ['zip', 'tar', 'gz', 'tgz', '7z'];
+// const ALLOWED_EXT = ['zip', 'tar', 'gz', 'tgz', '7z'];
+const ALLOWED_EXT = ['tar', 'gz', 'tgz'];
 const ALLOWED_MIME = [
-  'application/zip',
+  // 'application/zip',
   'application/x-tar',
   'application/gzip',
-  'application/x-zip-compressed',
-  'application/x-compressed',
+  // 'application/x-zip-compressed',
+  // 'application/x-compressed',
 ];
 
 export const accept = [...ALLOWED_EXT, ...ALLOWED_MIME].join(',');

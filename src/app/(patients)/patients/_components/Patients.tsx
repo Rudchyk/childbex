@@ -6,13 +6,15 @@ import {
   GridCellParams,
   GridColDef,
   GridRowId,
+  Toolbar,
+  ToolbarButton,
 } from '@mui/x-data-grid';
 import { FC, startTransition, useActionState, useEffect } from 'react';
 import { AddPatient } from './AddPatient/AddPatient';
 import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
-import { ExtendedPatient } from '@/types';
+import { ExtendedPatient, UserRoles } from '@/types';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
 import {
   UpdatePatientData,
@@ -22,6 +24,9 @@ import {
 import { UpdatePatientActionStates } from './UpdatePatient/UpdatePatientActionStates.enum';
 import { DeletePatient } from './DeletePatient/DeletePatient';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import { paths } from '@/lib/constants/paths';
 
 interface PatientProps {
   data: ExtendedPatient[];
@@ -31,6 +36,7 @@ export const Patients: FC<PatientProps> = ({ data }) => {
   const { notifyInfo, notifyError, notifySuccess, notifyWarning } =
     useNotifications();
   const router = useRouter();
+  const session = useSession();
   const [state, formAction] = useActionState<
     UpdatePatientActionState,
     UpdatePatientData
@@ -174,7 +180,25 @@ export const Patients: FC<PatientProps> = ({ data }) => {
         processRowUpdate={handleRowUpdate}
         disableRowSelectionOnClick
         rows={data}
-        slots={{ toolbar: AddPatient }}
+        slots={{
+          toolbar: () => (
+            <Toolbar>
+              {session.data?.user?.role &&
+                [UserRoles.ADMIN, UserRoles.SUPER].includes(
+                  session.data.user.role
+                ) && (
+                  <Tooltip title="Trashed patients">
+                    <ToolbarButton
+                      onClick={() => router.push(paths.adminTrashedPatients)}
+                    >
+                      <DeleteSweepIcon color="error" fontSize="small" />
+                    </ToolbarButton>
+                  </Tooltip>
+                )}
+              <AddPatient />
+            </Toolbar>
+          ),
+        }}
         showToolbar
         columns={columns}
       />

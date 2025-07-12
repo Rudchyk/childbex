@@ -11,6 +11,10 @@
 !.yarn/versions
 tmp
 data/archives
+public/uploads
+*.tar
+*.tgz
+*.gz
 
 # testing
 /coverage

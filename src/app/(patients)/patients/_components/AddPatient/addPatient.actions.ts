@@ -9,12 +9,13 @@ import { ValidationError } from 'yup';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
 import { PatientModel } from '@/db/models/Patient.model';
 import { AddPatientActionStates } from './AddPatientActionStates.enum';
-import { toSlugIfCyr, untar, unzip } from '@/lib/utils';
+import { toSlugIfCyr, unpackArchive, packArchive } from '@/lib/utils';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth/auth.options';
 import path from 'path';
 import fs from 'fs';
 import { ARCHIVES_ROOT, UPLOAD_ROOT } from '@/lib/constants/constants';
+import { tmpdir } from 'os';
 
 export interface AddPatientActionState {
   status: AddPatientActionStates;
@@ -42,14 +43,21 @@ export const addPatient = async (
 
     const existedPatient = await PatientModel.findOne({
       where: {
-        slug: slug,
+        slug,
       },
+      paranoid: false,
     });
 
     if (existedPatient) {
-      return {
-        status: AddPatientActionStates.PATIENT_EXISTS,
-      };
+      if (existedPatient.isSoftDeleted()) {
+        return {
+          status: AddPatientActionStates.PATIENT_IN_TRASH,
+        };
+      } else {
+        return {
+          status: AddPatientActionStates.PATIENT_EXISTS,
+        };
+      }
     }
 
     if (archive) {
@@ -57,18 +65,30 @@ export const addPatient = async (
       if (!fs.existsSync(ARCHIVES_ROOT)) {
         fs.mkdirSync(ARCHIVES_ROOT, { recursive: true });
       }
-      const archiveFile = path.join(ARCHIVES_ROOT, slug + ext);
-      fs.writeFileSync(archiveFile, Buffer.from(await archive.arrayBuffer()));
+      const tmp = path.join(
+        tmpdir(),
+        process.env.npm_package_name || '',
+        'uploads',
+        archive.name
+      );
+      const tmpPath = path.dirname(tmp);
+      if (!fs.existsSync(tmpPath)) {
+        fs.mkdirSync(tmpPath, { recursive: true });
+      }
+      // const archiveFile = path.join(ARCHIVES_ROOT, slug + ext);
+      fs.writeFileSync(tmp, Buffer.from(await archive.arrayBuffer()));
       const destDir = path.join(UPLOAD_ROOT, slug);
       fs.mkdirSync(destDir, { recursive: true });
       switch (ext) {
         case '.zip':
-          await unzip(archiveFile, destDir);
+          // await unzip(archiveFile, destDir);
           break;
         default:
-          await untar(archiveFile, destDir); // .tgz / .tar
+          await unpackArchive(tmp, destDir); // .tgz / .tar
           break;
       }
+      fs.unlinkSync(tmp);
+      await packArchive(destDir, path.join(ARCHIVES_ROOT, slug + ext));
     }
 
     await PatientModel.create({
@@ -89,7 +109,7 @@ export const addPatient = async (
     if (error instanceof SequelizeValidationError) {
       if (error.name === 'SequelizeUniqueConstraintError') {
         return {
-          status: AddPatientActionStates.PATIENT_IN_TRASH,
+          status: AddPatientActionStates.INVALID_DATA,
           message: error.message,
         };
       }
