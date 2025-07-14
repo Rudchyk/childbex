@@ -67,7 +67,7 @@ export class PatientModel
 
     return {
       ...(result.toJSON() as ExtendedPatient),
-      images: imagesList.map((imageName) => path.join(imagesPath, imageName)),
+      images: imagesList.map((imageName) => `/uploads/${slug}/${imageName}`),
     };
   }
 }

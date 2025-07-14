@@ -12,6 +12,7 @@
 tmp
 data/archives
 public/uploads
+public/assets/workers
 *.tar
 *.tgz
 *.gz

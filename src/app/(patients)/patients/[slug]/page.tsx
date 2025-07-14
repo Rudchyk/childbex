@@ -1,6 +1,9 @@
+'use server';
+
 import { PatientModel } from '@/db/models/Patient.model';
 import { Stack, Typography } from '@mui/material';
 import { notFound } from 'next/navigation';
+import { DicomViewer } from './_components/DicomViewer';
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -16,8 +19,8 @@ export default async function Page({ params }: PageProps) {
 
   return (
     <Stack spacing={2}>
-      <Typography variant="h1">{patient?.name}</Typography>
-      <p>Hello from patient {slug}</p>
+      <Typography variant="h1">{patient.name}</Typography>
+      <DicomViewer images={(patient.images || []).slice(1, 3)} />
     </Stack>
   );
 }
