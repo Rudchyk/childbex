@@ -17,10 +17,13 @@ export default async function Page({ params }: PageProps) {
     return notFound();
   }
 
+  const images = (patient.images || []).slice(1, -1);
+  // const images = patient.images;
   return (
     <Stack spacing={2}>
       <Typography variant="h1">{patient.name}</Typography>
-      <DicomViewer images={(patient.images || []).slice(1, 3)} />
+      {/* <DicomViewer images={(patient.images || []).slice(1, 3)} /> */}
+      <DicomViewer images={images} />
     </Stack>
   );
 }
