@@ -8,9 +8,34 @@ import { DicomViewerTools } from './DicomViewerTools';
 import { useDropbox } from './useDropbox';
 
 import './DicomViewer.css';
+import {
+  DicomLoadErrorEvent,
+  DicomLoadErrorEvents,
+  DicomLoadItemEvent,
+} from './DicomViewer.types';
 
 interface DwvComponentProps {
   images?: string[];
+}
+
+/**
+ * Return the SOP Instance UID (image ID) for the given slice index.
+ *
+ * @param meta  one element of app.getMetaData(dataId)   (the JSON you pasted)
+ * @param slice zero‑based index of the slice now on screen (0,1,2…)
+ */
+export function getImageUid(meta: any, slice = 0): string | undefined {
+  const tag = meta['00080018']; // (0008,0018) SOP Instance UID
+  if (!tag) return;
+
+  const v = tag.value;
+  // ─── Single‑slice object: value is just an array ──────────────────────────
+  if (Array.isArray(v)) return v[0];
+
+  // ─── Multi‑slice: keyed by "1", "2", … ────────────────────────────────────
+  const key = String(slice + 1); // convert 0‑based → 1‑based
+  const arr = (v as Record<string, any>)[key];
+  return Array.isArray(arr) ? arr[0] : undefined;
 }
 
 export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
@@ -30,8 +55,10 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
   const [imagesMapping, setImagesMapping] = useState<
     Record<string, string> | undefined
   >();
-  const [erroredItems, setErroredItems] = useState<string[]>([]);
-  const [abortedItems, setAbortedItems] = useState<string[]>([]);
+  const [loadedItems, setLoadedItems] = useState<string[]>([]);
+  const [loadErrorEvents, setLoadErrorEvents] = useState<DicomLoadErrorEvents>(
+    []
+  );
   const [loadProgress, setLoadProgress] = useState(0);
   const [canScroll, setCanScroll] = useState(false);
   const [selectedTool, setSelectedTool] = useState('Select Tool');
@@ -86,10 +113,6 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       tools,
     });
     let isFirstRender: boolean;
-    const _loadedItems: any[] = [];
-    const _erroredItems: string[] = [];
-    const _abortedItems: string[] = [];
-    // const _imagesMapping: Record<string, string> = {};
 
     app.addEventListener('loadstart', () => {
       isFirstRender = true;
@@ -120,39 +143,23 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
     });
     app.addEventListener('loadend', () => {
       setDataLoaded(true);
-      const metaRoot = app.getMetaData(0);
-      console.log('loadend metaRoot', metaRoot);
-      setMetaData(metaRoot);
-      // const lg = app.getActiveLayerGroup(); // or app.getLayerGroup(0)
-      // const vl = lg.getActiveViewLayer();
-      // const vc = vl.getViewController();
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      //@ts-ignore
-      // const currentUid = vc.getCurrentImageUid();
-      // setImageName(currentUid);
-      if (!_loadedItems.length) {
-        showDropbox(app, true);
-      }
     });
     app.addEventListener(
       'positionchange',
       (event: { dataid: number; data: { imageUid: string } }) => {
-        console.log('🚀 ~ app.addEventListener ~ event:', event);
-        const imageUid = event.data.imageUid; // SOPInstanceUID of that slice :contentReference[oaicite:0]{index=0}
-        console.log('imageUid', imageUid);
-        const dataId = event.dataid; // the dataset key DWV created
-        const metaRoot = app.getMetaData(dataId) as object;
-        console.log('metaRoot', metaRoot);
-
-        setMetaData(metaRoot);
-        console.log('imagesMapping', imagesMapping);
-
-        const currentUid = imagesMapping?.[imageUid];
-        setImageName(currentUid);
+        // console.log('🚀 ~ app.addEventListener ~ event:', event);
+        // const imageUid = event.data.imageUid; // SOPInstanceUID of that slice :contentReference[oaicite:0]{index=0}
+        // console.log('imageUid', imageUid);
+        // const dataId = event.dataid; // the dataset key DWV created
+        // const metaRoot = app.getMetaData(dataId) as object;
+        // console.log('metaRoot', metaRoot);
+        // setMetaData(metaRoot);
+        // console.log('imagesMapping', imagesMapping);
+        // const currentUid = imagesMapping?.[imageUid];
+        // setImageName(currentUid);
         // c// whole data set meta :contentReference[oaicite:1]{index=1}
         // const meta = metaRoot[imageUid] ?? metaRoot; // per‑instance sub‑tree
         // console.log('🚀 ~ app.addEventListener ~ meta:', meta);
-
         // console.table({
         //   patientName: meta['00100010']?.value?.[0], // (0020,0013) patientName
         //   instanceNumber: meta['00200013']?.value?.[0], // (0020,0013) InstanceNumber
@@ -165,66 +172,54 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
         // });
       }
     );
-    app.addEventListener(
-      'loaditem',
-      (event: {
-        source: string | File;
-        imageUid: string;
-        data: { imageUid: string };
-      }) => {
-        // console.log('loaditem', event);
-        const uid = event.imageUid ?? event.data.imageUid;
-        const src = event.source;
-        const name =
-          src instanceof File
-            ? src.name
-            : typeof src === 'string'
-            ? src.split('/').pop()!
-            : '(unknown)';
-        _loadedItems.push(event.source);
-        // _imagesMapping[uid] = name;
-        console.log('name', uid, name);
+    app.addEventListener('loaditem', (event: DicomLoadItemEvent) => {
+      const uid = getImageUid(event.data, 0);
+      if (uid) {
+        setImagesMapping((state) => ({ ...state, [uid]: event.source }));
+      }
+      setLoadedItems((state) => [...state, event.source]);
+    });
 
-        setImagesMapping({ ...imagesMapping, [uid]: name });
-      }
-    );
-    app.addEventListener(
-      'loaderror',
-      (event: { error: Error; source: string }) => {
-        _erroredItems.push(event.source);
-      }
-    );
-    app.addEventListener(
-      'loadabort',
-      (event: { error: Error; source: string }) => {
-        _abortedItems.push(event.source);
-      }
-    );
+    app.addEventListener('loaderror', (event: DicomLoadErrorEvent) => {
+      setLoadErrorEvents((state) => [...state, event]);
+    });
+    app.addEventListener('loadabort', (event: DicomLoadErrorEvent) => {
+      setLoadErrorEvents((state) => [...state, event]);
+    });
     app.addEventListener('keydown', (event: KeyboardEvent) => {
       app.defaultOnKeydown(event);
     });
 
     window.addEventListener('resize', app.onResize);
 
-    // if (images.length)
     app.loadURLs(images);
     appRef.current = app;
     setupDropbox(app);
-    setAbortedItems(_abortedItems);
-    setErroredItems(_erroredItems);
-    // setImagesMapping(_imagesMapping);
-    // setLoadedItems(_loadedItems);
 
     return () => appRef.current?.reset();
   }, []);
 
+  useEffect(() => {
+    setImageName(loadedItems[0]);
+    if (dataLoaded && !loadedItems.length && appRef.current) {
+      showDropbox(appRef.current, true);
+    }
+  }, [dataLoaded]);
+
   return (
-    <Box>
+    <Stack spacing={2}>
       {loadProgress !== 100 && loadProgress !== 0 && (
         <LinearProgress variant="determinate" value={loadProgress} />
       )}
+      <p>images: {images.length}</p>
+      <pre>{images.join('\n')}</pre>
+      <p>loadedItems: {loadedItems.length}</p>
+      <p>loadErrorEvents: {loadErrorEvents.length}</p>
+      <p>dataLoaded: {String(dataLoaded)}</p>
+      <p>selectedTool: {selectedTool}</p>
       <Typography variant="h3">{imageName}</Typography>
       <DicomViewerTools
+        app={appRef.current as any}
         tools={tools}
         selectedTool={selectedTool}
         onChangeTool={onChangeTool}
@@ -232,17 +227,14 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
         canRunTool={canRunTool}
         dataLoaded={dataLoaded}
         metaData={metaData}
-        erroredItems={erroredItems}
-        abortedItems={abortedItems}
+        loadErrorEvents={loadErrorEvents}
       />
-      <Stack spacing={2}>
-        <Box
-          ref={containerRef}
-          id="layerGroup0"
-          sx={{ height: 500, width: '100%' }}
-        />
-        <DicomViewerFooter />
-      </Stack>
-    </Box>
+      <Box
+        ref={containerRef}
+        id="layerGroup0"
+        sx={{ height: 500, width: '100%' }}
+      />
+      <DicomViewerFooter />
+    </Stack>
   );
 };

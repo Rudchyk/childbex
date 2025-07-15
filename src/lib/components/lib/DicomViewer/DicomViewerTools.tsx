@@ -1,23 +1,16 @@
-import {
-  List,
-  ListItem,
-  ListItemText,
-  Stack,
-  ToggleButton,
-  ToggleButtonGroup,
-} from '@mui/material';
+'use client';
+
+import { Stack, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { FC } from 'react';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import MenuIcon from '@mui/icons-material/Menu';
 import ContrastIcon from '@mui/icons-material/Contrast';
 import SearchIcon from '@mui/icons-material/Search';
-import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
 import StraightenIcon from '@mui/icons-material/Straighten';
-import { useToggle } from 'usehooks-ts';
-import { UIDialog } from '@/lib/components';
-import ReportGmailerrorredIcon from '@mui/icons-material/ReportGmailerrorred';
-import CrisisAlertIcon from '@mui/icons-material/CrisisAlert';
-import { TagsTable } from './TagsTable';
+import { ErroredItems } from './ErroredItems';
+import { DicomLoadErrorEvents } from './DicomViewer.types';
+import { Tags } from './Tags';
+import { App } from 'dwv';
 
 interface DicomViewerToolsProps {
   tools: Record<string, unknown>;
@@ -26,9 +19,9 @@ interface DicomViewerToolsProps {
   onReset: () => void;
   canRunTool: (tool: string) => boolean;
   dataLoaded: boolean;
-  erroredItems?: string[];
-  abortedItems?: string[];
+  loadErrorEvents: DicomLoadErrorEvents;
   metaData: any;
+  app: App;
 }
 
 export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
@@ -39,15 +32,12 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
   tools,
   onReset,
   metaData,
-  abortedItems,
-  erroredItems,
+  loadErrorEvents,
+  app,
 }) => {
-  const [open, toggleOpen] = useToggle(false);
-  const [abortedItemsOpen, toggleAbortedItemsOpen] = useToggle(false);
-  const [erroredItemsOpen, toggleErroredItemsOpen] = useToggle(false);
   const handleToolChange = (
     event: React.MouseEvent<HTMLElement>,
-    newTool: any
+    newTool: string
   ) => {
     if (newTool) {
       onChangeTool(newTool);
@@ -67,8 +57,6 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
         return null;
     }
   };
-
-  console.log('metaData', metaData);
 
   return (
     <Stack
@@ -106,74 +94,8 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
         <RefreshIcon />
       </ToggleButton>
 
-      <ToggleButton
-        size="small"
-        value="tags"
-        title="Tags"
-        disabled={!dataLoaded}
-        onClick={toggleOpen}
-      >
-        <LibraryBooksIcon />
-      </ToggleButton>
-      <UIDialog open={open} onDialogClose={toggleOpen} title="DICOM Tags">
-        <TagsTable data={metaData} />
-      </UIDialog>
-
-      {!!abortedItems?.length && (
-        <>
-          <ToggleButton
-            size="small"
-            value="tags"
-            title="Aborted Items"
-            color="warning"
-            disabled={!dataLoaded}
-            onClick={toggleAbortedItemsOpen}
-          >
-            <CrisisAlertIcon color="warning" />
-          </ToggleButton>
-          <UIDialog
-            open={abortedItemsOpen}
-            onDialogClose={toggleAbortedItemsOpen}
-            title="Aborted Items"
-          >
-            <List>
-              {abortedItems.map((item) => (
-                <ListItem key={item} disablePadding>
-                  <ListItemText primary={item} />
-                </ListItem>
-              ))}
-            </List>
-          </UIDialog>
-        </>
-      )}
-
-      {!!erroredItems?.length && (
-        <>
-          <ToggleButton
-            size="small"
-            value="tags"
-            title="Errored Items"
-            color="error"
-            disabled={!dataLoaded}
-            onClick={toggleErroredItemsOpen}
-          >
-            <ReportGmailerrorredIcon color="error" />
-          </ToggleButton>
-          <UIDialog
-            open={erroredItemsOpen}
-            onDialogClose={toggleErroredItemsOpen}
-            title="Errored Items"
-          >
-            <List>
-              {erroredItems.map((item) => (
-                <ListItem key={item} disablePadding>
-                  <ListItemText primary={item} />
-                </ListItem>
-              ))}
-            </List>
-          </UIDialog>
-        </>
-      )}
+      <Tags dataLoaded={dataLoaded} app={app} />
+      <ErroredItems data={loadErrorEvents} />
     </Stack>
   );
 };

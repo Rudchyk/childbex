@@ -1,3 +1,5 @@
+'use client';
+
 import { App } from 'dwv';
 
 export interface useDropboxProps {
