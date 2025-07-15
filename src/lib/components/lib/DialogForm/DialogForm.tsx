@@ -1,3 +1,5 @@
+'use client';
+
 import { FC, ReactElement, useRef } from 'react';
 import { UIDialog, UIDialogProps } from '../UIDialog/UIDialog';
 

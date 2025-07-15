@@ -5,6 +5,7 @@ import { Box, LinearProgress, Stack } from '@mui/material';
 import { App } from 'dwv';
 import { DicomViewerFooter } from './DicomViewerFooter';
 import { DicomViewerTools } from './DicomViewerTools';
+import { useDropbox } from './useDropbox';
 
 import './DicomViewer.css';
 
@@ -13,7 +14,9 @@ interface DwvComponentProps {
 }
 
 export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<App | null>(null);
+  const [imagesList, setImagesList] = useState(images);
   const tools = {
     Scroll: {},
     ZoomAndPan: {},
@@ -24,9 +27,10 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       type: 'factory',
     },
   };
-  const [nLoadItem, setNLoadItem] = useState(0);
-  const [nReceivedLoadError, setNReceivedLoadError] = useState(0);
-  const [nReceivedLoadAbort, setNReceivedLoadAbort] = useState(0);
+  const { showDropbox, setupDropbox } = useDropbox();
+  const [loadedItems, setLoadedItems] = useState<string[]>([]);
+  const [erroredItems, setErroredItems] = useState<string[]>([]);
+  const [abortedItems, setAbortedItems] = useState<string[]>([]);
   const [loadProgress, setLoadProgress] = useState(0);
   const [canScroll, setCanScroll] = useState(false);
   const [selectedTool, setSelectedTool] = useState('Select Tool');
@@ -39,7 +43,6 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
     }
   };
   const onChangeTool = (tool: string) => {
-    console.log('🚀 ~ onChangeTool ~ tool:', tool);
     if (appRef.current) {
       setSelectedTool(tool);
       appRef.current.setTool(tool);
@@ -77,16 +80,17 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
 
     const app = new App();
     app.init({
-      dataViewConfigs: { '*': [{ divId: 'layerGroup0' }] },
+      dataViewConfigs: { '*': [{ divId: containerRef?.current?.id }] },
       tools,
     });
     let isFirstRender: boolean;
+    const _loadedItems: string[] = [];
+    const _erroredItems: string[] = [];
+    const _abortedItems: string[] = [];
 
     app.addEventListener('loadstart', () => {
-      setNLoadItem(0);
-      setNReceivedLoadError(0);
-      setNReceivedLoadAbort(0);
       isFirstRender = true;
+      showDropbox(app, false);
     });
     app.addEventListener('loadprogress', (event: { loaded: number }) => {
       setLoadProgress(event.loaded);
@@ -107,46 +111,88 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
         }
         onChangeTool(canScroll ? 'Scroll' : 'ZoomAndPan');
       }
-
-      console.log('dataid', event);
     });
-    app.addEventListener('load', () => {
-      setDataLoaded(true);
+    app.addEventListener('load', (event: any) => {
+      console.log('load', event);
+      // setDataLoaded(true);
     });
     app.addEventListener('loadend', () => {
-      if (nReceivedLoadError) {
-        setLoadProgress(0);
-        alert('Received errors during load. Check log for details.');
-      }
-      if (nReceivedLoadAbort) {
-        setLoadProgress(0);
-        alert('Load was aborted.');
+      setDataLoaded(true);
+      if (!_loadedItems.length) {
+        showDropbox(app, true);
       }
     });
-    app.addEventListener('loaditem', () => {
-      setNLoadItem((state) => ++state);
+    app.addEventListener('positionchange', (evt: any) => {
+      console.log('🚀 ~ app.addEventListener ~ evt:', evt);
+      // ───────── what slice is visible? ─────────
+      const sliceIndex = evt.value[0]; // integer index in the stack
+      const coords = evt.value[1]; // [x,y,z] RAS‑world position
+      const imageUid = evt.data.imageUid; // SOPInstanceUID of that slice :contentReference[oaicite:0]{index=0}
+
+      console.log(
+        `Now showing slice #${sliceIndex} (UID ${imageUid}) at`,
+        coords
+      );
+
+      // ───────── fetch and display its metadata ─────────
+      const dataId = evt.dataid; // the dataset key DWV created
+      const metaRoot = app.getMetaData(dataId) as any; // whole data set meta :contentReference[oaicite:1]{index=1}
+      const meta = metaRoot[imageUid] ?? metaRoot; // per‑instance sub‑tree
+      console.log('🚀 ~ app.addEventListener ~ meta:', meta);
+
+      console.table({
+        patientName: meta['00100010']?.value?.[0], // (0020,0013) patientName
+        instanceNumber: meta['00200013']?.value?.[0], // (0020,0013) InstanceNumber
+        sliceLocation: meta['00201041']?.value?.[0], // (0020,1041)
+        thickness: meta['00180050']?.value?.[0], // (0018,0050) SliceThickness
+        windowCenter: meta['00281050']?.value?.[0], // (0028,1050)
+        windowWidth: meta['00281051']?.value?.[0], // (0028,1051)
+        sopClass: meta['00080016']?.value?.[0], // (0008,0016)
+        uid: imageUid,
+      });
     });
-    app.addEventListener('loaderror', (event: { error: Error }) => {
-      console.error(event.error);
-      setNReceivedLoadError((state) => ++state);
+    app.addEventListener('loaditem', (event: { source: string }) => {
+      _loadedItems.push(event.source);
     });
-    app.addEventListener('loadabort', () => {
-      setNReceivedLoadAbort((state) => ++state);
-    });
+    app.addEventListener(
+      'loaderror',
+      (event: { error: Error; source: string }) => {
+        _erroredItems.push(event.source);
+      }
+    );
+    app.addEventListener(
+      'loadabort',
+      (event: { error: Error; source: string }) => {
+        _abortedItems.push(event.source);
+      }
+    );
     app.addEventListener('keydown', (event: KeyboardEvent) => {
       app.defaultOnKeydown(event);
     });
     window.addEventListener('resize', app.onResize);
 
+    // if (images.length)
     app.loadURLs(images);
     appRef.current = app;
+    setupDropbox(app);
+    setAbortedItems(_abortedItems);
+    setErroredItems(_erroredItems);
+    setLoadedItems(_loadedItems);
 
     return () => appRef.current?.reset();
   }, []);
 
+  useEffect(() => {
+    console.log('loadedItems', loadedItems.length);
+    if (appRef.current) {
+      appRef.current.reset();
+      appRef.current.loadURLs(loadedItems);
+    }
+  }, [loadedItems]);
+
   return (
     <Box>
-      {loadProgress !== 100 && (
+      {loadProgress !== 100 && loadProgress !== 0 && (
         <LinearProgress variant="determinate" value={loadProgress} />
       )}
       <DicomViewerTools
@@ -157,11 +203,14 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
         canRunTool={canRunTool}
         dataLoaded={dataLoaded}
         metaData={metaData}
+        erroredItems={erroredItems}
+        abortedItems={abortedItems}
       />
       <Stack spacing={2}>
-        <div
+        <Box
+          ref={containerRef}
           id="layerGroup0"
-          style={{ height: 500, width: '100%', border: '1px dashed #ccc' }}
+          sx={{ height: 500, width: '100%' }}
         />
         <DicomViewerFooter />
       </Stack>

@@ -1,3 +1,5 @@
+'use client';
+
 import Dialog, { DialogProps } from '@mui/material/Dialog';
 import DialogActions, { DialogActionsProps } from '@mui/material/DialogActions';
 import DialogContent, { DialogContentProps } from '@mui/material/DialogContent';

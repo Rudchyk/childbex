@@ -12,4 +12,5 @@ export const paths = {
   adminTrashedPatients: '/admin/trash/patients',
   patients: '/patients',
   test: '/test',
+  dicomViewer: '/dicom-viewer',
 };

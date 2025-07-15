@@ -10,3 +10,4 @@ export * from './lib/DialogForm/DialogForm';
 export * from './lib/DialogAreYouSure/DialogAreYouSure';
 export * from './lib/FormUISelect/FormUISelect';
 export * from './lib/FormUIFileInput/FormUIFileInput';
+export * from './lib/DicomViewer/DicomViewer';

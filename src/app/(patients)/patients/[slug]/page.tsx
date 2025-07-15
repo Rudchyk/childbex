@@ -3,7 +3,7 @@
 import { PatientModel } from '@/db/models/Patient.model';
 import { Stack, Typography } from '@mui/material';
 import { notFound } from 'next/navigation';
-import { DicomViewer } from './_components/DicomViewer';
+import { DicomViewer } from '@/lib/components';
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -18,11 +18,11 @@ export default async function Page({ params }: PageProps) {
   }
 
   const images = (patient.images || []).slice(1, -1);
+  // const images = (patient.images || []).slice(200, 400);
   // const images = patient.images;
   return (
     <Stack spacing={2}>
       <Typography variant="h1">{patient.name}</Typography>
-      {/* <DicomViewer images={(patient.images || []).slice(1, 3)} /> */}
       <DicomViewer images={images} />
     </Stack>
   );

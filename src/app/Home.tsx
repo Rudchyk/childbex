@@ -12,18 +12,24 @@ import {
 import { FC } from 'react';
 import BiotechIcon from '@mui/icons-material/Biotech';
 import { paths } from '@/lib/constants/paths';
+import EmojiSymbolsIcon from '@mui/icons-material/EmojiSymbols';
 
 export const Home: FC = () => {
   const links = [
     {
-      href: paths.adminUsers,
+      href: paths.patients,
       label: 'Patients',
       icon: <PeopleIcon />,
     },
     {
-      href: paths.adminTrash,
-      label: 'Test',
+      href: paths.dicomViewer,
+      label: 'Dicom viewer',
       icon: <BiotechIcon />,
+    },
+    {
+      href: paths.test,
+      label: 'Test',
+      icon: <EmojiSymbolsIcon />,
     },
   ];
   return (
