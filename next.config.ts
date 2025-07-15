@@ -3,7 +3,7 @@ import CopyWebpackPlugin from 'copy-webpack-plugin';
 import path from 'path';
 
 const nextConfig: NextConfig = {
-  reactStrictMode: false,
+  // reactStrictMode: false,
   serverExternalPackages: ['sequelize'],
   experimental: {
     serverActions: {

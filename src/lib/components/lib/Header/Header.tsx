@@ -22,6 +22,7 @@ export const Header = () => {
           Next App
         </Typography>
         <Stack direction="row" spacing={1} alignItems="center">
+          <span>{process.env.NODE_ENV.toUpperCase()}</span>
           <ThemeSwitcher />
           <AuthUser />
         </Stack>

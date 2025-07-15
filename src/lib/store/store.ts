@@ -1,11 +1,13 @@
 import { configureStore } from '@reduxjs/toolkit';
 import { setupListeners } from '@reduxjs/toolkit/query';
 import { apiService } from './services/apiService';
+import { baseSlice } from './slices/baseSlice';
 
 export const makeStore = () => {
   const store = configureStore({
     reducer: {
       [apiService.reducerPath]: apiService.reducer,
+      [baseSlice.reducerPath]: baseSlice.reducer,
     },
     middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware().concat(apiService.middleware),

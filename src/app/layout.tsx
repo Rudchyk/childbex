@@ -27,7 +27,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={roboto.variable}>
       <body>
-        <StoreProvider>
+        <StoreProvider data={{ nodeEnv: process.env.NODE_ENV }}>
           <ThemeProvider>
             <Auth>
               <NotificationsProvider
