@@ -17,6 +17,7 @@ import { useToggle } from 'usehooks-ts';
 import { UIDialog } from '@/lib/components';
 import ReportGmailerrorredIcon from '@mui/icons-material/ReportGmailerrorred';
 import CrisisAlertIcon from '@mui/icons-material/CrisisAlert';
+import { TagsTable } from './TagsTable';
 
 interface DicomViewerToolsProps {
   tools: Record<string, unknown>;
@@ -27,7 +28,7 @@ interface DicomViewerToolsProps {
   dataLoaded: boolean;
   erroredItems?: string[];
   abortedItems?: string[];
-  metaData: unknown;
+  metaData: any;
 }
 
 export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
@@ -66,6 +67,9 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
         return null;
     }
   };
+
+  console.log('metaData', metaData);
+
   return (
     <Stack
       direction="row"
@@ -112,7 +116,7 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
         <LibraryBooksIcon />
       </ToggleButton>
       <UIDialog open={open} onDialogClose={toggleOpen} title="DICOM Tags">
-        <pre>{JSON.stringify(metaData, null, 2)}</pre>
+        <TagsTable data={metaData} />
       </UIDialog>
 
       {!!abortedItems?.length && (

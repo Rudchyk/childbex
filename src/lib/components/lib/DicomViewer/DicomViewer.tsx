@@ -1,7 +1,7 @@
 'use client';
 
 import { FC, useEffect, useRef, useState } from 'react';
-import { Box, LinearProgress, Stack } from '@mui/material';
+import { Box, LinearProgress, Stack, Typography } from '@mui/material';
 import { App } from 'dwv';
 import { DicomViewerFooter } from './DicomViewerFooter';
 import { DicomViewerTools } from './DicomViewerTools';
@@ -16,7 +16,6 @@ interface DwvComponentProps {
 export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<App | null>(null);
-  const [imagesList, setImagesList] = useState(images);
   const tools = {
     Scroll: {},
     ZoomAndPan: {},
@@ -28,7 +27,9 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
     },
   };
   const { showDropbox, setupDropbox } = useDropbox();
-  const [loadedItems, setLoadedItems] = useState<string[]>([]);
+  const [imagesMapping, setImagesMapping] = useState<
+    Record<string, string> | undefined
+  >();
   const [erroredItems, setErroredItems] = useState<string[]>([]);
   const [abortedItems, setAbortedItems] = useState<string[]>([]);
   const [loadProgress, setLoadProgress] = useState(0);
@@ -36,7 +37,8 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
   const [selectedTool, setSelectedTool] = useState('Select Tool');
   const [canWindowLevel, setCanWindowLevel] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
-  const [metaData, setMetaData] = useState({});
+  const [imageName, setImageName] = useState<string>();
+  const [metaData, setMetaData] = useState<object | undefined>();
   const onChangeShape = (shape: string) => {
     if (appRef.current) {
       appRef.current.setToolFeatures({ shapeName: shape });
@@ -84,9 +86,10 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       tools,
     });
     let isFirstRender: boolean;
-    const _loadedItems: string[] = [];
+    const _loadedItems: any[] = [];
     const _erroredItems: string[] = [];
     const _abortedItems: string[] = [];
+    // const _imagesMapping: Record<string, string> = {};
 
     app.addEventListener('loadstart', () => {
       isFirstRender = true;
@@ -112,48 +115,79 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
         onChangeTool(canScroll ? 'Scroll' : 'ZoomAndPan');
       }
     });
-    app.addEventListener('load', (event: any) => {
-      console.log('load', event);
-      // setDataLoaded(true);
+    app.addEventListener('load', () => {
+      console.log('load');
     });
     app.addEventListener('loadend', () => {
       setDataLoaded(true);
+      const metaRoot = app.getMetaData(0);
+      console.log('loadend metaRoot', metaRoot);
+      setMetaData(metaRoot);
+      // const lg = app.getActiveLayerGroup(); // or app.getLayerGroup(0)
+      // const vl = lg.getActiveViewLayer();
+      // const vc = vl.getViewController();
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      //@ts-ignore
+      // const currentUid = vc.getCurrentImageUid();
+      // setImageName(currentUid);
       if (!_loadedItems.length) {
         showDropbox(app, true);
       }
     });
-    app.addEventListener('positionchange', (evt: any) => {
-      console.log('🚀 ~ app.addEventListener ~ evt:', evt);
-      // ───────── what slice is visible? ─────────
-      const sliceIndex = evt.value[0]; // integer index in the stack
-      const coords = evt.value[1]; // [x,y,z] RAS‑world position
-      const imageUid = evt.data.imageUid; // SOPInstanceUID of that slice :contentReference[oaicite:0]{index=0}
+    app.addEventListener(
+      'positionchange',
+      (event: { dataid: number; data: { imageUid: string } }) => {
+        console.log('🚀 ~ app.addEventListener ~ event:', event);
+        const imageUid = event.data.imageUid; // SOPInstanceUID of that slice :contentReference[oaicite:0]{index=0}
+        console.log('imageUid', imageUid);
+        const dataId = event.dataid; // the dataset key DWV created
+        const metaRoot = app.getMetaData(dataId) as object;
+        console.log('metaRoot', metaRoot);
 
-      console.log(
-        `Now showing slice #${sliceIndex} (UID ${imageUid}) at`,
-        coords
-      );
+        setMetaData(metaRoot);
+        console.log('imagesMapping', imagesMapping);
 
-      // ───────── fetch and display its metadata ─────────
-      const dataId = evt.dataid; // the dataset key DWV created
-      const metaRoot = app.getMetaData(dataId) as any; // whole data set meta :contentReference[oaicite:1]{index=1}
-      const meta = metaRoot[imageUid] ?? metaRoot; // per‑instance sub‑tree
-      console.log('🚀 ~ app.addEventListener ~ meta:', meta);
+        const currentUid = imagesMapping?.[imageUid];
+        setImageName(currentUid);
+        // c// whole data set meta :contentReference[oaicite:1]{index=1}
+        // const meta = metaRoot[imageUid] ?? metaRoot; // per‑instance sub‑tree
+        // console.log('🚀 ~ app.addEventListener ~ meta:', meta);
 
-      console.table({
-        patientName: meta['00100010']?.value?.[0], // (0020,0013) patientName
-        instanceNumber: meta['00200013']?.value?.[0], // (0020,0013) InstanceNumber
-        sliceLocation: meta['00201041']?.value?.[0], // (0020,1041)
-        thickness: meta['00180050']?.value?.[0], // (0018,0050) SliceThickness
-        windowCenter: meta['00281050']?.value?.[0], // (0028,1050)
-        windowWidth: meta['00281051']?.value?.[0], // (0028,1051)
-        sopClass: meta['00080016']?.value?.[0], // (0008,0016)
-        uid: imageUid,
-      });
-    });
-    app.addEventListener('loaditem', (event: { source: string }) => {
-      _loadedItems.push(event.source);
-    });
+        // console.table({
+        //   patientName: meta['00100010']?.value?.[0], // (0020,0013) patientName
+        //   instanceNumber: meta['00200013']?.value?.[0], // (0020,0013) InstanceNumber
+        //   sliceLocation: meta['00201041']?.value?.[0], // (0020,1041)
+        //   thickness: meta['00180050']?.value?.[0], // (0018,0050) SliceThickness
+        //   windowCenter: meta['00281050']?.value?.[0], // (0028,1050)
+        //   windowWidth: meta['00281051']?.value?.[0], // (0028,1051)
+        //   sopClass: meta['00080016']?.value?.[0], // (0008,0016)
+        //   uid: imageUid,
+        // });
+      }
+    );
+    app.addEventListener(
+      'loaditem',
+      (event: {
+        source: string | File;
+        imageUid: string;
+        data: { imageUid: string };
+      }) => {
+        // console.log('loaditem', event);
+        const uid = event.imageUid ?? event.data.imageUid;
+        const src = event.source;
+        const name =
+          src instanceof File
+            ? src.name
+            : typeof src === 'string'
+            ? src.split('/').pop()!
+            : '(unknown)';
+        _loadedItems.push(event.source);
+        // _imagesMapping[uid] = name;
+        console.log('name', uid, name);
+
+        setImagesMapping({ ...imagesMapping, [uid]: name });
+      }
+    );
     app.addEventListener(
       'loaderror',
       (event: { error: Error; source: string }) => {
@@ -169,6 +203,7 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
     app.addEventListener('keydown', (event: KeyboardEvent) => {
       app.defaultOnKeydown(event);
     });
+
     window.addEventListener('resize', app.onResize);
 
     // if (images.length)
@@ -177,24 +212,18 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
     setupDropbox(app);
     setAbortedItems(_abortedItems);
     setErroredItems(_erroredItems);
-    setLoadedItems(_loadedItems);
+    // setImagesMapping(_imagesMapping);
+    // setLoadedItems(_loadedItems);
 
     return () => appRef.current?.reset();
   }, []);
-
-  useEffect(() => {
-    console.log('loadedItems', loadedItems.length);
-    if (appRef.current) {
-      appRef.current.reset();
-      appRef.current.loadURLs(loadedItems);
-    }
-  }, [loadedItems]);
 
   return (
     <Box>
       {loadProgress !== 100 && loadProgress !== 0 && (
         <LinearProgress variant="determinate" value={loadProgress} />
       )}
+      <Typography variant="h3">{imageName}</Typography>
       <DicomViewerTools
         tools={tools}
         selectedTool={selectedTool}
