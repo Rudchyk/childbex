@@ -82,7 +82,7 @@ export const useDropbox = (props?: useDropboxProps) => {
         box.appendChild(p);
       }
       // show box
-      box.setAttribute('style', 'display:initial');
+      box.setAttribute('style', 'display:block');
       // stop layer listening
       if (layerDiv) {
         layerDiv.removeEventListener('dragover', defaultHandleDragEvent);

@@ -1,6 +1,12 @@
 'use client';
 
-import { Stack, ToggleButton, ToggleButtonGroup } from '@mui/material';
+import {
+  Avatar,
+  Stack,
+  ToggleButton,
+  ToggleButtonGroup,
+  Tooltip,
+} from '@mui/material';
 import { FC } from 'react';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -10,7 +16,8 @@ import StraightenIcon from '@mui/icons-material/Straighten';
 import { ErroredItems } from './ErroredItems';
 import { DicomLoadErrorEvents } from './DicomViewer.types';
 import { Tags } from './Tags';
-import { App } from 'dwv';
+import CheckIcon from '@mui/icons-material/Check';
+import { green } from '@mui/material/colors';
 
 interface DicomViewerToolsProps {
   tools: Record<string, unknown>;
@@ -18,22 +25,22 @@ interface DicomViewerToolsProps {
   onChangeTool: (tool: string) => void;
   onReset: () => void;
   canRunTool: (tool: string) => boolean;
-  dataLoaded: boolean;
+  isDataLoaded: boolean;
+  isLoadSuccessful: boolean;
   loadErrorEvents: DicomLoadErrorEvents;
-  metaData: any;
-  app: App;
+  metaData: Record<string, unknown>;
 }
 
 export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
   selectedTool,
   onChangeTool,
   canRunTool,
-  dataLoaded,
+  isDataLoaded,
+  isLoadSuccessful,
   tools,
   onReset,
   metaData,
   loadErrorEvents,
-  app,
 }) => {
   const handleToolChange = (
     event: React.MouseEvent<HTMLElement>,
@@ -78,7 +85,7 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
             value={tool}
             key={tool}
             title={tool}
-            disabled={!dataLoaded || !canRunTool(tool)}
+            disabled={!isDataLoaded || !canRunTool(tool)}
           >
             {getToolIcon(tool)}
           </ToggleButton>
@@ -88,14 +95,22 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
         size="small"
         value="reset"
         title="Reset"
-        disabled={!dataLoaded}
+        disabled={!isDataLoaded}
         onChange={onReset}
       >
         <RefreshIcon />
       </ToggleButton>
 
-      <Tags dataLoaded={dataLoaded} app={app} />
+      <Tags dataLoaded={isDataLoaded} data={metaData} />
       <ErroredItems data={loadErrorEvents} />
+
+      {isLoadSuccessful && (
+        <Tooltip title="Dataset loaded successfully">
+          <Avatar variant="rounded" sx={{ bgcolor: green[500] }}>
+            <CheckIcon />
+          </Avatar>
+        </Tooltip>
+      )}
     </Stack>
   );
 };

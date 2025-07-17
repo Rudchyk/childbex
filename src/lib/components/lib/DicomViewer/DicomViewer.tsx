@@ -1,7 +1,18 @@
 'use client';
 
 import { FC, useEffect, useRef, useState } from 'react';
-import { Box, LinearProgress, Stack, Typography } from '@mui/material';
+import {
+  Box,
+  Grid,
+  LinearProgress,
+  List,
+  ListItem,
+  ListItemText,
+  ListSubheader,
+  Paper,
+  Stack,
+  Typography,
+} from '@mui/material';
 import { App } from 'dwv';
 import { DicomViewerFooter } from './DicomViewerFooter';
 import { DicomViewerTools } from './DicomViewerTools';
@@ -12,6 +23,9 @@ import {
   DicomLoadErrorEvent,
   DicomLoadErrorEvents,
   DicomLoadItemEvent,
+  DicomLoadProgressEvent,
+  DicomLoadStartEvent,
+  DicomPositionChangeEvent,
 } from './DicomViewer.types';
 
 interface DwvComponentProps {
@@ -41,6 +55,7 @@ export function getImageUid(meta: any, slice = 0): string | undefined {
 export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<App | null>(null);
+  const itemRefs = useRef<(HTMLLIElement | null)[]>([]);
   const tools = {
     Scroll: {},
     ZoomAndPan: {},
@@ -52,20 +67,21 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
     },
   };
   const { showDropbox, setupDropbox } = useDropbox();
-  const [imagesMapping, setImagesMapping] = useState<
-    Record<string, string> | undefined
-  >();
+  const [imagesSourcesMapping, setImagesSourcesMapping] = useState<
+    Record<string, string>
+  >({});
   const [loadedItems, setLoadedItems] = useState<string[]>([]);
   const [loadErrorEvents, setLoadErrorEvents] = useState<DicomLoadErrorEvents>(
     []
   );
   const [loadProgress, setLoadProgress] = useState(0);
+  const [isLoadSuccessful, setIsLoadSuccessful] = useState(false);
   const [canScroll, setCanScroll] = useState(false);
   const [selectedTool, setSelectedTool] = useState('Select Tool');
   const [canWindowLevel, setCanWindowLevel] = useState(false);
-  const [dataLoaded, setDataLoaded] = useState(false);
-  const [imageName, setImageName] = useState<string>();
-  const [metaData, setMetaData] = useState<object | undefined>();
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [metaData, setMetaData] = useState<Record<string, unknown>>({});
+  const [currentImageId, setCurrentImageId] = useState<string | undefined>();
   const onChangeShape = (shape: string) => {
     if (appRef.current) {
       appRef.current.setToolFeatures({ shapeName: shape });
@@ -114,11 +130,15 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
     });
     let isFirstRender: boolean;
 
+    /**
+     * @event type DicomLoadStartEvent
+     */
     app.addEventListener('loadstart', () => {
+      console.log('loadstart');
       isFirstRender = true;
       showDropbox(app, false);
     });
-    app.addEventListener('loadprogress', (event: { loaded: number }) => {
+    app.addEventListener('loadprogress', (event: DicomLoadProgressEvent) => {
       setLoadProgress(event.loaded);
     });
     app.addEventListener('renderend', (event: { dataid: number }) => {
@@ -139,21 +159,21 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       }
     });
     app.addEventListener('load', () => {
-      console.log('load');
+      // console.log('load');
+      setIsLoadSuccessful(true);
     });
-    app.addEventListener('loadend', () => {
-      setDataLoaded(true);
+    app.addEventListener('loadend', (event: any) => {
+      // console.log('loadend', event);
+      setIsDataLoaded(true);
     });
     app.addEventListener(
       'positionchange',
-      (event: { dataid: number; data: { imageUid: string } }) => {
-        // console.log('🚀 ~ app.addEventListener ~ event:', event);
-        // const imageUid = event.data.imageUid; // SOPInstanceUID of that slice :contentReference[oaicite:0]{index=0}
-        // console.log('imageUid', imageUid);
-        // const dataId = event.dataid; // the dataset key DWV created
-        // const metaRoot = app.getMetaData(dataId) as object;
-        // console.log('metaRoot', metaRoot);
-        // setMetaData(metaRoot);
+      (event: DicomPositionChangeEvent) => {
+        setCurrentImageId(event.data.imageUid);
+        const dataId = event.dataid; // the dataset key DWV created
+        const metaRoot = app.getMetaData(dataId) as object;
+        console.log('metaRoot', metaRoot);
+        setMetaData(metaRoot);
         // console.log('imagesMapping', imagesMapping);
         // const currentUid = imagesMapping?.[imageUid];
         // setImageName(currentUid);
@@ -173,11 +193,20 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       }
     );
     app.addEventListener('loaditem', (event: DicomLoadItemEvent) => {
+      // console.log('loaditem', event);
+      let name = '';
+      if (typeof event.source === 'string') {
+        name = event.source;
+      } else {
+        if ((event.source as any).name) {
+          name = (event.source as any).name;
+        }
+      }
       const uid = getImageUid(event.data, 0);
       if (uid) {
-        setImagesMapping((state) => ({ ...state, [uid]: event.source }));
+        setImagesSourcesMapping((state) => ({ ...state, [uid]: name }));
       }
-      setLoadedItems((state) => [...state, event.source]);
+      setLoadedItems((state) => [...state, name]);
     });
 
     app.addEventListener('loaderror', (event: DicomLoadErrorEvent) => {
@@ -192,48 +221,107 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
 
     window.addEventListener('resize', app.onResize);
 
-    app.loadURLs(images);
+    if (images?.length) {
+      app.loadURLs(images);
+    }
     appRef.current = app;
     setupDropbox(app);
 
     return () => appRef.current?.reset();
   }, []);
 
-  useEffect(() => {
-    setImageName(loadedItems[0]);
-    if (dataLoaded && !loadedItems.length && appRef.current) {
-      showDropbox(appRef.current, true);
+  const getCurrentImageSource = (imageId?: string) => {
+    if (!imageId) {
+      return '';
     }
-  }, [dataLoaded]);
+    return imagesSourcesMapping[imageId] || '';
+  };
+  const getIsCurrentImageSourceExists = (source: string, imageId = '') => {
+    return imagesSourcesMapping[imageId] === source;
+  };
+
+  useEffect(() => {
+    if (isDataLoaded && appRef.current) {
+      if (!loadedItems.length) {
+        console.log('loadedItems', loadedItems.length);
+
+        showDropbox(appRef.current, true);
+      } else {
+        // const image = appRef.current.getImage(0);
+        // const uid = image.getImageUid();
+        // setCurrentImageId(uid);
+      }
+    }
+  }, [isDataLoaded]);
+
+  //   useLayoutEffect(() => {
+  //   const el = itemRefs.current[initialHoveredIndex];
+  //   if (!el) return;
+
+  //   /* 3️⃣ Scroll the *list*, not the whole window */
+  //   el.scrollIntoView({
+  //     behavior: 'smooth',   // skip this if you need an instant jump
+  //     block: 'center',      // start | center | end | nearest
+  //     inline: 'nearest'
+  //   });
+  // }, [initialHoveredIndex]);
 
   return (
     <Stack spacing={2}>
       {loadProgress !== 100 && loadProgress !== 0 && (
         <LinearProgress variant="determinate" value={loadProgress} />
       )}
-      <p>images: {images.length}</p>
-      <pre>{images.join('\n')}</pre>
-      <p>loadedItems: {loadedItems.length}</p>
-      <p>loadErrorEvents: {loadErrorEvents.length}</p>
-      <p>dataLoaded: {String(dataLoaded)}</p>
-      <p>selectedTool: {selectedTool}</p>
-      <Typography variant="h3">{imageName}</Typography>
       <DicomViewerTools
-        app={appRef.current as any}
         tools={tools}
         selectedTool={selectedTool}
         onChangeTool={onChangeTool}
         onReset={onReset}
         canRunTool={canRunTool}
-        dataLoaded={dataLoaded}
+        isDataLoaded={isDataLoaded}
         metaData={metaData}
+        isLoadSuccessful={isLoadSuccessful}
         loadErrorEvents={loadErrorEvents}
       />
+      <Typography variant="caption" textAlign="center">
+        Image source: {getCurrentImageSource(currentImageId)}
+      </Typography>
       <Box
         ref={containerRef}
         id="layerGroup0"
         sx={{ height: 500, width: '100%' }}
-      />
+      >
+        <Box id="dropBox"></Box>
+      </Box>
+      <Box
+        component={Paper}
+        elevation={3}
+        sx={{
+          position: 'fixed',
+          top: '10%',
+          bottom: '10%',
+          right: 5,
+          width: 300,
+        }}
+      >
+        <List sx={{ height: '100%', overflow: 'auto' }}>
+          <ListSubheader>Sources:</ListSubheader>
+          {loadedItems.sort().map((source, i) => (
+            <ListItem
+              key={source}
+              // ref={(el: any) => (itemRefs.current[i] = el)}
+              sx={{
+                borderBottom: '1px solid #ccc',
+                background: (theme) =>
+                  getIsCurrentImageSourceExists(source, currentImageId)
+                    ? theme.palette.action.focus
+                    : undefined,
+              }}
+            >
+              <ListItemText primary={source} />
+            </ListItem>
+          ))}
+        </List>
+      </Box>
       <DicomViewerFooter />
     </Stack>
   );

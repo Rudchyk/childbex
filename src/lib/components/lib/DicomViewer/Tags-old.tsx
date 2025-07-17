@@ -5,14 +5,14 @@ import { FC } from 'react';
 import { useToggle } from 'usehooks-ts';
 import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
 import { UIDialog } from '../UIDialog/UIDialog';
-import { TagsTableAll } from './TagsTableAll';
+import { App } from 'dwv';
 
 interface TagsProps {
   dataLoaded: boolean;
-  data: Record<string, unknown>;
+  app: App;
 }
 
-export const Tags: FC<TagsProps> = ({ dataLoaded, data }) => {
+export const Tags: FC<TagsProps> = ({ dataLoaded }) => {
   const [open, toggleOpen] = useToggle(false);
   return (
     <>
@@ -26,7 +26,8 @@ export const Tags: FC<TagsProps> = ({ dataLoaded, data }) => {
         <LibraryBooksIcon />
       </ToggleButton>
       <UIDialog open={open} onDialogClose={toggleOpen} title="DICOM Tags">
-        <TagsTableAll data={data} />
+        ddd
+        {/* <TagsTable data={metaData} /> */}
       </UIDialog>
     </>
   );
