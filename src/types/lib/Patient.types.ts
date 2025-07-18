@@ -1,5 +1,6 @@
 import { ModelTimestamps, ModelSoftDeleted } from './Model.types';
 import { User } from './User.types';
+import { PatientImage } from './PatientImage.types';
 
 export interface Patient {
   id: string;
@@ -15,5 +16,5 @@ export type PatientModelAttributes = Patient &
 
 export interface ExtendedPatient extends PatientModelAttributes {
   creator: User;
-  images?: string[];
+  images?: PatientImage[];
 }

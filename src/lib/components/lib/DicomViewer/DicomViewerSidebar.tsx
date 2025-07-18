@@ -7,7 +7,7 @@ import {
   ListItem,
   ListItemIcon,
   ListItemText,
-  ListSubheader,
+  // ListSubheader,
   Paper,
 } from '@mui/material';
 import { App, Index } from 'dwv';
@@ -77,7 +77,7 @@ export const DicomViewerSidebar: FC<DicomViewerSidebarProps> = ({
       }}
     >
       <List sx={{ height: '100%', overflow: 'auto' }}>
-        <ListSubheader>Files:</ListSubheader>
+        {/* <ListSubheader>Files:</ListSubheader> */}
         {itemsList.map(({ imageUid, source, index }) => {
           const sourceChain = source.split('/');
           const name = sourceChain.pop();

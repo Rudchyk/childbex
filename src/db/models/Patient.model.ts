@@ -1,10 +1,7 @@
-import { DataTypes, FindOptions, Model, Optional } from 'sequelize';
+import { DataTypes, Model, Optional } from 'sequelize';
 import { sequelize } from '@/db';
-import { ExtendedPatient, PatientModelAttributes } from '@/types';
+import { PatientModelAttributes } from '@/types';
 import { UserModel } from './User.model';
-import path from 'path';
-import fs from 'fs';
-import { UPLOAD_ROOT } from '@/lib/constants/constants';
 
 export * from '@/types/lib/Patient.types';
 
@@ -17,59 +14,8 @@ export class PatientModel
   declare id: string;
   declare name: string;
   declare slug: string;
-  declare notes: string;
+  declare notes?: string;
   declare creator_id: string;
-
-  static async findExtendedPatients(
-    props?: FindOptions<PatientModelAttributes>
-  ): Promise<ExtendedPatient[]> {
-    const result = await this.findAll({
-      ...props,
-      include: [
-        {
-          model: UserModel,
-          as: 'creator',
-        },
-      ],
-    });
-    return result.map((r) => {
-      const patient = r.toJSON() as ExtendedPatient;
-      const imagesPath = path.join(UPLOAD_ROOT, patient.slug);
-      const imagesList = fs.readdirSync(imagesPath);
-      return {
-        ...patient,
-        images: imagesList.map((imageName) => path.join(imagesPath, imageName)),
-      };
-    });
-  }
-
-  static async findExtendedPatient(
-    slug: PatientModelAttributes['slug']
-  ): Promise<ExtendedPatient | undefined> {
-    const result = await this.findOne({
-      where: {
-        slug,
-      },
-      include: [
-        {
-          model: UserModel,
-          as: 'creator',
-        },
-      ],
-    });
-
-    if (!result) {
-      return;
-    }
-
-    const imagesPath = path.join(UPLOAD_ROOT, slug);
-    const imagesList = fs.readdirSync(imagesPath);
-
-    return {
-      ...(result.toJSON() as ExtendedPatient),
-      images: imagesList.map((imageName) => `/uploads/${slug}/${imageName}`),
-    };
-  }
 }
 
 PatientModel.init(
@@ -82,7 +28,6 @@ PatientModel.init(
     },
     creator_id: {
       type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
       allowNull: false,
     },
     slug: {

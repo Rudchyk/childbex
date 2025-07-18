@@ -8,6 +8,7 @@ import {
 import { ValidationError } from 'yup';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
 import { PatientModel } from '@/db/models/Patient.model';
+import { PatientImageModel } from '@/db/models/PatientImage.model';
 import { AddPatientActionStates } from './AddPatientActionStates.enum';
 import { toSlugIfCyr, unpackArchive, packArchive } from '@/lib/utils';
 import { getServerSession } from 'next-auth';
@@ -60,6 +61,13 @@ export const addPatient = async (
       }
     }
 
+    const patient = await PatientModel.create({
+      slug,
+      name,
+      notes,
+      creator_id: session.user.id,
+    });
+
     if (archive) {
       const ext = path.extname(archive.name).toLowerCase();
       if (!fs.existsSync(ARCHIVES_ROOT)) {
@@ -89,15 +97,14 @@ export const addPatient = async (
       }
       fs.unlinkSync(tmp);
       await packArchive(destDir, path.join(ARCHIVES_ROOT, slug + '.tgz'));
+      const imagesList = fs.readdirSync(destDir);
+      await PatientImageModel.bulkCreate(
+        imagesList.map((imageName) => ({
+          source: `/uploads/${slug}/${imageName}`,
+          patient_id: patient.id,
+        }))
+      );
     }
-
-    await PatientModel.create({
-      slug,
-      name,
-      notes,
-      creator_id: session.user.id,
-    });
-
     return { status: AddPatientActionStates.SUCCESS };
   } catch (error) {
     if (error instanceof ValidationError) {

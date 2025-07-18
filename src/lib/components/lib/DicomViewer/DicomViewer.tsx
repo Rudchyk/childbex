@@ -1,6 +1,13 @@
 'use client';
 
-import { FC, useEffect, useRef, useState } from 'react';
+import {
+  FC,
+  ReactElement,
+  ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Box, LinearProgress, Stack } from '@mui/material';
 import { App, Index } from 'dwv';
 import { DicomViewerFooter } from './DicomViewerFooter';
@@ -19,14 +26,18 @@ import './DicomViewer.css';
 import { getImageUid } from './DicomViewer.utils';
 import { DicomViewerDropbox } from './DicomViewerDropbox';
 
-interface DwvComponentProps {
-  images?: string[];
+interface DicomViewerProps {
+  list?: string[];
   isClean?: boolean;
+  onCurrentItemChange?: (source: string) => void;
+  toolbar?: ReactElement | ReactNode;
 }
 
-export const DicomViewer: FC<DwvComponentProps> = ({
-  images = [],
+export const DicomViewer: FC<DicomViewerProps> = ({
+  list = [],
   isClean,
+  onCurrentItemChange,
+  toolbar,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<App>(null);
@@ -207,8 +218,8 @@ export const DicomViewer: FC<DwvComponentProps> = ({
 
     window.addEventListener('resize', app.onResize);
 
-    if (images?.length) {
-      app.loadURLs(images);
+    if (list?.length) {
+      app.loadURLs(list);
     } else {
       setIsShowDropbox(true);
     }
@@ -232,6 +243,13 @@ export const DicomViewer: FC<DwvComponentProps> = ({
     }
   }, [isDataLoaded]);
 
+  useEffect(() => {
+    if (currentImageId && onCurrentItemChange) {
+      const currentSource = loadedItemsMapping[currentImageId];
+      onCurrentItemChange(currentSource);
+    }
+  }, [currentImageId]);
+
   return (
     <Stack spacing={2}>
       {loadProgress !== 100 && loadProgress !== 0 && (
@@ -249,6 +267,7 @@ export const DicomViewer: FC<DwvComponentProps> = ({
         loadErrorEvents={loadErrorEvents}
         onClean={isClean ? onClean : undefined}
       />
+      {toolbar}
       <Box
         ref={containerRef}
         id="layerGroup0"

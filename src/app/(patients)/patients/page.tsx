@@ -1,11 +1,9 @@
-import { syncDb } from '@/db';
-import { PatientModel } from '@/db/models/Patient.model';
 import { Stack, Typography } from '@mui/material';
 import { Patients } from './_components/Patients';
+import { findExtendedPatients } from '@/lib/services/patients.service';
 
 export default async function Page() {
-  await syncDb();
-  const patients = await PatientModel.findExtendedPatients();
+  const patients = await findExtendedPatients();
 
   return (
     <Stack spacing={1}>
