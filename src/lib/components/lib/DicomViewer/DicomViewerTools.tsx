@@ -13,9 +13,9 @@ import MenuIcon from '@mui/icons-material/Menu';
 import ContrastIcon from '@mui/icons-material/Contrast';
 import SearchIcon from '@mui/icons-material/Search';
 import StraightenIcon from '@mui/icons-material/Straighten';
-import { ErroredItems } from './ErroredItems';
+import { DicomViewerErroredItems } from './DicomViewerErroredItems';
 import { DicomLoadErrorEvents } from './DicomViewer.types';
-import { Tags } from './Tags';
+import { DicomViewerTags } from './DicomViewerTags';
 import CheckIcon from '@mui/icons-material/Check';
 import { green } from '@mui/material/colors';
 
@@ -101,8 +101,8 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
         <RefreshIcon />
       </ToggleButton>
 
-      <Tags dataLoaded={isDataLoaded} data={metaData} />
-      <ErroredItems data={loadErrorEvents} />
+      <DicomViewerTags dataLoaded={isDataLoaded} data={metaData} />
+      <DicomViewerErroredItems data={loadErrorEvents} />
 
       {isLoadSuccessful && (
         <Tooltip title="Dataset loaded successfully">

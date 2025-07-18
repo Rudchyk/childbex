@@ -51,11 +51,13 @@ const Root = styled('div')(() => ({
   },
 }));
 
-interface TagsTableAllProps {
+interface DicomViewerTagsTableProps {
   data: Record<string, unknown>;
 }
 
-export const TagsTableAll: FC<TagsTableAllProps> = ({ data }) => {
+export const DicomViewerTagsTable: FC<DicomViewerTagsTableProps> = ({
+  data,
+}) => {
   const [searchfor, setSearchfor] = useState('');
   const [instanceNumbers, setInstanceNumbers] = useState<number[]>([]);
   const [instanceNumber, setInstanceNumber] = useState(0);

@@ -8,11 +8,13 @@ import ReportGmailerrorredIcon from '@mui/icons-material/ReportGmailerrorred';
 import { DicomLoadErrorEvents, DicomLoadErrorEvent } from './DicomViewer.types';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 
-interface ErroredItemsProps {
+interface DicomViewerErroredItemsProps {
   data: DicomLoadErrorEvents;
 }
 
-export const ErroredItems: FC<ErroredItemsProps> = ({ data }) => {
+export const DicomViewerErroredItems: FC<DicomViewerErroredItemsProps> = ({
+  data,
+}) => {
   const [open, toggleOpen] = useToggle(false);
   const rows = useMemo(
     () => data.map((item) => ({ ...item, id: item.loadid + item.source })),
