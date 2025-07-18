@@ -1,14 +1,11 @@
 'use client';
 
 import { FC, useEffect, useRef, useState } from 'react';
-import { Box, LinearProgress, Stack, Typography } from '@mui/material';
+import { Box, LinearProgress, Stack } from '@mui/material';
 import { App, Index } from 'dwv';
 import { DicomViewerFooter } from './DicomViewerFooter';
 import { DicomViewerTools } from './DicomViewerTools';
-import { useDropbox } from './useDropbox';
 import { DicomViewerSidebar } from './DicomViewerSidebar';
-
-import './DicomViewer.css';
 import {
   DicomLoadErrorEvent,
   DicomLoadErrorEvents,
@@ -18,32 +15,12 @@ import {
   DicomLoadEndEvent,
 } from './DicomViewer.types';
 
+import './DicomViewer.css';
+import { getImageUid } from './DicomViewer.utils';
+import { DicomViewerDropbox } from './DicomViewerDropbox';
+
 interface DwvComponentProps {
   images?: string[];
-}
-
-/**
- * Return the SOP Instance UID (image ID) for the given slice index.
- *
- * @param meta  one element of app.getMetaData(dataId)   (the JSON you pasted)
- * @param slice zero‑based index of the slice now on screen (0,1,2…)
- */
-export function getImageUid(meta: any, slice = 0): string | undefined {
-  const tag = meta['00080018']; // (0008,0018) SOP Instance UID
-  if (!tag) {
-    return;
-  }
-
-  const v = tag.value;
-  // ─── Single‑slice object: value is just an array ──────────────────────────
-  if (Array.isArray(v)) {
-    return v[0];
-  }
-
-  // ─── Multi‑slice: keyed by "1", "2", … ────────────────────────────────────
-  const key = String(slice + 1); // convert 0‑based → 1‑based
-  const arr = (v as Record<string, any>)[key];
-  return Array.isArray(arr) ? arr[0] : undefined;
 }
 
 export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
@@ -54,12 +31,10 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
     ZoomAndPan: {},
     WindowLevel: {},
     Draw: {
-      // options: ['Ruler'],
       options: ['Rectangle'],
       type: 'factory',
     },
   };
-  // const { showDropbox, setupDropbox } = useDropbox();
   const [loadedItemsMapping, setLoadedItemsMapping] = useState<
     Record<string, string>
   >({});
@@ -121,6 +96,11 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       appRef.current.resetLayout();
     }
   };
+  const onLoadFiles = (files: FileList) => {
+    if (appRef.current) {
+      appRef.current.loadFiles(files);
+    }
+  };
 
   useEffect(() => {
     if (appRef.current) {
@@ -133,18 +113,10 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       tools,
     });
 
-    /**
-     * @event type DicomLoadStartEvent
-     */
-    app.addEventListener('loadstart', () => {
-      // showDropbox(app, false);
-    });
     app.addEventListener('loadprogress', (event: DicomLoadProgressEvent) => {
       setLoadProgress(event.loaded);
     });
-    // app.addEventListener('renderend', (event: { dataid: number }) => {});
     app.addEventListener('load', () => {
-      // console.log('load');
       setIsLoadSuccessful(true);
     });
     app.addEventListener('loadend', (event: DicomLoadEndEvent) => {
@@ -184,16 +156,6 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       'positionchange',
       (event: DicomPositionChangeEvent) => {
         setCurrentImageId(event.data.imageUid);
-        // console.table({
-        //   patientName: meta['00100010']?.value?.[0], // (0020,0013) patientName
-        //   instanceNumber: meta['00200013']?.value?.[0], // (0020,0013) InstanceNumber
-        //   sliceLocation: meta['00201041']?.value?.[0], // (0020,1041)
-        //   thickness: meta['00180050']?.value?.[0], // (0018,0050) SliceThickness
-        //   windowCenter: meta['00281050']?.value?.[0], // (0028,1050)
-        //   windowWidth: meta['00281051']?.value?.[0], // (0028,1051)
-        //   sopClass: meta['00080016']?.value?.[0], // (0008,0016)
-        //   uid: imageUid,
-        // });
       }
     );
     app.addEventListener('loaditem', (event: DicomLoadItemEvent) => {
@@ -226,17 +188,9 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       app.loadURLs(images);
     }
     appRef.current = app;
-    // setupDropbox(app);
 
     return () => appRef.current?.reset();
   }, []);
-
-  // const getCurrentImage = (imageId?: string) => {
-  //   if (!imageId) {
-  //     return '';
-  //   }
-  //   return loadedItemsMapping[imageId] || '';
-  // };
 
   useEffect(() => {
     if (isDataLoaded) {
@@ -252,7 +206,6 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       setItems(_loadedItems);
     }
   }, [isDataLoaded]);
-
   return (
     <Stack spacing={2}>
       {loadProgress !== 100 && loadProgress !== 0 && (
@@ -274,20 +227,13 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
         id="layerGroup0"
         sx={{ height: 500, width: '100%' }}
       >
-        <Box id="dropBox"></Box>
+        <DicomViewerDropbox isShow={!items.length} onLoadFiles={onLoadFiles} />
       </Box>
       <DicomViewerSidebar
         app={appRef.current}
         currentImageId={currentImageId}
-        containerId={containerRef.current?.id}
         items={items}
       />
-      {/* <Typography variant="caption" textAlign="center">
-        Source: {getCurrentImage(currentImageId)}
-      </Typography>
-      <Typography variant="caption" textAlign="center">
-        Image UID: {currentImageId}
-      </Typography> */}
       <DicomViewerFooter />
     </Stack>
   );

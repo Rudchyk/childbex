@@ -1,6 +1,5 @@
 'use client';
 
-import styled from '@emotion/styled';
 import {
   Button,
   FormHelperText,
@@ -20,6 +19,7 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import { Control, Controller, FieldValues, Path } from 'react-hook-form';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import DeleteIcon from '@mui/icons-material/Delete';
+import { VisuallyHiddenInput } from '../VisuallyHiddenInput/VisuallyHiddenInput';
 
 export interface UIFileInputProps<T extends FieldValues> {
   onChange?: ChangeEventHandler<HTMLInputElement>;
@@ -35,18 +35,6 @@ export interface UIFileInputProps<T extends FieldValues> {
     formHelperTextProps?: FormHelperTextProps;
   };
 }
-
-const VisuallyHiddenInput = styled('input')({
-  clip: 'rect(0 0 0 0)',
-  clipPath: 'inset(50%)',
-  height: 1,
-  overflow: 'hidden',
-  position: 'absolute',
-  bottom: 0,
-  left: 0,
-  whiteSpace: 'nowrap',
-  width: 1,
-});
 
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) {

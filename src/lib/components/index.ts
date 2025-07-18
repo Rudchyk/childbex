@@ -1,4 +1,5 @@
 export * from './lib/UINextButton/UINextButton';
+export * from './lib/VisuallyHiddenInput/VisuallyHiddenInput';
 export * from './lib/Header/Header';
 export * from './lib/HomeButton/HomeButton';
 export * from './lib/FormUITextField/FormUITextField';

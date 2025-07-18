@@ -20,14 +20,12 @@ export interface Item {
 export interface DicomViewerSidebarProps {
   items: Item[];
   currentImageId?: string;
-  containerId?: string;
   app: App | null;
 }
 
 export const DicomViewerSidebar: FC<DicomViewerSidebarProps> = ({
   items = [],
   currentImageId,
-  containerId,
   app,
 }) => {
   const itemsList = useMemo(() => [...items].reverse(), [items]);
@@ -49,23 +47,20 @@ export const DicomViewerSidebar: FC<DicomViewerSidebarProps> = ({
     }
   }, [currentImageId]);
 
-  if (!containerId) {
-    console.warn('containerId does not exist!');
-    return null;
-  }
-  if (!app) {
-    console.warn('app does not exist!');
-    return null;
-  }
-
   const jumpTo = (i: number) => {
-    const lg = app.getLayerGroupByDivId(containerId);
-    const vl = lg.getActiveViewLayer();
-    const vc = vl.getViewController();
-    const vals = vc.getCurrentIndex().getValues();
-    vals[2] = i;
-    vc.setCurrentIndex(new Index(vals), false);
+    if (app) {
+      const lg = app.getActiveLayerGroup();
+      const vl = lg.getActiveViewLayer();
+      const vc = vl.getViewController();
+      const vals = vc.getCurrentIndex().getValues();
+      vals[2] = i;
+      vc.setCurrentIndex(new Index(vals), false);
+    }
   };
+
+  if (!items.length) {
+    return null;
+  }
 
   return (
     <Box
