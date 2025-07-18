@@ -67,6 +67,8 @@ export const DicomViewerErroredItems: FC<DicomViewerErroredItemsProps> = ({
       </ToggleButton>
       <UIDialog
         slotProps={{ dialogProps: { maxWidth: 'lg' } }}
+        isButtonCancel={false}
+        isButtonPrimary={false}
         open={open}
         onDialogClose={toggleOpen}
         title="Errored Items"

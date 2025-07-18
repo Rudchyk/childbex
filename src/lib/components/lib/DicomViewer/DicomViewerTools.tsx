@@ -18,6 +18,7 @@ import { DicomLoadErrorEvents } from './DicomViewer.types';
 import { DicomViewerTags } from './DicomViewerTags';
 import CheckIcon from '@mui/icons-material/Check';
 import { green } from '@mui/material/colors';
+import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 
 interface DicomViewerToolsProps {
   tools: Record<string, unknown>;
@@ -29,6 +30,7 @@ interface DicomViewerToolsProps {
   isLoadSuccessful: boolean;
   loadErrorEvents: DicomLoadErrorEvents;
   metaData: Record<string, unknown>;
+  onClean?: () => void;
 }
 
 export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
@@ -41,6 +43,7 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
   onReset,
   metaData,
   loadErrorEvents,
+  onClean,
 }) => {
   const handleToolChange = (
     event: React.MouseEvent<HTMLElement>,
@@ -110,6 +113,18 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
             <CheckIcon />
           </Avatar>
         </Tooltip>
+      )}
+
+      {!!onClean && (
+        <ToggleButton
+          size="small"
+          value="clean"
+          title="Clean"
+          disabled={!isDataLoaded}
+          onChange={onClean}
+        >
+          <HighlightOffIcon />
+        </ToggleButton>
       )}
     </Stack>
   );

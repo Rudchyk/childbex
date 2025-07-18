@@ -5,11 +5,13 @@ import {
   Box,
   List,
   ListItem,
+  ListItemIcon,
   ListItemText,
   ListSubheader,
   Paper,
 } from '@mui/material';
 import { App, Index } from 'dwv';
+import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 
 export interface Item {
   imageUid: string;
@@ -71,7 +73,7 @@ export const DicomViewerSidebar: FC<DicomViewerSidebarProps> = ({
         top: '10%',
         bottom: '10%',
         right: 5,
-        width: 150,
+        width: 200,
       }}
     >
       <List sx={{ height: '100%', overflow: 'auto' }}>
@@ -95,7 +97,10 @@ export const DicomViewerSidebar: FC<DicomViewerSidebarProps> = ({
                     : undefined,
               }}
             >
-              <ListItemText sx={{ textAlign: 'center' }} primary={name} />
+              <ListItemIcon>
+                <InsertDriveFileIcon />
+              </ListItemIcon>
+              <ListItemText primary={name} />
             </ListItem>
           );
         })}

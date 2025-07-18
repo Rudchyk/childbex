@@ -28,7 +28,13 @@ export const DicomViewerTags: FC<DicomViewerTagsProps> = ({
       >
         <LibraryBooksIcon />
       </ToggleButton>
-      <UIDialog open={open} onDialogClose={toggleOpen} title="DICOM Tags">
+      <UIDialog
+        open={open}
+        isButtonCancel={false}
+        isButtonPrimary={false}
+        onDialogClose={toggleOpen}
+        title="DICOM Tags"
+      >
         <DicomViewerTagsTable data={data} />
       </UIDialog>
     </>

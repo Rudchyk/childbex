@@ -21,9 +21,13 @@ import { DicomViewerDropbox } from './DicomViewerDropbox';
 
 interface DwvComponentProps {
   images?: string[];
+  isClean?: boolean;
 }
 
-export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
+export const DicomViewer: FC<DwvComponentProps> = ({
+  images = [],
+  isClean,
+}) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<App>(null);
   const tools = {
@@ -46,6 +50,7 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
     source: string;
     index: number;
   }
+  const defaultSelectedTool = 'Select Tool';
   const [items, setItems] = useState<Item[]>([]);
   const [sliceCount, setSliceCount] = useState<number>(0);
   const [loadErrorEvents, setLoadErrorEvents] = useState<DicomLoadErrorEvents>(
@@ -53,8 +58,9 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
   );
   const [loadProgress, setLoadProgress] = useState(0);
   const [isLoadSuccessful, setIsLoadSuccessful] = useState(false);
+  const [isShowDropbox, setIsShowDropbox] = useState(false);
   const [canScroll, setCanScroll] = useState(false);
-  const [selectedTool, setSelectedTool] = useState('Select Tool');
+  const [selectedTool, setSelectedTool] = useState(defaultSelectedTool);
   const [canWindowLevel, setCanWindowLevel] = useState(false);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [currentMetaData, setCurrentMetaData] = useState<
@@ -100,6 +106,22 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
     if (appRef.current) {
       appRef.current.loadFiles(files);
     }
+  };
+  const onClean = () => {
+    appRef.current?.reset();
+    setItems([]);
+    setSliceCount(0);
+    setLoadProgress(0);
+    setIsLoadSuccessful(false);
+    setIsShowDropbox(true);
+    setCurrentImageId(undefined);
+    setCurrentMetaData({});
+    setIsDataLoaded(false);
+    setCanWindowLevel(false);
+    setSelectedTool(defaultSelectedTool);
+    setCanScroll(false);
+    setLoadedSlicesMapping({});
+    setLoadedItemsMapping({});
   };
 
   useEffect(() => {
@@ -151,6 +173,7 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       setCurrentImageId(_loadedSlicesMapping[sliceCount - 1]);
       setIsDataLoaded(true);
       setCurrentMetaData(metaRoot);
+      setIsShowDropbox(sliceCount === 0);
     });
     app.addEventListener(
       'positionchange',
@@ -186,6 +209,8 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
 
     if (images?.length) {
       app.loadURLs(images);
+    } else {
+      setIsShowDropbox(true);
     }
     appRef.current = app;
 
@@ -206,6 +231,7 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
       setItems(_loadedItems);
     }
   }, [isDataLoaded]);
+
   return (
     <Stack spacing={2}>
       {loadProgress !== 100 && loadProgress !== 0 && (
@@ -221,13 +247,14 @@ export const DicomViewer: FC<DwvComponentProps> = ({ images = [] }) => {
         metaData={currentMetaData}
         isLoadSuccessful={isLoadSuccessful}
         loadErrorEvents={loadErrorEvents}
+        onClean={isClean ? onClean : undefined}
       />
       <Box
         ref={containerRef}
         id="layerGroup0"
         sx={{ height: 500, width: '100%' }}
       >
-        <DicomViewerDropbox isShow={!items.length} onLoadFiles={onLoadFiles} />
+        <DicomViewerDropbox isShow={isShowDropbox} onLoadFiles={onLoadFiles} />
       </Box>
       <DicomViewerSidebar
         app={appRef.current}
