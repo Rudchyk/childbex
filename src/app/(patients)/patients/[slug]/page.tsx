@@ -18,7 +18,8 @@ export default async function Page({ params }: PageProps) {
   }
 
   // const images = (patient.images || []).slice(1, 10);
-  const images = (patient.images || []).slice(1, -1);
+  const images = (patient.images || []).slice(0, 30);
+  // const images = (patient.images || []).slice(1, -1);
   // const images = (patient.images || []).slice(200, 400);
   // const images = patient.images;
   return (

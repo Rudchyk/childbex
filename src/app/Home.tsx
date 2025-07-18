@@ -22,7 +22,7 @@ export const Home: FC = () => {
       icon: <PeopleIcon />,
     },
     {
-      href: paths.dicomViewer,
+      href: paths.dwv,
       label: 'Dicom viewer',
       icon: <BiotechIcon />,
     },
