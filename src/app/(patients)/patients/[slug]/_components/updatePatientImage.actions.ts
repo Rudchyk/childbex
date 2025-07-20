@@ -13,6 +13,8 @@ import { authOptions } from '@/lib/auth/auth.options';
 export interface UpdatePatientImageActionState {
   status: UpdatePatientImageActionStates;
   message?: string;
+  source?: string;
+  type?: PatientImageTypes;
 }
 
 export interface UpdatePatientImageData {
@@ -45,7 +47,11 @@ export const updatePatientImage = async (
 
     await patientImage.update({ type });
 
-    return { status: UpdatePatientImageActionStates.SUCCESS };
+    return {
+      status: UpdatePatientImageActionStates.SUCCESS,
+      source: patientImage.source,
+      type,
+    };
   } catch (error) {
     if (error instanceof SequelizeValidationError) {
       if (error.name === 'SequelizeUniqueConstraintError') {

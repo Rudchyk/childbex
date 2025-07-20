@@ -1,7 +1,13 @@
 'use client';
 
 import { FormControlLabel, Stack, Switch } from '@mui/material';
-import { FC, useActionState, useEffect, startTransition } from 'react';
+import {
+  FC,
+  useActionState,
+  useEffect,
+  startTransition,
+  useState,
+} from 'react';
 import { UpdatePatientImageActionStates } from './UpdatePatientImageActionStates.enum';
 import { PatientImage, PatientImageTypes } from '@/types';
 import {
@@ -10,14 +16,16 @@ import {
   UpdatePatientImageData,
 } from './updatePatientImage.actions';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
-import { useRouter } from 'next/navigation';
 
 interface PatientDWVToolbarProps {
-  item?: PatientImage;
+  currentItem?: PatientImage;
+  onItemUpdate: (source: string, type: PatientImageTypes) => void;
 }
 
-export const PatientDWVToolbar: FC<PatientDWVToolbarProps> = ({ item }) => {
-  const router = useRouter();
+export const PatientDWVToolbar: FC<PatientDWVToolbarProps> = ({
+  currentItem: _currentItem,
+  onItemUpdate,
+}) => {
   const [state, formAction] = useActionState<
     UpdatePatientImageActionState,
     UpdatePatientImageData
@@ -25,16 +33,18 @@ export const PatientDWVToolbar: FC<PatientDWVToolbarProps> = ({ item }) => {
     status: UpdatePatientImageActionStates.IDLE,
   });
   const { notifyError, notifySuccess, notifyWarning } = useNotifications();
+  const [currentItem, setCurrentItem] = useState(_currentItem);
   const handleChange = () => {
-    if (item) {
+    if (currentItem) {
       startTransition(() => {
-        formAction({
-          id: item.id,
+        const data = {
+          id: currentItem.id,
           type:
-            item.type === PatientImageTypes.ANOMALY
+            currentItem.type === PatientImageTypes.ANOMALY
               ? PatientImageTypes.NORMAL
               : PatientImageTypes.ANOMALY,
-        });
+        };
+        formAction(data);
       });
     }
   };
@@ -51,18 +61,35 @@ export const PatientDWVToolbar: FC<PatientDWVToolbarProps> = ({ item }) => {
         break;
       case UpdatePatientImageActionStates.SUCCESS:
         notifySuccess('Patient image is updated successfully!');
-        window.location.reload();
+        if (state.source && state.type && currentItem) {
+          onItemUpdate(state.source, state.type);
+          setCurrentItem({
+            ...currentItem,
+            type: state.type,
+          });
+        }
         break;
       default:
         break;
     }
   }, [state]);
 
+  useEffect(() => {
+    setCurrentItem(_currentItem);
+  }, [_currentItem]);
+
+  if (!currentItem) {
+    return null;
+  }
+
   return (
     <Stack direction="row" justifyContent="center">
       <FormControlLabel
         control={
-          <Switch onChange={handleChange} checked={item?.type === 'anomaly'} />
+          <Switch
+            onChange={handleChange}
+            checked={currentItem.type === PatientImageTypes.ANOMALY}
+          />
         }
         label="Anomaly"
       />

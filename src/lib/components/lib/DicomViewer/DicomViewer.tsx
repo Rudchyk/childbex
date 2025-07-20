@@ -31,6 +31,7 @@ interface DicomViewerProps {
   isClean?: boolean;
   onCurrentItemChange?: (source: string) => void;
   toolbar?: ReactElement | ReactNode;
+  sidebarItemIcon?: (source: string) => ReactElement;
 }
 
 export const DicomViewer: FC<DicomViewerProps> = ({
@@ -38,6 +39,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   isClean,
   onCurrentItemChange,
   toolbar,
+  sidebarItemIcon,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<App>(null);
@@ -279,6 +281,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
         app={appRef.current}
         currentImageId={currentImageId}
         items={items}
+        icon={sidebarItemIcon}
       />
       <DicomViewerFooter />
     </Stack>

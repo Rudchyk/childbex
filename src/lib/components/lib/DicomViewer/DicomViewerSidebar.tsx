@@ -1,6 +1,6 @@
 'use client';
 
-import { FC, useLayoutEffect, useMemo, useRef } from 'react';
+import { FC, ReactElement, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   Box,
   List,
@@ -23,11 +23,13 @@ export interface DicomViewerSidebarProps {
   items: Item[];
   currentImageId?: string;
   app: App | null;
+  icon?: (source: string) => ReactElement;
 }
 
 export const DicomViewerSidebar: FC<DicomViewerSidebarProps> = ({
   items = [],
   currentImageId,
+  icon = () => <InsertDriveFileIcon />,
   app,
 }) => {
   const itemsList = useMemo(() => [...items].reverse(), [items]);
@@ -97,9 +99,7 @@ export const DicomViewerSidebar: FC<DicomViewerSidebarProps> = ({
                     : undefined,
               }}
             >
-              <ListItemIcon>
-                <InsertDriveFileIcon />
-              </ListItemIcon>
+              <ListItemIcon>{icon(source)}</ListItemIcon>
               <ListItemText primary={name} />
             </ListItem>
           );
