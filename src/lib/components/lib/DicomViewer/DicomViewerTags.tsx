@@ -34,6 +34,11 @@ export const DicomViewerTags: FC<DicomViewerTagsProps> = ({
         isButtonPrimary={false}
         onDialogClose={toggleOpen}
         title="DICOM Tags"
+        slotProps={{
+          dialogProps: {
+            maxWidth: 'lg',
+          },
+        }}
       >
         <DicomViewerTagsTable data={data} />
       </UIDialog>

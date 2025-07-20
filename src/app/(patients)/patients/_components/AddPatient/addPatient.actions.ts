@@ -8,7 +8,11 @@ import {
 import { ValidationError } from 'yup';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
 import { PatientModel } from '@/db/models/Patient.model';
-import { PatientImageModel } from '@/db/models/PatientImage.model';
+import {
+  PatientImageModel,
+  PatientImageModelCreationAttributes,
+  PatientImageStates,
+} from '@/db/models/PatientImage.model';
 import { AddPatientActionStates } from './AddPatientActionStates.enum';
 import { toSlugIfCyr, unpackArchive, packArchive } from '@/lib/utils';
 import { getServerSession } from 'next-auth';
@@ -16,6 +20,7 @@ import { authOptions } from '@/lib/auth/auth.options';
 import path from 'path';
 import fs from 'fs';
 import { ARCHIVES_ROOT, UPLOAD_ROOT } from '@/lib/constants/constants';
+import { clusterByOrientation } from '@/lib/services/dicom.service';
 import { tmpdir } from 'os';
 
 export interface AddPatientActionState {
@@ -98,12 +103,47 @@ export const addPatient = async (
       fs.unlinkSync(tmp);
       await packArchive(destDir, path.join(ARCHIVES_ROOT, slug + '.tgz'));
       const imagesList = fs.readdirSync(destDir);
-      await PatientImageModel.bulkCreate(
-        imagesList.map((imageName) => ({
+      const inputFiles = imagesList.map((f) => path.join(destDir, f));
+      const result = clusterByOrientation(inputFiles);
+      const brokenItemsMapping = Object.fromEntries(
+        (result?.broken || []).map((item) => {
+          const parsedFile = path.parse(item.file);
+          return [parsedFile.name, item.reason];
+        })
+      );
+      const usableItemsMapping: Record<
+        string,
+        { geometry: string; cluster: string }
+      > = {};
+      result?.clusters.forEach(({ files = [], id, geometry }) => {
+        files.forEach(({ file }) => {
+          const parsedFile = path.parse(file);
+          usableItemsMapping[parsedFile.name] = {
+            cluster: String(id),
+            geometry: JSON.stringify(geometry),
+          };
+        });
+      });
+      const patientImages = imagesList.map((imageName) => {
+        const base: PatientImageModelCreationAttributes = {
           source: `/uploads/${slug}/${imageName}`,
           patient_id: patient.id,
-        }))
-      );
+          state: PatientImageStates.USABLE,
+        };
+        const reason = brokenItemsMapping[imageName];
+        if (reason) {
+          base.state = PatientImageStates.BROKEN;
+          base.notes = reason;
+        } else {
+          const usable = usableItemsMapping[imageName];
+          base.cluster = usable?.cluster;
+          base.geometry = usable?.geometry;
+        }
+
+        return base as PatientImageModelCreationAttributes;
+      });
+
+      await PatientImageModel.bulkCreate(patientImages);
     }
     return { status: AddPatientActionStates.SUCCESS };
   } catch (error) {

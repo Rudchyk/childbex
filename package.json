@@ -30,6 +30,7 @@
     "copy-webpack-plugin": "^13.0.0",
     "cyrillic-doctor": "^1.0.3",
     "date-fns": "^4.1.0",
+    "dicom-parser": "^1.8.21",
     "dwv": "^0.32.0",
     "lodash": "^4.17.21",
     "next": "15.3.5",

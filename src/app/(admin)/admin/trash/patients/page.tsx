@@ -1,12 +1,12 @@
 import { syncDb } from '@/db';
 import { TrashedPatients } from './_components/TrashedPatients';
-import { PatientModel } from '@/db/models/Patient.model';
 import { Stack, Typography } from '@mui/material';
 import { Op } from 'sequelize';
+import { findExtendedPatients } from '@/lib/services/patients.service';
 
 const Page: React.FC = async () => {
   await syncDb();
-  const result = await PatientModel.findExtendedPatients({
+  const result = await findExtendedPatients({
     paranoid: false,
     where: { deletedAt: { [Op.ne]: null } },
   });

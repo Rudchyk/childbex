@@ -1,12 +1,16 @@
 import { DataTypes, Model, Optional } from 'sequelize';
 import { sequelize } from '@/db';
-import { PatientImageModelAttributes, PatientImageTypes } from '@/types';
+import {
+  PatientImageModelAttributes,
+  PatientImageStates,
+  PatientImageTypes,
+} from '@/types';
 import { PatientModel } from './Patient.model';
 import fs from 'fs';
 
 export * from '@/types/lib/PatientImage.types';
 
-type PatientImageModelCreationAttributes = Optional<
+export type PatientImageModelCreationAttributes = Optional<
   PatientImageModelAttributes,
   'id' | 'type'
 >;
@@ -22,7 +26,10 @@ export class PatientImageModel
   declare source: string;
   declare type: PatientImageTypes;
   declare patient_id: string;
+  declare state: PatientImageStates;
   declare notes?: string;
+  declare cluster?: string;
+  declare geometry?: string;
 }
 
 PatientImageModel.init(
@@ -51,8 +58,20 @@ PatientImageModel.init(
       allowNull: false,
       defaultValue: PatientImageTypes.NORMAL,
     },
+    state: {
+      type: DataTypes.ENUM(...Object.values(PatientImageStates)),
+      allowNull: false,
+    },
     notes: {
       type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    cluster: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    geometry: {
+      type: DataTypes.STRING,
       allowNull: true,
     },
   },
