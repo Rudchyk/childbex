@@ -2,7 +2,7 @@
 
 import { ReactNode, FC } from 'react';
 import { Box, Container, ContainerProps } from '@mui/material';
-import { Header, Breadcrumbs } from '@/lib/components';
+import { Header, Breadcrumbs } from '../../../components';
 
 export interface DefaultLayoutProps {
   children: ReactNode;

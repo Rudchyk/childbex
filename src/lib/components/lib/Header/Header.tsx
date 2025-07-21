@@ -1,9 +1,9 @@
 'use client';
 
 import { AppBar, Toolbar, Typography, Stack } from '@mui/material';
-import { AuthUser } from '@/lib/components';
+import { AuthUser } from '../AuthUser/AuthUser';
 import NextLink from 'next/link';
-import { ThemeSwitcher } from '@/lib/modules/ThemeModule';
+import { ThemeSwitcher } from '../../../modules/ThemeModule/ThemeSwitcher';
 
 export const Header = () => {
   return (

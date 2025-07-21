@@ -3,7 +3,7 @@
 import { Box, ToggleButton } from '@mui/material';
 import { FC, useMemo } from 'react';
 import { useToggle } from 'usehooks-ts';
-import { UIDialog } from '@/lib/components';
+import { UIDialog } from '../UIDialog/UIDialog';
 import ReportGmailerrorredIcon from '@mui/icons-material/ReportGmailerrorred';
 import { DicomLoadErrorEvents, DicomLoadErrorEvent } from './DicomViewer.types';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';

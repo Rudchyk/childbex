@@ -3,7 +3,7 @@
 import { Chip, Stack, Typography } from '@mui/material';
 import { notFound } from 'next/navigation';
 import { Patient } from './_components/Patient';
-import { findExtendedPatient } from '@/lib/services/patients.service';
+import { findExtendedPatient } from '../../../../../lib/services/patients.service';
 import { groupBy } from 'lodash';
 
 interface PageProps {

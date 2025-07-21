@@ -14,8 +14,9 @@ import { AddPatient } from './AddPatient/AddPatient';
 import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
-import { ExtendedPatient, UserRoles } from '@/types';
-import { useNotifications } from '@/lib/modules/NotificationsModule';
+import { UserRoles } from '../../../../db/models/User.model';
+import { ExtendedPatient } from '../../../../types';
+import { useNotifications } from '../../../../lib/modules/NotificationsModule';
 import {
   UpdatePatientData,
   UpdatePatientActionState,
@@ -26,7 +27,7 @@ import { DeletePatient } from './DeletePatient/DeletePatient';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
-import { paths } from '@/lib/constants/paths';
+import { paths } from '../../../../lib/constants/paths';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import NextLink from 'next/link';
 

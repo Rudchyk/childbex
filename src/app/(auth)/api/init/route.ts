@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { UserModel, UserRoles } from '@/db/models/User.model';
+import { UserModel, UserRoles } from '../../../../db/models/User.model';
 
 export async function GET() {
   try {

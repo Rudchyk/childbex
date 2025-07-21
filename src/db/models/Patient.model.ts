@@ -1,9 +1,9 @@
 import { DataTypes, Model, Optional } from 'sequelize';
-import { sequelize } from '@/db';
-import { PatientModelAttributes } from '@/types';
+import { sequelize } from '../../db';
+import { PatientModelAttributes } from '../../types';
 import { UserModel } from './User.model';
 
-export * from '@/types/lib/Patient.types';
+export * from '../../types/lib/Patient.types';
 
 type PatientModelCreationAttributes = Optional<PatientModelAttributes, 'id'>;
 

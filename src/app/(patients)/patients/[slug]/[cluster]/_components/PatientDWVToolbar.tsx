@@ -9,13 +9,13 @@ import {
   useState,
 } from 'react';
 import { UpdatePatientImageActionStates } from './UpdatePatientImageActionStates.enum';
-import { PatientImage, PatientImageTypes } from '@/types';
+import { PatientImage, PatientImageTypes } from '../../../../../../types';
 import {
   updatePatientImage,
   UpdatePatientImageActionState,
   UpdatePatientImageData,
 } from './updatePatientImage.actions';
-import { useNotifications } from '@/lib/modules/NotificationsModule';
+import { useNotifications } from '../../../../../../lib/modules/NotificationsModule';
 
 interface PatientDWVToolbarProps {
   currentItem?: PatientImage;

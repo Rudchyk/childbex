@@ -1,7 +1,7 @@
 import { FC, startTransition, useActionState, useEffect } from 'react';
 import { Tooltip, useTheme } from '@mui/material';
-import { DialogAreYouSure } from '@/lib/components';
-import { useNotifications } from '@/lib/modules/NotificationsModule';
+import { DialogAreYouSure } from '../../../../../../lib/components';
+import { useNotifications } from '../../../../../../lib/modules/NotificationsModule';
 import { DeleteUserActionStates } from './DeleteUserActionStates.enum';
 import { DeleteProfileActionState, deleteProfile } from './deleteUser.action';
 import { useToggle } from 'usehooks-ts';

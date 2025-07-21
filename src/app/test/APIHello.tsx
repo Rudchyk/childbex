@@ -1,7 +1,7 @@
 'use client';
 
 import { FC } from 'react';
-import { useGetHelloQuery } from '@/lib/store/services/apiService';
+import { useGetHelloQuery } from '../../lib/store/services/apiService';
 import { Alert, CircularProgress } from '@mui/material';
 
 export const APIHello: FC = () => {

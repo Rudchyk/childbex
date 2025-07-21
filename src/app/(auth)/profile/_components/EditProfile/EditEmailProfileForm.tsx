@@ -3,7 +3,7 @@
 import React, { FC } from 'react';
 import { SubmitHandler, SubmitErrorHandler, useForm } from 'react-hook-form';
 import { Box, IconButton, InputAdornment } from '@mui/material';
-import { FormUITextField } from '@/lib/components';
+import { FormUITextField } from '../../../../../lib/components';
 import {
   editEmailProfileFormSchema,
   EditEmailProfileFormData,

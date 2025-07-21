@@ -1,4 +1,4 @@
-import { DefaultLayout } from '@/lib/layouts';
+import { DefaultLayout } from '../../../lib/layouts';
 
 export default async function Layout({
   children,

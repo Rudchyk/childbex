@@ -1,4 +1,4 @@
-import { useNotifications } from '@/lib/modules/NotificationsModule';
+import { useNotifications } from '../../../../../lib/modules/NotificationsModule';
 import { FC, startTransition, useActionState, useEffect } from 'react';
 import {
   changePasswordProfile,
@@ -9,9 +9,9 @@ import { ChangePasswordProfileActionStates } from './ChangePasswordProfileAction
 import { ChangePasswordProfileFormData } from './changePasswordProfile.schema';
 import { useToggle } from 'usehooks-ts';
 import { signOut } from 'next-auth/react';
-import { paths } from '@/lib/constants/paths';
+import { paths } from '../../../../../lib/constants/paths';
 import { Button } from '@mui/material';
-import { DialogForm } from '@/lib/components';
+import { DialogForm } from '../../../../../lib/components';
 import { ChangePasswordProfileForm } from './ChangePasswordProfileForm';
 import { encode } from 'next-auth/jwt';
 import { SubmitHandler } from 'react-hook-form';

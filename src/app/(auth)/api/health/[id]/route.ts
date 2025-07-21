@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { UserModel } from '@/db/models/User.model';
-import { syncDb } from '@/db';
+import { UserModel } from '../../../../../db/models/User.model';
+import { syncDb } from '../../../../../db';
 
 export async function GET(
   request: Request,

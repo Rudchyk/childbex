@@ -1,13 +1,13 @@
 'use server';
 
-import { syncDb } from '@/db';
-import { PatientModel } from '@/db/models/Patient.model';
+import { syncDb } from '../../../../../../db';
+import { PatientModel } from '../../../../../../db/models/Patient.model';
 import { TrashedPatientsActionStates } from './TrashedPatientsActionStates.enum';
 import { TrashedPatientsActionTypes } from './TrashedPatientsActionTypes.enum';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
 import fs from 'fs';
 import path from 'path';
-import { UPLOAD_ROOT } from '@/lib/constants/constants';
+import { UPLOAD_ROOT } from '../../../../../../lib/constants/constants';
 
 export interface TrashedPatientsActionState {
   status: TrashedPatientsActionStates;

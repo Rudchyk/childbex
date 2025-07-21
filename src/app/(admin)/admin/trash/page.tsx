@@ -6,7 +6,7 @@ import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import PeopleIcon from '@mui/icons-material/People';
 import NextLink from 'next/link';
-import { paths } from '@/lib/constants/paths';
+import { paths } from '../../../../lib/constants/paths';
 import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
 
 const Page: React.FC = (): JSX.Element => {

@@ -11,8 +11,9 @@ import {
 } from '@mui/material';
 import { FC } from 'react';
 import BiotechIcon from '@mui/icons-material/Biotech';
-import { paths } from '@/lib/constants/paths';
+
 import EmojiSymbolsIcon from '@mui/icons-material/EmojiSymbols';
+import { paths } from '../lib/constants/paths';
 
 export const Home: FC = () => {
   const links = [

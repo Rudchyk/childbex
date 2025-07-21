@@ -1,26 +1,33 @@
 'use server';
 
-import { sequelize } from '@/db';
+import { sequelize } from '../../../../../db';
 import {
   addPatientFormDataSchema,
   AddPatientFormData,
 } from './addPatientForm.schema';
 import { ValidationError } from 'yup';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
-import { PatientModel } from '@/db/models/Patient.model';
+import { PatientModel } from '../../../../../db/models/Patient.model';
 import {
   PatientImageModel,
   PatientImageModelCreationAttributes,
   PatientImageStates,
-} from '@/db/models/PatientImage.model';
+} from '../../../../../db/models/PatientImage.model';
 import { AddPatientActionStates } from './AddPatientActionStates.enum';
-import { toSlugIfCyr, unpackArchive, packArchive } from '@/lib/utils';
+import {
+  toSlugIfCyr,
+  unpackArchive,
+  packArchive,
+} from '../../../../../lib/utils';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth/auth.options';
+import { authOptions } from '../../../../../lib/auth/auth.options';
 import path from 'path';
 import fs from 'fs';
-import { ARCHIVES_ROOT, UPLOAD_ROOT } from '@/lib/constants/constants';
-import { clusterByOrientation } from '@/lib/services/dicom.service';
+import {
+  ARCHIVES_ROOT,
+  UPLOAD_ROOT,
+} from '../../../../../lib/constants/constants';
+import { clusterByOrientation } from '../../../../../lib/services/dicom.service';
 import { tmpdir } from 'os';
 
 export interface AddPatientActionState {

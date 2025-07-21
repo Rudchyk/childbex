@@ -1,5 +1,5 @@
-import { syncDb } from '@/db';
-import { UserModel } from '@/db/models/User.model';
+import { syncDb } from '../../../../db';
+import { UserModel } from '../../../../db/models/User.model';
 import { Stack, Typography } from '@mui/material';
 import { Users } from './_components/Users';
 

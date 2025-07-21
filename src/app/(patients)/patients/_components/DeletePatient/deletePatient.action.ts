@@ -1,8 +1,8 @@
 'use server';
 
-import { syncDb } from '@/db';
+import { syncDb } from '../../../../../db';
 import { DeletePatientActionStates } from './DeletePatientActionStates.enum';
-import { PatientModel } from '@/db/models/Patient.model';
+import { PatientModel } from '../../../../../db/models/Patient.model';
 
 export interface DeleteProfileActionState {
   status: DeletePatientActionStates;

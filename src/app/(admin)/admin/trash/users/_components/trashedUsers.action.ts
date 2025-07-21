@@ -1,7 +1,7 @@
 'use server';
 
-import { syncDb } from '@/db';
-import { UserModel } from '@/db/models/User.model';
+import { syncDb } from '../../../../../../db';
+import { UserModel } from '../../../../../../db/models/User.model';
 import { TrashedUsersActionStates } from './TrashedUsersActionStates.enum';
 import { TrashedUsersActionTypes } from './TrashedUsersActionTypes.enum';
 import { ValidationError as SequelizeValidationError } from 'sequelize';

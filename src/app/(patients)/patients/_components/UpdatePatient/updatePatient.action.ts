@@ -1,10 +1,10 @@
 'use server';
 
-import { syncDb } from '@/db';
-import { PatientModel, Patient } from '@/db/models/Patient.model';
+import { syncDb } from '../../../../../db';
+import { PatientModel, Patient } from '../../../../../db/models/Patient.model';
 import { UpdatePatientActionStates } from './UpdatePatientActionStates.enum';
 import * as Yup from 'yup';
-import { toSlugIfCyr } from '@/lib/utils';
+import { toSlugIfCyr } from '../../../../../lib/utils';
 
 export interface UpdatePatientActionState {
   status: UpdatePatientActionStates;

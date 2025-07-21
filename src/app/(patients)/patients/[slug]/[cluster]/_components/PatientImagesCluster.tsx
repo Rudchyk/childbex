@@ -1,9 +1,9 @@
 'use client';
 
-import { DicomViewer } from '@/lib/components';
+import { DicomViewer } from '../../../../../../lib/components';
 import { FC, useState } from 'react';
 import { PatientDWVToolbar } from './PatientDWVToolbar';
-import { PatientImage, PatientImageTypes } from '@/types';
+import { PatientImage, PatientImageTypes } from '../../../../../../types';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 

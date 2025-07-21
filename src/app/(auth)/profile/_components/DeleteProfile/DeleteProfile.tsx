@@ -1,8 +1,8 @@
 import { FC, startTransition, useActionState, useEffect } from 'react';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { Button } from '@mui/material';
-import { DialogAreYouSure } from '@/lib/components';
-import { useNotifications } from '@/lib/modules/NotificationsModule';
+import { DialogAreYouSure } from '../../../../../lib/components';
+import { useNotifications } from '../../../../../lib/modules/NotificationsModule';
 import { DeleteProfileActionStates } from './DeleteProfileActionStates.enum';
 import {
   DeleteProfileActionState,
@@ -10,8 +10,8 @@ import {
 } from './deleteProfile.action';
 import { useToggle } from 'usehooks-ts';
 import { useSession, signOut } from 'next-auth/react';
-import { paths } from '@/lib/constants/paths';
-import { UserRoles } from '@/types';
+import { paths } from '../../../../../lib/constants/paths';
+import { UserRoles } from '../../../../../types';
 
 interface DeleteProfileProps {
   id: string;

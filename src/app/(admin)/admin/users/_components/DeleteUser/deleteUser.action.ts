@@ -1,7 +1,7 @@
 'use server';
 
-import { syncDb } from '@/db';
-import { UserModel, UserRoles } from '@/db/models/User.model';
+import { syncDb } from '../../../../../../db';
+import { UserModel, UserRoles } from '../../../../../../db/models/User.model';
 import { DeleteUserActionStates } from './DeleteUserActionStates.enum';
 
 export interface DeleteProfileActionState {

@@ -3,11 +3,14 @@
 import React, { FC, FormEventHandler } from 'react';
 import { SubmitHandler, SubmitErrorHandler, useForm } from 'react-hook-form';
 import { Box, Button } from '@mui/material';
-import { FormUITextField, FormUIPasswordField } from '@/lib/components';
-import { LoginFormData, loginFormSchema } from '@/lib/auth/loginForm.schema';
+import { FormUITextField, FormUIPasswordField } from '../../lib/components';
+import {
+  LoginFormData,
+  loginFormSchema,
+} from '../../lib/auth/loginForm.schema';
 import { yupResolver } from '@hookform/resolvers/yup';
 
-export * from '@/lib/auth/loginForm.schema';
+export * from '../../lib/auth/loginForm.schema';
 
 export interface LoginFormProps {
   onSubmit: SubmitHandler<LoginFormData>;

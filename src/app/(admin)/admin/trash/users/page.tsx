@@ -1,6 +1,6 @@
-import { syncDb } from '@/db';
+import { syncDb } from '../../../../../db';
 import { TrashedUsers } from './_components/TrashedUsers';
-import { UserModel } from '@/db/models/User.model';
+import { UserModel } from '../../../../../db/models/User.model';
 import { Stack, Typography } from '@mui/material';
 import { Op } from 'sequelize';
 

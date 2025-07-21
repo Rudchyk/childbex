@@ -12,8 +12,8 @@ import { AddUser } from './AddUser/AddUser';
 import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
-import { PublicUser, UserRoles } from '@/types';
-import { useNotifications } from '@/lib/modules/NotificationsModule';
+import { PublicUser, UserRoles } from '../../../../../types';
+import { useNotifications } from '../../../../../lib/modules/NotificationsModule/useNotifications';
 import {
   UpdateUserData,
   UpdateUserActionState,
@@ -24,7 +24,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import { ChangeUserPassword } from './ChangeUserPassword/ChangeUserPassword';
-import { roleValues } from '@/lib/constants/roleValues';
+import { roleValues } from '../../../../../lib/constants/roleValues';
 import { DeleteUser } from './DeleteUser/DeleteUser';
 
 interface UsersProps {

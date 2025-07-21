@@ -1,9 +1,9 @@
 'use server';
 
-import { syncDb } from '@/db';
+import { syncDb } from '../../../../../../db';
 import { changeUserPasswordFormSchema } from './changeUserPassword.schema';
 import { ValidationError } from 'yup';
-import { UserModel } from '@/db/models/User.model';
+import { UserModel } from '../../../../../../db/models/User.model';
 import { ChangeUserPasswordActionStates } from './ChangeUserPasswordActionStates.enum';
 import { decode } from 'next-auth/jwt';
 

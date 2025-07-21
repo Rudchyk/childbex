@@ -1,7 +1,7 @@
 'use client';
 
 import { FC } from 'react';
-import { PatientImage } from '@/types';
+import { PatientImage } from '../../../../../../types';
 import { Alert, AlertTitle, Stack } from '@mui/material';
 
 interface PatientBrockenImagesClusterProps {

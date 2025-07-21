@@ -1,6 +1,6 @@
 'use client';
 
-import { PublicUser } from '@/types';
+import { PublicUser } from '../../../../types';
 import { Chip, Grid, Stack, TextField, Typography } from '@mui/material';
 import {
   FC,
@@ -15,7 +15,7 @@ import { EditNameProfileForm } from './EditProfile/EditNameProfileForm';
 import { SubmitHandler } from 'react-hook-form';
 import { format } from 'date-fns';
 import { EditProfileActionStates } from './EditProfile/EditProfileActionStates.enum';
-import { useNotifications } from '@/lib/modules/NotificationsModule';
+import { useNotifications } from '../../../../lib/modules/NotificationsModule/useNotifications';
 import { DeleteProfile } from './DeleteProfile/DeleteProfile';
 import { ChangePasswordProfile } from './ChangePasswordProfile/ChangePasswordProfile';
 import {

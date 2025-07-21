@@ -3,14 +3,17 @@
 import { yupResolver } from '@hookform/resolvers/yup';
 import { SubmitErrorHandler, SubmitHandler, useForm } from 'react-hook-form';
 import { FC, useEffect } from 'react';
-import { FormUITextField, FormUIFileInput } from '@/lib/components';
+import {
+  FormUITextField,
+  FormUIFileInput,
+} from '../../../../../lib/components';
 import {
   addPatientFormDataSchema,
   AddPatientFormData,
   accept,
 } from './addPatientForm.schema';
 import { Box } from '@mui/material';
-import { toSlugIfCyr } from '@/lib/utils';
+import { toSlugIfCyr } from '../../../../../lib/utils';
 
 interface AddPatientFormProps {
   onSubmit: SubmitHandler<AddPatientFormData>;

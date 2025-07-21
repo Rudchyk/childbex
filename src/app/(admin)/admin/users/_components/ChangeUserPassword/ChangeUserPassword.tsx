@@ -1,4 +1,4 @@
-import { useNotifications } from '@/lib/modules/NotificationsModule';
+import { useNotifications } from '../../../../../../lib/modules/NotificationsModule';
 import { FC, startTransition, useActionState, useEffect } from 'react';
 import {
   changeUserPassword,
@@ -9,7 +9,7 @@ import { ChangeUserPasswordActionStates } from './ChangeUserPasswordActionStates
 import { ChangeUserPasswordFormData } from './changeUserPassword.schema';
 import { useToggle } from 'usehooks-ts';
 import { Button } from '@mui/material';
-import { DialogForm } from '@/lib/components';
+import { DialogForm } from '../../../../../../lib/components';
 import { ChangeUserPasswordForm } from './ChangeUserPasswordForm';
 import { encode } from 'next-auth/jwt';
 import { SubmitHandler } from 'react-hook-form';

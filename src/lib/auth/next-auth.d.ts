@@ -1,5 +1,5 @@
 import { DefaultSession } from 'next-auth';
-import { PublicUser } from '@/types';
+import { PublicUser } from '../../types';
 
 declare module 'next-auth' {
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type

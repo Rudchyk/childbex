@@ -1,7 +1,11 @@
 'use server';
 
-import { syncDb } from '@/db';
-import { PublicUser, UserModel, UserRoles } from '@/db/models/User.model';
+import { syncDb } from '../../../../../../db';
+import {
+  PublicUser,
+  UserModel,
+  UserRoles,
+} from '../../../../../../db/models/User.model';
 import { UpdateUserActionStates } from './UpdateUserActionStates.enum';
 import * as Yup from 'yup';
 

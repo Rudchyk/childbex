@@ -1,7 +1,7 @@
 'use server';
 
 import { Stack, Typography } from '@mui/material';
-import { DicomViewer } from '@/lib/components';
+import { DicomViewer } from '../../lib/components';
 
 export default async function Page() {
   return (

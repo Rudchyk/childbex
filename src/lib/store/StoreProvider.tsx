@@ -2,8 +2,8 @@
 
 import { useRef } from 'react';
 import { Provider } from 'react-redux';
-import { makeStore, AppStore } from '@/lib/store/store';
-import { BaseState, initializeBase } from '@/lib/store/slices/baseSlice';
+import { makeStore, AppStore } from '../../lib/store/store';
+import { BaseState, initializeBase } from '../../lib/store/slices/baseSlice';
 
 export interface StoreProviderProps {
   children: React.ReactNode;

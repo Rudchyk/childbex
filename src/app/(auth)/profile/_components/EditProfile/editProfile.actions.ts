@@ -1,6 +1,6 @@
 'use server';
 
-import { syncDb } from '@/db';
+import { syncDb } from '../../../../../db';
 import {
   editNameProfileFormSchema,
   EditNameProfileFormData,
@@ -8,7 +8,7 @@ import {
   EditEmailProfileFormData,
 } from './editProfileForms.schemas';
 import { ValidationError } from 'yup';
-import { User, UserModel } from '@/db/models/User.model';
+import { User, UserModel } from '../../../../../db/models/User.model';
 import { EditProfileActionStates } from './EditProfileActionStates.enum';
 
 export interface EditProfileActionState {

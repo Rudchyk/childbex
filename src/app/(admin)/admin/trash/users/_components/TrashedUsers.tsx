@@ -7,7 +7,7 @@ import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
 import { PublicUser, UserRoles } from '../../../../../../types';
-import { useNotifications } from '@/lib/modules/NotificationsModule';
+import { useNotifications } from '../../../../../../lib/modules/NotificationsModule/useNotifications';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { TrashAction } from './TrashAction';
 import { TrashedUsersActionTypes } from './TrashedUsersActionTypes.enum';

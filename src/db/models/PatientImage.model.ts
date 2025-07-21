@@ -1,14 +1,14 @@
 import { DataTypes, Model, Optional } from 'sequelize';
-import { sequelize } from '@/db';
+import { sequelize } from '../../db';
 import {
   PatientImageModelAttributes,
   PatientImageStates,
   PatientImageTypes,
-} from '@/types';
+} from '../../types';
 import { PatientModel } from './Patient.model';
 import fs from 'fs';
 
-export * from '@/types/lib/PatientImage.types';
+export * from '../../types/lib/PatientImage.types';
 
 export type PatientImageModelCreationAttributes = Optional<
   PatientImageModelAttributes,

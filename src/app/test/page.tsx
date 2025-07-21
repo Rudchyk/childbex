@@ -1,4 +1,4 @@
-import { DefaultLayout } from '@/lib/layouts';
+import { DefaultLayout } from '../../lib/layouts';
 import { APIHello } from './APIHello';
 import { Stack } from '@mui/material';
 import { redirect } from 'next/navigation';

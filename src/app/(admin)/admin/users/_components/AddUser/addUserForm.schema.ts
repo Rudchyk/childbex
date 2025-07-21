@@ -1,5 +1,5 @@
-import { roleValues } from '@/lib/constants/roleValues';
-import { UserRoles } from '@/types';
+import { roleValues } from '../../../../../../lib/constants/roleValues';
+import { UserRoles } from '../../../../../../types';
 import * as Yup from 'yup';
 import { InferType } from 'yup';
 

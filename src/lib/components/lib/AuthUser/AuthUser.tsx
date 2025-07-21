@@ -10,11 +10,11 @@ import {
 } from '@mui/material';
 import { useSession, signOut } from 'next-auth/react';
 import CircularProgress from '@mui/material/CircularProgress';
-import { paths } from '@/lib/constants/paths';
+import { paths } from '../../../constants/paths';
 import LogoutIcon from '@mui/icons-material/Logout';
 import NextLink from 'next/link';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
-import { UserRoles } from '@/types';
+import { UserRoles } from '../../../../types';
 import { useRouter } from 'next/navigation';
 import BoltIcon from '@mui/icons-material/Bolt';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';

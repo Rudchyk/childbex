@@ -1,8 +1,8 @@
-import { syncDb } from '@/db';
+import { syncDb } from '../../db';
 import { getServerSession } from 'next-auth';
 import React from 'react';
 import { authOptions } from './auth.options';
-import { UserModel } from '@/db/models/User.model';
+import { UserModel } from '../../db/models/User.model';
 import { signOut } from 'next-auth/react';
 import { AuthProvider } from './AuthProvider';
 

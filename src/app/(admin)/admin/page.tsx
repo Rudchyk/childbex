@@ -7,7 +7,7 @@ import ListItemText from '@mui/material/ListItemText';
 import PeopleIcon from '@mui/icons-material/People';
 import DeleteIcon from '@mui/icons-material/Delete';
 import NextLink from 'next/link';
-import { paths } from '@/lib/constants/paths';
+import { paths } from '../../../lib/constants/paths';
 
 const Page: React.FC = (): JSX.Element => {
   const links = [

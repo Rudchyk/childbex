@@ -1,8 +1,8 @@
-import { syncDb } from '@/db';
+import { syncDb } from '../../../../../db';
 import { TrashedPatients } from './_components/TrashedPatients';
 import { Stack, Typography } from '@mui/material';
 import { Op } from 'sequelize';
-import { findExtendedPatients } from '@/lib/services/patients.service';
+import { findExtendedPatients } from '../../../../../lib/services/patients.service';
 
 const Page: React.FC = async () => {
   await syncDb();

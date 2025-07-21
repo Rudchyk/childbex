@@ -1,11 +1,11 @@
 'use server';
 
-import { sequelize } from '@/db';
+import { sequelize } from '../../../../../../db';
 import { addUserFormDataSchema } from './addUserForm.schema';
 import { decode } from 'next-auth/jwt';
 import { ValidationError } from 'yup';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
-import { UserModel } from '@/db/models/User.model';
+import { UserModel } from '../../../../../../db/models/User.model';
 import { AddUserActionStates } from './AddUserActionStates.enum';
 import { omit } from 'lodash';
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { FC } from 'react';
-import { PatientImage } from '@/types';
+import { PatientImage } from '../../../../../../types';
 import { PatientImagesCluster } from './PatientImagesCluster';
 import { PatientBrockenImagesCluster } from './PatientBrockenImagesCluster';
 

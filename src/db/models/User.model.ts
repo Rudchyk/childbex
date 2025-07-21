@@ -1,10 +1,10 @@
 import { DataTypes, Model, Optional } from 'sequelize';
 import bcrypt from 'bcrypt';
-import { sequelize } from '@/db';
-import { UserModelAttributes, UserRoles, PublicUser } from '@/types';
+import { sequelize } from '../../db';
+import { UserModelAttributes, UserRoles, PublicUser } from '../../types';
 import { omit } from 'lodash';
 
-export * from '@/types/lib/User.types';
+export * from '../../types/lib/User.types';
 
 type UserModelCreationAttributes = Optional<UserModelAttributes, 'id' | 'role'>;
 

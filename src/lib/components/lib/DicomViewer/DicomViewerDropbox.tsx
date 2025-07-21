@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FC, useCallback, useState } from 'react';
 import { Box } from '@mui/material';
-import { VisuallyHiddenInput } from '@/lib/components';
+import { VisuallyHiddenInput } from '../VisuallyHiddenInput/VisuallyHiddenInput';
 
 export interface DicomViewerDropboxProps {
   isShow: boolean;

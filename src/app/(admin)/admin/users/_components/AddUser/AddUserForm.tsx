@@ -8,11 +8,11 @@ import {
   FormUIPasswordField,
   FormUITextField,
   FormUISelect,
-} from '@/lib/components';
+} from '../../../../../../lib/components';
 import { addUserFormDataSchema, AddUserFormData } from './addUserForm.schema';
-import { UserRoles } from '@/types';
+import { UserRoles } from '../../../../../../types';
 import { Box } from '@mui/material';
-import { roleValues } from '@/lib/constants/roleValues';
+import { roleValues } from '../../../../../../lib/constants/roleValues';
 
 interface AddUserFormProps {
   onSubmit: SubmitHandler<AddUserFormData>;

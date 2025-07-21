@@ -11,10 +11,10 @@ import {
   Typography,
 } from '@mui/material';
 import { notFound } from 'next/navigation';
-import { findExtendedPatient } from '@/lib/services/patients.service';
+import { findExtendedPatient } from '../../../../lib/services/patients.service';
 import { groupBy } from 'lodash';
 import NextLink from 'next/link';
-import { paths } from '@/lib/constants/paths';
+import { paths } from '../../../../lib/constants/paths';
 import ImageIcon from '@mui/icons-material/Image';
 
 interface PageProps {

@@ -1,11 +1,11 @@
 import './globals.sass';
 
 import type { Metadata } from 'next';
-import { ThemeProvider } from '@/lib/modules/ThemeModule';
-import { NotificationsProvider } from '@/lib/modules/NotificationsModule';
-import { StoreProvider } from '@/lib/store/StoreProvider';
+import { ThemeProvider } from '../lib/modules/ThemeModule';
+import { NotificationsProvider } from '../lib/modules/NotificationsModule';
+import { StoreProvider } from '../lib/store/StoreProvider';
 import { Roboto } from 'next/font/google';
-import { Auth } from '@/lib/auth/Auth';
+import { Auth } from '../lib/auth/Auth';
 
 export const metadata: Metadata = {
   title: 'ChildBEX',

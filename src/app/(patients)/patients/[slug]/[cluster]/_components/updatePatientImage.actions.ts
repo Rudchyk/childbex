@@ -1,14 +1,14 @@
 'use server';
 
-import { sequelize } from '@/db';
+import { sequelize } from '../../../../../../db';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
 import {
   PatientImageModel,
   PatientImageTypes,
-} from '@/db/models/PatientImage.model';
+} from '../../../../../../db/models/PatientImage.model';
 import { UpdatePatientImageActionStates } from './UpdatePatientImageActionStates.enum';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth/auth.options';
+import { authOptions } from '../../../../../../lib/auth/auth.options';
 
 export interface UpdatePatientImageActionState {
   status: UpdatePatientImageActionStates;

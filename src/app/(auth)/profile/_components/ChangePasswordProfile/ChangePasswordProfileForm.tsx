@@ -3,7 +3,7 @@
 import React, { FC } from 'react';
 import { SubmitHandler, SubmitErrorHandler, useForm } from 'react-hook-form';
 import { Box } from '@mui/material';
-import { FormUIPasswordField } from '@/lib/components';
+import { FormUIPasswordField } from '../../../../../lib/components';
 import {
   changePasswordProfileFormSchema,
   ChangePasswordProfileFormData,

@@ -1,8 +1,8 @@
-import { syncDb } from '@/db';
-import { PatientModel } from '@/db/models/Patient.model';
-import { PatientImageModel } from '@/db/models/PatientImage.model';
-import { UserModel } from '@/db/models/User.model';
-import { ExtendedPatient, PatientModelAttributes } from '@/types';
+import { syncDb } from '../../db';
+import { PatientModel } from '../../db/models/Patient.model';
+import { PatientImageModel } from '../../db/models/PatientImage.model';
+import { UserModel } from '../../db/models/User.model';
+import { ExtendedPatient, PatientModelAttributes } from '../../types';
 import { FindOptions } from 'sequelize';
 
 export const findExtendedPatients = async (
