@@ -12,3 +12,5 @@ export * from './lib/DialogAreYouSure/DialogAreYouSure';
 export * from './lib/FormUISelect/FormUISelect';
 export * from './lib/FormUIFileInput/FormUIFileInput';
 export * from './lib/DicomViewer/DicomViewer';
+export * from './lib/UITabs/UITabs';
+export * from './lib/Breadcrumbs/Breadcrumbs';

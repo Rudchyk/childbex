@@ -7,11 +7,13 @@ import { PatientImage, PatientImageTypes } from '@/types';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 
-interface PatientProps {
+interface PatientImagesClusterProps {
   data: PatientImage[];
 }
 
-export const Patient: FC<PatientProps> = ({ data }) => {
+export const PatientImagesCluster: FC<PatientImagesClusterProps> = ({
+  data,
+}) => {
   const [itemsMapping, setItemsMapping] = useState(
     Object.fromEntries(data.map((item) => [item.source, item]))
   );

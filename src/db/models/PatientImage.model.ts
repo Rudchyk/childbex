@@ -28,8 +28,8 @@ export class PatientImageModel
   declare patient_id: string;
   declare state: PatientImageStates;
   declare notes?: string;
-  declare cluster?: string;
-  declare geometry?: string;
+  declare cluster: number;
+  declare geometry?: object;
 }
 
 PatientImageModel.init(
@@ -67,11 +67,11 @@ PatientImageModel.init(
       allowNull: true,
     },
     cluster: {
-      type: DataTypes.STRING,
-      allowNull: true,
+      type: DataTypes.INTEGER,
+      allowNull: false,
     },
     geometry: {
-      type: DataTypes.STRING,
+      type: DataTypes.JSON,
       allowNull: true,
     },
   },

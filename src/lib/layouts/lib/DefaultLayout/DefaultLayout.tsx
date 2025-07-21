@@ -2,7 +2,7 @@
 
 import { ReactNode, FC } from 'react';
 import { Box, Container, ContainerProps } from '@mui/material';
-import { Header } from '@/lib/components';
+import { Header, Breadcrumbs } from '@/lib/components';
 
 export interface DefaultLayoutProps {
   children: ReactNode;
@@ -19,7 +19,10 @@ export const DefaultLayout: FC<DefaultLayoutProps> = ({
     <>
       {isHeader && <Header />}
       <Container maxWidth="lg" component="main" {...ContainerProps}>
-        <Box py={2}>{children}</Box>
+        <Box py={2}>
+          <Breadcrumbs />
+          {children}
+        </Box>
       </Container>
     </>
   );

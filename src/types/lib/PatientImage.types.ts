@@ -15,8 +15,8 @@ export interface PatientImage {
   patient_id: string;
   notes?: string | null;
   state: PatientImageStates;
-  cluster?: string | null;
-  geometry?: string | null;
+  cluster: number;
+  geometry?: object | null;
 }
 
 export type PatientImageModelAttributes = PatientImage;

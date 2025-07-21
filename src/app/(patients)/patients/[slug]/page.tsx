@@ -1,11 +1,21 @@
 'use server';
 
-import { Stack, Typography } from '@mui/material';
+import {
+  Avatar,
+  List,
+  ListItem,
+  ListItemAvatar,
+  ListItemButton,
+  ListItemText,
+  Stack,
+  Typography,
+} from '@mui/material';
 import { notFound } from 'next/navigation';
-import { Patient } from './_components/Patient';
 import { findExtendedPatient } from '@/lib/services/patients.service';
 import { groupBy } from 'lodash';
-import { PatientImageStates } from '@/types';
+import NextLink from 'next/link';
+import { paths } from '@/lib/constants/paths';
+import ImageIcon from '@mui/icons-material/Image';
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -18,23 +28,33 @@ export default async function Page({ params }: PageProps) {
   if (!patient) {
     return notFound();
   }
-  const usableItems =
-    patient.images?.filter(
-      ({ state }) => state === PatientImageStates.USABLE
-    ) || [];
-  const imagesMapping = groupBy(usableItems, 'cluster');
-  console.log('🚀 ~ Page ~ data:', imagesMapping);
 
-  // const images = (patient.images || []).slice(1, 10);
-  // const data = (patient.images || []).slice(0, 40);
-  // console.log('🚀 ~ Page ~ data:', data);
-  // const images = (patient.images || []).slice(1, -1);
-  // const images = (patient.images || []).slice(200, 400);
-  // const images = patient.images;
+  const imagesMapping = groupBy(patient?.images || [], 'cluster');
   return (
     <Stack spacing={2}>
       <Typography variant="h1">{patient.name}</Typography>
-      <Patient data={imagesMapping[1]} />
+      <nav aria-label="main mailbox folders">
+        <List>
+          {Object.entries(imagesMapping).map(([key, data]) => (
+            <ListItem key={key} disablePadding>
+              <ListItemButton
+                LinkComponent={NextLink}
+                href={`${paths.patients}/${slug}/${key}`}
+              >
+                <ListItemAvatar>
+                  <Avatar>
+                    <ImageIcon />
+                  </Avatar>
+                </ListItemAvatar>
+                <ListItemText
+                  primary={key === '-1' ? `Brocken images` : `Cluster ${key}`}
+                  secondary={`${data.length} images`}
+                />
+              </ListItemButton>
+            </ListItem>
+          ))}
+        </List>
+      </nav>
     </Stack>
   );
 }

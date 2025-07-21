@@ -19,10 +19,12 @@ export const Header = () => {
           }}
           variant="h6"
         >
-          Next App
+          ChildBEX
         </Typography>
         <Stack direction="row" spacing={1} alignItems="center">
-          <span>{process.env.NODE_ENV.toUpperCase()}</span>
+          {process.env.NODE_ENV === 'development' && (
+            <span>{process.env.NODE_ENV.toUpperCase()}</span>
+          )}
           <ThemeSwitcher />
           <AuthUser />
         </Stack>

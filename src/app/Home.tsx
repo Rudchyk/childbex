@@ -26,12 +26,15 @@ export const Home: FC = () => {
       label: 'Dicom viewer',
       icon: <BiotechIcon />,
     },
-    {
+  ];
+
+  if (process.env.NODE_ENV === 'development') {
+    links.push({
       href: paths.test,
       label: 'Test',
       icon: <EmojiSymbolsIcon />,
-    },
-  ];
+    });
+  }
   return (
     <nav aria-label="main mailbox folders">
       <List>

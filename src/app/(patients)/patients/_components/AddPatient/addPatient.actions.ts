@@ -106,21 +106,21 @@ export const addPatient = async (
       const inputFiles = imagesList.map((f) => path.join(destDir, f));
       const result = clusterByOrientation(inputFiles);
       const brokenItemsMapping = Object.fromEntries(
-        (result?.broken || []).map((item) => {
+        result.broken.map((item) => {
           const parsedFile = path.parse(item.file);
           return [parsedFile.name, item.reason];
         })
       );
       const usableItemsMapping: Record<
         string,
-        { geometry: string; cluster: string }
+        { geometry: object; cluster: number }
       > = {};
-      result?.clusters.forEach(({ files = [], id, geometry }) => {
+      result.clusters.forEach(({ files = [], id, geometry }) => {
         files.forEach(({ file }) => {
           const parsedFile = path.parse(file);
           usableItemsMapping[parsedFile.name] = {
-            cluster: String(id),
-            geometry: JSON.stringify(geometry),
+            cluster: id,
+            geometry,
           };
         });
       });
@@ -129,15 +129,17 @@ export const addPatient = async (
           source: `/uploads/${slug}/${imageName}`,
           patient_id: patient.id,
           state: PatientImageStates.USABLE,
+          cluster: 0,
         };
         const reason = brokenItemsMapping[imageName];
         if (reason) {
           base.state = PatientImageStates.BROKEN;
           base.notes = reason;
+          base.cluster = -1;
         } else {
           const usable = usableItemsMapping[imageName];
-          base.cluster = usable?.cluster;
-          base.geometry = usable?.geometry;
+          base.cluster = usable.cluster;
+          base.geometry = usable.geometry;
         }
 
         return base as PatientImageModelCreationAttributes;
