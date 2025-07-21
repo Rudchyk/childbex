@@ -6,7 +6,7 @@ import { FC } from 'react';
 import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
-import { PublicUser, UserRoles } from '@/types';
+import { PublicUser, UserRoles } from '../../../../../../types';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { TrashAction } from './TrashAction';

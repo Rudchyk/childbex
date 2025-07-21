@@ -1,6 +1,6 @@
 import { FC, startTransition, useActionState, useEffect } from 'react';
 import { Tooltip, useTheme } from '@mui/material';
-import { DialogAreYouSure } from '@/lib/components';
+import { DialogAreYouSure } from '../../../../../../lib/components';
 import { useNotifications } from '../../../../../../lib/modules/NotificationsModule/useNotifications';
 import { TrashedUsersActionStates } from './TrashedUsersActionStates.enum';
 import {
