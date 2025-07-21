@@ -25,8 +25,8 @@ export const LoginForm: FC<LoginFormProps> = ({
   const { handleSubmit, control } = useForm<LoginFormData>({
     resolver: yupResolver(loginFormSchema),
     defaultValues: {
-      email: 'sergii.rudchyk@gmail.com', // TODO:
-      password: '111111111', // TODO:
+      email: '',
+      password: '',
     },
   });
   return (
