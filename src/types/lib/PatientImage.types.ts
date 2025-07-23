@@ -1,22 +1,30 @@
-export enum PatientImageTypes {
-  ANOMALY = 'anomaly',
+export enum PatientImageStatus {
+  PENDING = 'pending',
   NORMAL = 'normal',
-}
-
-export enum PatientImageStates {
-  BROKEN = 'broken',
-  USABLE = 'usable',
+  ABNORMAL = 'abnormal',
+  CONFLICTED = 'conflicted',
+  ADMIN_RESOLVED = 'admin_resolved',
 }
 
 export interface PatientImage {
   id: string;
   source: string;
-  type: PatientImageTypes;
-  patient_id: string;
+  patientId: string;
   notes?: string | null;
-  state: PatientImageStates;
-  cluster: number;
-  geometry?: object | null;
+  group?: string | null;
+  cluster?: number | null;
+  isBrocken?: boolean | null;
+  isAbnormal?: boolean | null;
+  isReview: boolean;
+  details?: object | null;
+  status: PatientImageStatus;
+  adminResolutionId?: string | null;
+  resolutionComment?: string | null;
+  resolvedAt?: Date | null;
+  votesCount: number;
+  normalVotes: number;
+  abnormalVotes: number;
+  uncertainVotes: number;
 }
 
 export type PatientImageModelAttributes = PatientImage;

@@ -34,6 +34,7 @@ export interface UIFileInputProps<T extends FieldValues> {
     labelProps?: Omit<TypographyProps, 'children'>;
     formHelperTextProps?: FormHelperTextProps;
   };
+  disabled?: boolean;
 }
 
 const formatFileSize = (bytes: number): string => {
@@ -55,6 +56,7 @@ export const FormUIFileInput = <T extends FieldValues>({
   helperText,
   buttonText = 'Upload file',
   slotsProps = {},
+  disabled,
 }: UIFileInputProps<T>) => {
   return (
     <Controller
@@ -65,6 +67,7 @@ export const FormUIFileInput = <T extends FieldValues>({
           {...slotsProps?.formControlProps}
           error={!!error}
           sx={{ width: '100%' }}
+          disabled={disabled}
         >
           {!!label && <FormLabel>{label}</FormLabel>}
           {value ? (

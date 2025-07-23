@@ -1,4 +1,4 @@
-import { DataTypes, Model, Optional } from 'sequelize';
+import { DataTypes, ForeignKey, Model, Optional } from 'sequelize';
 import { sequelize } from '@/db';
 import { PatientModelAttributes } from '@/types';
 import { UserModel } from './User.model';
@@ -14,8 +14,8 @@ export class PatientModel
   declare id: string;
   declare name: string;
   declare slug: string;
-  declare notes?: string;
-  declare creator_id: string;
+  declare notes?: string | null;
+  declare creatorId: ForeignKey<UserModel['id']>;
 }
 
 PatientModel.init(
@@ -26,9 +26,13 @@ PatientModel.init(
       primaryKey: true,
       allowNull: false,
     },
-    creator_id: {
+    creatorId: {
       type: DataTypes.UUID,
       allowNull: false,
+      references: {
+        model: UserModel,
+        key: 'id',
+      },
     },
     slug: {
       type: DataTypes.STRING,
@@ -49,11 +53,11 @@ PatientModel.init(
 );
 
 UserModel.hasMany(PatientModel, {
-  foreignKey: 'creator_id',
+  foreignKey: 'creatorId',
   as: 'creator',
 });
 
 PatientModel.belongsTo(UserModel, {
-  foreignKey: 'creator_id',
+  foreignKey: 'creatorId',
   as: 'creator',
 });

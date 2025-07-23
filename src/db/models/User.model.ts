@@ -54,6 +54,7 @@ UserModel.init(
     sequelize,
     tableName: 'users',
     paranoid: true,
+    indexes: [{ unique: true, fields: ['email'] }],
     hooks: {
       async beforeSave(user: UserModel) {
         if (user.changed('password')) {

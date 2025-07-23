@@ -11,12 +11,14 @@ interface SliceMeta {
   pixelSpacing?: [number, number];
   validPixelData: boolean;
   reason?: string;
+  seriesDescription?: string;
 }
 
 interface ClusterSlice {
   file: string;
   sopInstanceUID: string;
   positionScalar: number;
+  group?: string;
   rows: number;
   cols: number;
   pixelSpacing?: [number, number];
@@ -26,6 +28,7 @@ interface Cluster {
   id: number;
   normal: [number, number, number];
   files: ClusterSlice[];
+  group?: string;
   geometry: {
     rows: number;
     cols: number;
@@ -67,6 +70,7 @@ function parseDicom(filePath: string): SliceMeta | null {
   const cols = dataSet.uint16('x00280011');
   const bitsAllocated = dataSet.uint16('x00280100') || 0;
   const samplesPerPixel = dataSet.uint16('x00280002') || 1;
+  const seriesDescription = getStr('x0008103e');
 
   if (
     !sop ||
@@ -121,6 +125,7 @@ function parseDicom(filePath: string): SliceMeta | null {
     pixelSpacing,
     validPixelData,
     reason,
+    seriesDescription,
   };
 }
 
@@ -181,6 +186,9 @@ export function clusterByOrientation(
         return false;
       }
     }
+    if (cluster.group !== m.seriesDescription) {
+      return false;
+    }
     return true;
   }
 
@@ -215,6 +223,7 @@ export function clusterByOrientation(
         }
         cl.files.push({
           file: m.file,
+          group: m.seriesDescription,
           sopInstanceUID: m.sopInstanceUID,
           positionScalar: posScalar,
           rows: m.rows,
@@ -230,11 +239,13 @@ export function clusterByOrientation(
       const posScalar = 0; // тимчасово, перерахуємо після
       clusters.push({
         id: clusterId++,
+        group: m.seriesDescription,
         normal: [...m.normal],
         files: [
           {
             file: m.file,
             sopInstanceUID: m.sopInstanceUID,
+            group: m.seriesDescription,
             positionScalar: posScalar,
             rows: m.rows,
             cols: m.cols,

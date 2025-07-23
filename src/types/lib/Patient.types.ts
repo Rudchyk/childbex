@@ -6,7 +6,7 @@ export interface Patient {
   id: string;
   name: string;
   slug: string;
-  creator_id: string;
+  creatorId: string;
   notes?: string | null;
 }
 

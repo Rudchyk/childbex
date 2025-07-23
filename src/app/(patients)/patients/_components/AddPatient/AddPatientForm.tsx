@@ -15,11 +15,13 @@ import { toSlugIfCyr } from '@/lib/utils';
 interface AddPatientFormProps {
   onSubmit: SubmitHandler<AddPatientFormData>;
   onError?: SubmitErrorHandler<AddPatientFormData>;
+  loading?: boolean;
 }
 
 export const AddPatientForm: FC<AddPatientFormProps> = ({
   onSubmit,
   onError,
+  loading,
 }) => {
   const methods = useForm({
     resolver: yupResolver<AddPatientFormData, unknown, unknown>(
@@ -61,6 +63,7 @@ export const AddPatientForm: FC<AddPatientFormProps> = ({
         accept={accept}
         control={control}
         label="Archive"
+        disabled={loading}
       />
       <FormUITextField
         name="name"
@@ -68,6 +71,7 @@ export const AddPatientForm: FC<AddPatientFormProps> = ({
         label="Name"
         margin="normal"
         fullWidth
+        disabled={loading}
       />
       <FormUITextField
         name="slug"
@@ -75,6 +79,7 @@ export const AddPatientForm: FC<AddPatientFormProps> = ({
         label="Slug"
         margin="normal"
         fullWidth
+        disabled={loading}
       />
       <FormUITextField
         name="notes"
@@ -83,6 +88,7 @@ export const AddPatientForm: FC<AddPatientFormProps> = ({
         label="Notes"
         margin="normal"
         fullWidth
+        disabled={loading}
         rows={3}
       />
     </Box>

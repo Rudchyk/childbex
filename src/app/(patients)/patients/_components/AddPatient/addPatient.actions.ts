@@ -11,7 +11,6 @@ import { PatientModel } from '@/db/models/Patient.model';
 import {
   PatientImageModel,
   PatientImageModelCreationAttributes,
-  PatientImageStates,
 } from '@/db/models/PatientImage.model';
 import { AddPatientActionStates } from './AddPatientActionStates.enum';
 import { toSlugIfCyr, unpackArchive, packArchive } from '@/lib/utils';
@@ -70,7 +69,7 @@ export const addPatient = async (
       slug,
       name,
       notes,
-      creator_id: session.user.id,
+      creatorId: session.user.id,
     });
 
     if (archive) {
@@ -113,13 +112,14 @@ export const addPatient = async (
       );
       const usableItemsMapping: Record<
         string,
-        { geometry: object; cluster: number }
+        { geometry: object; cluster?: number; group?: string }
       > = {};
-      result.clusters.forEach(({ files = [], id, geometry }) => {
+      result.clusters.forEach(({ files = [], id, geometry, group }) => {
         files.forEach(({ file }) => {
           const parsedFile = path.parse(file);
           usableItemsMapping[parsedFile.name] = {
             cluster: id,
+            group,
             geometry,
           };
         });
@@ -127,19 +127,18 @@ export const addPatient = async (
       const patientImages = imagesList.map((imageName) => {
         const base: PatientImageModelCreationAttributes = {
           source: `/uploads/${slug}/${imageName}`,
-          patient_id: patient.id,
-          state: PatientImageStates.USABLE,
-          cluster: 0,
+          patientId: patient.id,
+          group: '0',
         };
         const reason = brokenItemsMapping[imageName];
         if (reason) {
-          base.state = PatientImageStates.BROKEN;
+          base.isBrocken = true;
           base.notes = reason;
-          base.cluster = -1;
         } else {
           const usable = usableItemsMapping[imageName];
           base.cluster = usable.cluster;
-          base.geometry = usable.geometry;
+          base.group = usable.group;
+          base.details = usable.geometry;
         }
 
         return base as PatientImageModelCreationAttributes;

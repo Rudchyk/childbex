@@ -73,7 +73,7 @@ export const AddPatient = () => {
         isButtonCancel={!loading}
         isButtonClose={!loading}
         onDialogClose={loading ? () => {} : toggleOpen}
-        form={<AddPatientForm onSubmit={onSubmit} />}
+        form={<AddPatientForm onSubmit={onSubmit} loading={loading} />}
       />
     </>
   );

@@ -4,13 +4,13 @@ import { FC } from 'react';
 import { PatientImage } from '@/types';
 import { Alert, AlertTitle, Stack } from '@mui/material';
 
-interface PatientBrockenImagesClusterProps {
+interface PatientBrockenImagesGroupProps {
   data: PatientImage[];
 }
 
-export const PatientBrockenImagesCluster: FC<
-  PatientBrockenImagesClusterProps
-> = ({ data }) => {
+export const PatientBrockenImagesGroup: FC<PatientBrockenImagesGroupProps> = ({
+  data,
+}) => {
   return (
     <Stack spacing={2}>
       {data.map(({ id, notes, source }) => (

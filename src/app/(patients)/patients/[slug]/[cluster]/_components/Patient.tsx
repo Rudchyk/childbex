@@ -2,8 +2,8 @@
 
 import { FC } from 'react';
 import { PatientImage } from '@/types';
-import { PatientImagesCluster } from './PatientImagesCluster';
-import { PatientBrockenImagesCluster } from './PatientBrockenImagesCluster';
+import { PatientImagesGroup } from './PatientImagesGroup';
+import { PatientBrockenImagesGroup } from './PatientBrockenImagesGroup';
 
 interface PatientProps {
   data: PatientImage[];
@@ -11,9 +11,9 @@ interface PatientProps {
 }
 
 export const Patient: FC<PatientProps> = ({ data, label }) => {
-  if (label === '-1') {
-    return <PatientBrockenImagesCluster data={data} />;
+  if (label === 'BROCKEN') {
+    return <PatientBrockenImagesGroup data={data} />;
   }
 
-  return <PatientImagesCluster data={data} />;
+  return <PatientImagesGroup data={data} />;
 };

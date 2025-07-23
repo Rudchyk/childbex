@@ -24,7 +24,8 @@ export default async function Page({ params }: PageProps) {
   if (!imagesCluster) {
     return notFound();
   }
-  const label = cluster === '-1' ? 'Brocken images' : `Cluster ${cluster}`;
+  const label = cluster === 'null' ? 'Brocken images' : `Cluster ${cluster}`;
+  const group = imagesCluster[0]?.group || '';
 
   return (
     <Stack spacing={2}>
@@ -32,7 +33,7 @@ export default async function Page({ params }: PageProps) {
       <Stack direction="row">
         <Chip label={label} />
       </Stack>
-      <Patient data={imagesCluster} label={cluster} />
+      <Patient data={imagesCluster} label={group} />
     </Stack>
   );
 }

@@ -47,7 +47,11 @@ export default async function Page({ params }: PageProps) {
                   </Avatar>
                 </ListItemAvatar>
                 <ListItemText
-                  primary={key === '-1' ? `Brocken images` : `Cluster ${key}`}
+                  primary={
+                    key === 'null'
+                      ? `Brocken images`
+                      : imagesMapping[key][0]?.group || `Group ${key}`
+                  }
                   secondary={`${data.length} images`}
                 />
               </ListItemButton>
