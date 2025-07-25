@@ -1,16 +1,12 @@
 'use server';
 
-import { Chip, Stack, Typography } from '@mui/material';
+import { Stack, Typography } from '@mui/material';
 import { notFound } from 'next/navigation';
 import { PatientImageCluster } from '@/db/models/PatientImageCluster.model';
 import { Patient } from '@/db/models/Patient.model';
 import { PatientImage } from '@/db/models/PatientImage.model';
-import { format } from 'date-fns';
-import pluralize from 'pluralize';
 import { PatientBrockenImages } from './_components/PatientBrockenImages';
 import { PatientImages } from './_components/PatientImages';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import PermMediaIcon from '@mui/icons-material/PermMedia';
 import { PatientImageReviewVote } from '@/db/models/PatientImageReviewVote.model';
 
 interface PageProps {
@@ -50,35 +46,14 @@ export default async function Page({ params }: PageProps) {
 
   const data = (imagesCluster?.images || []).map((i: any) => i.toJSON());
   const isBrocken = imagesCluster.cluster === -1;
+  const _imagesCluster = imagesCluster.toJSON();
   return (
     <Stack spacing={2}>
       <Typography variant="h1">{patient.name}</Typography>
-      <Stack direction="row" spacing={2} alignItems="center">
-        <Chip
-          color={isBrocken ? 'error' : 'primary'}
-          label={imagesCluster.name}
-        />
-        {!!imagesCluster.images?.length && (
-          <Chip
-            color="secondary"
-            icon={<PermMediaIcon />}
-            label={`${imagesCluster.images.length} ${pluralize(
-              'image',
-              imagesCluster.images.length
-            )}`}
-          ></Chip>
-        )}
-        {!!imagesCluster.studyDate && (
-          <Chip
-            icon={<CalendarMonthIcon />}
-            label={format(imagesCluster.studyDate, 'dd/MM/yyyy HH:mm:sss')}
-          />
-        )}
-      </Stack>
       {isBrocken ? (
-        <PatientBrockenImages data={data} />
+        <PatientBrockenImages data={data} imagesCluster={_imagesCluster} />
       ) : (
-        <PatientImages data={data} inReview={imagesCluster.inReview} />
+        <PatientImages data={data} imagesCluster={_imagesCluster} />
       )}
     </Stack>
   );

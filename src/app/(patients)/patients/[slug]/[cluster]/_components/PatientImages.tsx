@@ -3,17 +3,21 @@
 import { DicomViewer } from '@/lib/components';
 import { FC, useState } from 'react';
 // import { PatientDWVToolbar } from './PatientDWVToolbar';
-import { PatientImage } from '@/types';
+import { PatientImage, PatientImageCluster } from '@/types';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
-import { PatientImagesSidebar } from './PatientImagesSidebar';
+import { Box, Paper } from '@mui/material';
+import { PatientImagesTags } from './PatientImagesTags';
 
 interface PatientImagesProps {
   data: PatientImage[];
-  inReview: boolean;
+  imagesCluster: PatientImageCluster;
 }
 
-export const PatientImages: FC<PatientImagesProps> = ({ data }) => {
+export const PatientImages: FC<PatientImagesProps> = ({
+  data,
+  imagesCluster,
+}) => {
   const [itemsMapping, setItemsMapping] = useState(
     Object.fromEntries(data.map((item) => [item.source, item]))
   );
@@ -39,7 +43,19 @@ export const PatientImages: FC<PatientImagesProps> = ({ data }) => {
   };
   return (
     <>
-      <PatientImagesSidebar item={currentItem} />
+      <Box
+        component={Paper}
+        elevation={3}
+        sx={{
+          position: 'fixed',
+          top: '10%',
+          bottom: '10%',
+          left: 5,
+          width: 300,
+        }}
+      >
+        <PatientImagesTags imagesCluster={imagesCluster} />
+      </Box>
       <DicomViewer
         list={data.map(({ source }) => source)}
         onCurrentItemChange={onCurrentItemChange}
