@@ -4,11 +4,11 @@ import { FC } from 'react';
 import { PatientImage } from '@/types';
 import { Alert, AlertTitle, Stack } from '@mui/material';
 
-interface PatientBrockenImagesGroupProps {
+interface PatientBrockenImagesProps {
   data: PatientImage[];
 }
 
-export const PatientBrockenImagesGroup: FC<PatientBrockenImagesGroupProps> = ({
+export const PatientBrockenImages: FC<PatientBrockenImagesProps> = ({
   data,
 }) => {
   return (

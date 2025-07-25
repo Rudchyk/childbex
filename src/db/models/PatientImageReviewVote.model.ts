@@ -39,13 +39,13 @@ export class PatientImageReviewVote
   declare readonly updatedAt: PatientImageReviewVoteAttributes['updatedAt'];
 
   // Associations:
-  declare image?: NonAttribute<PatientImage>;
+  declare votes?: NonAttribute<PatientImageReviewVote[]>;
   declare reviewer?: NonAttribute<User>;
 
   declare getPatientImage: BelongsToGetAssociationMixin<PatientImage>;
 
   declare static associations: {
-    image: Association<PatientImageReviewVote, PatientImage>;
+    votes: Association<PatientImageReviewVote, PatientImage>;
     reviewer: Association<PatientImageReviewVote, User>;
   };
 }
@@ -112,14 +112,14 @@ PatientImageReviewVote.init(
 
 PatientImage.hasMany(PatientImageReviewVote, {
   foreignKey: 'patientImageId',
-  as: 'image',
+  as: 'votes',
   onDelete: 'CASCADE',
   hooks: true,
 });
 
 PatientImageReviewVote.belongsTo(PatientImage, {
   foreignKey: 'patientImageId',
-  as: 'image',
+  as: 'votes',
 });
 
 User.hasMany(PatientImageReviewVote, {

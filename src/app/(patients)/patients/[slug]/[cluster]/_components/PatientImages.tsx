@@ -6,12 +6,14 @@ import { FC, useState } from 'react';
 import { PatientImage } from '@/types';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
+import { PatientImagesSidebar } from './PatientImagesSidebar';
 
-interface PatientImagesGroupProps {
+interface PatientImagesProps {
   data: PatientImage[];
+  inReview: boolean;
 }
 
-export const PatientImagesGroup: FC<PatientImagesGroupProps> = ({ data }) => {
+export const PatientImages: FC<PatientImagesProps> = ({ data }) => {
   const [itemsMapping, setItemsMapping] = useState(
     Object.fromEntries(data.map((item) => [item.source, item]))
   );
@@ -36,22 +38,19 @@ export const PatientImagesGroup: FC<PatientImagesGroupProps> = ({ data }) => {
     // });
   };
   return (
-    <DicomViewer
-      list={data.map(({ source }) => source)}
-      onCurrentItemChange={onCurrentItemChange}
-      sidebarItemIcon={(source: string) =>
-        itemsMapping[source].isAbnormal ? (
-          <AcUnitIcon />
-        ) : (
-          <InsertDriveFileIcon />
-        )
-      }
-      // toolbar={
-      //   <PatientDWVToolbar
-      //     currentItem={currentItem}
-      //     onItemUpdate={handleOnItemUpdate}
-      //   />
-      // }
-    />
+    <>
+      <PatientImagesSidebar item={currentItem} />
+      <DicomViewer
+        list={data.map(({ source }) => source)}
+        onCurrentItemChange={onCurrentItemChange}
+        sidebarItemIcon={(source: string) =>
+          itemsMapping[source].isAbnormal ? (
+            <AcUnitIcon />
+          ) : (
+            <InsertDriveFileIcon />
+          )
+        }
+      />
+    </>
   );
 };

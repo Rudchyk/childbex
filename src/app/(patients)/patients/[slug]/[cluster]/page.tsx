@@ -7,10 +7,11 @@ import { Patient } from '@/db/models/Patient.model';
 import { PatientImage } from '@/db/models/PatientImage.model';
 import { format } from 'date-fns';
 import pluralize from 'pluralize';
-import { PatientBrockenImagesGroup } from './_components/PatientBrockenImagesGroup';
-import { PatientImagesGroup } from './_components/PatientImagesGroup';
+import { PatientBrockenImages } from './_components/PatientBrockenImages';
+import { PatientImages } from './_components/PatientImages';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import PermMediaIcon from '@mui/icons-material/PermMedia';
+import { PatientImageReviewVote } from '@/db/models/PatientImageReviewVote.model';
 
 interface PageProps {
   params: Promise<{ slug: string; cluster: string }>;
@@ -33,6 +34,12 @@ export default async function Page({ params }: PageProps) {
       {
         model: PatientImage,
         as: 'images',
+        include: [
+          {
+            model: PatientImageReviewVote,
+            as: 'votes',
+          },
+        ],
       },
     ],
   });
@@ -69,9 +76,9 @@ export default async function Page({ params }: PageProps) {
         )}
       </Stack>
       {isBrocken ? (
-        <PatientBrockenImagesGroup data={data} />
+        <PatientBrockenImages data={data} />
       ) : (
-        <PatientImagesGroup data={data} />
+        <PatientImages data={data} inReview={imagesCluster.inReview} />
       )}
     </Stack>
   );
