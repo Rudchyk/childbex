@@ -6,10 +6,12 @@ import type { Patient } from './Patient.types';
 export const patientBrokenImageClusterName = 'broken';
 
 export interface PatientImageCluster extends Timestamps {
-  id: number;
+  id: string;
+  cluster: number;
   name: typeof patientBrokenImageClusterName | string;
   patientId: ForeignKey<Patient['id']>;
   notes: string | null;
+  studyDate: Date | null;
   inReview: boolean;
 
   // Associations:

@@ -2,13 +2,13 @@ import { syncDb } from '@/db';
 import { Patient } from '@/db/models/Patient.model';
 import { PatientImageCluster } from '@/db/models/PatientImageCluster.model';
 import { User } from '@/db/models/User.model';
-import { FindOptions } from 'sequelize';
+import { FindOptions, IncludeOptions } from 'sequelize';
 
 export const findExtendedPatients = async (
   props?: FindOptions<Patient>
 ): Promise<Patient[]> => {
   await syncDb();
-  return await Patient.findAll({
+  const result = await Patient.findAll({
     ...props,
     include: [
       {
@@ -21,11 +21,19 @@ export const findExtendedPatients = async (
       },
     ],
   });
+  return result.map((item) => item.toJSON());
 };
 
-export const findExtendedPatient = async (slug: Patient['slug']) => {
+interface FindExtendedPatientOptions {
+  patientImageClusterOptions?: IncludeOptions;
+}
+
+export const findExtendedPatient = async (
+  slug: Patient['slug'],
+  options?: FindExtendedPatientOptions
+) => {
   await syncDb();
-  return await Patient.findOne({
+  const result = await Patient.findOne({
     where: {
       slug,
     },
@@ -37,7 +45,9 @@ export const findExtendedPatient = async (slug: Patient['slug']) => {
       {
         model: PatientImageCluster,
         as: 'clusters',
+        ...options?.patientImageClusterOptions,
       },
     ],
   });
+  return result;
 };

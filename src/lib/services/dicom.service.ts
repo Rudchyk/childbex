@@ -12,6 +12,7 @@ interface SliceMeta {
   validPixelData: boolean;
   reason?: string;
   seriesDescription?: string;
+  studyDate?: Date;
 }
 
 interface ClusterSlice {
@@ -19,6 +20,7 @@ interface ClusterSlice {
   sopInstanceUID: string;
   positionScalar: number;
   group?: string;
+  studyDate?: Date;
   rows: number;
   cols: number;
   pixelSpacing?: [number, number];
@@ -28,6 +30,7 @@ export interface Cluster {
   id: number;
   normal: [number, number, number];
   files: ClusterSlice[];
+  studyDate?: Date;
   group?: string;
   geometry: {
     rows: number;
@@ -40,6 +43,25 @@ export interface Cluster {
 export interface ClusterResult {
   clusters: Cluster[];
   broken: { file: string; reason: string }[];
+}
+
+function parseDicomDateTime(
+  dateStr?: string,
+  timeStr?: string
+): Date | undefined {
+  if (!dateStr || !timeStr) return;
+
+  // Extract parts
+  const year = parseInt(dateStr.slice(0, 4));
+  const month = parseInt(dateStr.slice(4, 6)) - 1; // JS months are 0-based
+  const day = parseInt(dateStr.slice(6, 8));
+
+  const hour = parseInt(timeStr.slice(0, 2) || '0');
+  const minute = parseInt(timeStr.slice(2, 4) || '0');
+  const second = parseInt(timeStr.slice(4, 6) || '0');
+  const ms = parseFloat('0.' + (timeStr.split('.')[1] || '0')) * 1000;
+
+  return new Date(year, month, day, hour, minute, second, ms);
 }
 
 function parseDicom(filePath: string): SliceMeta | null {
@@ -71,6 +93,8 @@ function parseDicom(filePath: string): SliceMeta | null {
   const bitsAllocated = dataSet.uint16('x00280100') || 0;
   const samplesPerPixel = dataSet.uint16('x00280002') || 1;
   const seriesDescription = getStr('x0008103e');
+  const studyDate = getStr('x00080020'); // Tag (0008,0020)
+  const studyTime = getStr('x00080030'); // Study Time tag
 
   if (
     !sop ||
@@ -126,6 +150,7 @@ function parseDicom(filePath: string): SliceMeta | null {
     validPixelData,
     reason,
     seriesDescription,
+    studyDate: parseDicomDateTime(studyDate, studyTime),
   };
 }
 
@@ -240,12 +265,14 @@ export function clusterByOrientation(
       clusters.push({
         id: clusterId++,
         group: m.seriesDescription,
+        studyDate: m.studyDate,
         normal: [...m.normal],
         files: [
           {
             file: m.file,
             sopInstanceUID: m.sopInstanceUID,
             group: m.seriesDescription,
+            studyDate: m.studyDate,
             positionScalar: posScalar,
             rows: m.rows,
             cols: m.cols,

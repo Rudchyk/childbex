@@ -1,6 +1,6 @@
 import type { Timestamps, SoftDeletion } from './Model.types';
 import type { User } from './User.types';
-import type { PatientImage } from './PatientImage.types';
+import type { PatientImageCluster } from './PatientImageCluster.types';
 import type { ForeignKey, NonAttribute } from 'sequelize';
 
 export interface Patient extends Timestamps, SoftDeletion {
@@ -11,6 +11,6 @@ export interface Patient extends Timestamps, SoftDeletion {
   notes: string | null;
 
   // Associations:
-  clusters?: NonAttribute<PatientImage[]>;
+  clusters?: NonAttribute<PatientImageCluster[]>;
   creator?: NonAttribute<User>;
 }

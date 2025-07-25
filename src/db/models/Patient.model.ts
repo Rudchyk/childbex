@@ -4,11 +4,13 @@ import {
   Op,
   InferAttributes,
   InferCreationAttributes,
+  // Association,
 } from 'sequelize';
 import { sequelize } from '@/db';
 import { Patient as PatientAttributes } from '@/types';
 import { timestampFields } from '../helpers/timestamps';
 import { User } from './User.model';
+// import { PatientImageCluster } from './PatientImageCluster.model';
 import { toSlugIfCyr } from '@/lib/utils';
 
 export class Patient
@@ -33,6 +35,12 @@ export class Patient
   declare readonly createdAt: PatientAttributes['createdAt'];
   declare readonly updatedAt: PatientAttributes['updatedAt'];
   declare readonly deletedAt: PatientAttributes['deletedAt'];
+
+  // // Статичні асоціації // TODO:?
+  // declare static associations: {
+  //   clusters: Association<Patient, PatientImageCluster>;
+  //   creator: Association<Patient, User>;
+  // };
 
   // Associations:
   declare clusters?: PatientAttributes['clusters'];
@@ -77,26 +85,26 @@ Patient.init(
     timestamps: true,
     hooks: {
       beforeValidate: async (patient: Patient) => {
-        if (!patient.slug) {
-          const base = toSlugIfCyr(patient.name);
-          const rows = await Patient.findAll({
-            where: {
-              slug: { [Op.like]: `${base}%` },
-            },
-            attributes: ['slug'],
-          });
+        const base = patient.slug || toSlugIfCyr(patient.name);
+        const rows = await Patient.findAll({
+          where: {
+            slug: { [Op.like]: `${base}%` },
+          },
+          attributes: ['slug'],
+        });
 
-          // Збираємо всі числа із суфіксів, якщо вони є
-          const nums = rows.map((r) => {
-            const m = r.slug.match(new RegExp(`^${base}-(\\d+)$`));
-            return m ? parseInt(m[1], 10) : 0;
-          });
+        // Збираємо всі числа із суфіксів, якщо вони є
+        const nums = rows.map((r) => {
+          const m = r.slug.match(new RegExp(`^${base}-(\\d+)$`));
+          return m ? parseInt(m[1], 10) : 0;
+        });
+        if (nums.length) {
           const next = Math.max(...nums) + 1;
-
-          patient.slug =
+          const newSlug =
             next === 1 && !rows.some((r) => r.slug === base)
               ? base
               : `${base}-${next}`;
+          patient.slug = newSlug;
         }
       },
     },

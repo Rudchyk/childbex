@@ -3,7 +3,7 @@
 import { usePathname } from 'next/navigation';
 import { Breadcrumbs as MUIBreadcrumbs, Typography } from '@mui/material';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
-import { capitalize } from 'lodash';
+// import { capitalize } from 'lodash';
 import HomeIcon from '@mui/icons-material/Home';
 import NextLink from 'next/link';
 
@@ -21,18 +21,21 @@ export const Breadcrumbs = () => {
   // Build an array of { href, label } for each “crumb”
   const crumbs: Crumb[] = segments.map((seg, idx) => {
     const href = '/' + segments.slice(0, idx + 1).join('/');
-    let label = seg;
+    // let label = seg;
+
+    // console.log('seg', seg);
 
     // Optional: map dynamic params to human labels
     // e.g. if seg matches /^\d+$/ you might fetch post title, but here:
     // for IDs, just show “Post #123”
-    if (/^\d+$/.test(seg)) {
-      label = `#${seg}`;
-    } else {
-      label = capitalize(seg.replace(/[-_]/g, ' '));
-    }
+    // TODO:
+    // if (/^\d+$/.test(seg)) {
+    //   label = `#${seg}`;
+    // } else {
+    //   label = capitalize(seg.replace(/[-_]/g, ' '));
+    // }
 
-    return { href, label };
+    return { href, label: seg };
   });
 
   if (pathname === '/') {

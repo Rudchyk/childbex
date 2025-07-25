@@ -13,7 +13,7 @@ import { basicTimestampFields } from '../helpers/timestamps';
 export type PatientImageClusterCreationAttributes = InferCreationAttributes<
   PatientImageCluster,
   {
-    omit: 'inReview' | 'createdAt' | 'updatedAt';
+    omit: 'id' | 'inReview' | 'createdAt' | 'updatedAt';
   }
 >;
 
@@ -25,7 +25,9 @@ export class PatientImageCluster
   implements PatientImageClusterAttributes
 {
   declare id: PatientImageClusterAttributes['id'];
+  declare cluster: PatientImageClusterAttributes['cluster'];
   declare name: PatientImageClusterAttributes['name'];
+  declare studyDate: PatientImageClusterAttributes['studyDate'];
   declare patientId: PatientImageClusterAttributes['patientId'];
   declare notes: PatientImageClusterAttributes['notes'];
   declare inReview: PatientImageClusterAttributes['inReview'];
@@ -47,12 +49,17 @@ export class PatientImageCluster
 PatientImageCluster.init(
   {
     id: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
       allowNull: false,
     },
     name: {
       type: DataTypes.STRING,
+      allowNull: false,
+    },
+    cluster: {
+      type: DataTypes.INTEGER,
       allowNull: false,
     },
     patientId: {
@@ -68,9 +75,14 @@ PatientImageCluster.init(
       type: DataTypes.TEXT,
       allowNull: true,
     },
+    studyDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
     inReview: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
+      defaultValue: false,
     },
     ...basicTimestampFields,
   },
@@ -80,7 +92,7 @@ PatientImageCluster.init(
     indexes: [
       {
         unique: true,
-        fields: ['id', 'patientId'],
+        fields: ['cluster', 'patientId', 'studyDate'],
       },
     ],
   }

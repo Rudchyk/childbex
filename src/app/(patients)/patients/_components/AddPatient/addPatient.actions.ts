@@ -47,26 +47,6 @@ export const addPatient = async (
     const validated = await addPatientFormDataSchema.validate(data);
     const { name, slug: validatedSlug, notes, archive } = validated;
     const slug = validatedSlug || toSlugIfCyr(name);
-
-    const existedPatient = await Patient.findOne({
-      where: {
-        slug,
-      },
-      paranoid: false,
-    });
-
-    if (existedPatient) {
-      if (existedPatient.isSoftDeleted()) {
-        return {
-          status: AddPatientActionStates.PATIENT_IN_TRASH,
-        };
-      } else {
-        return {
-          status: AddPatientActionStates.PATIENT_EXISTS,
-        };
-      }
-    }
-
     const patient = await Patient.create({
       slug,
       name,
@@ -113,18 +93,21 @@ export const addPatient = async (
           if (isBrocken) {
             const imageCluster = await PatientImageCluster.create({
               name: key,
-              id: -1,
+              cluster: -1,
               patientId: patient.id,
             });
             await PatientImage.bulkCreate(
-              value.map(({ reason, file }: ClusterResult['broken'][0]) => ({
-                source: `/uploads/${slug}/${file}`,
-                notes: reason,
-                clusterId: imageCluster.id,
-                isBrocken: true,
-                group: -1,
-                status: PatientImageStatus.BROKEN,
-              }))
+              value.map(({ reason, file }: ClusterResult['broken'][0]) => {
+                const parsedFile = path.parse(file);
+                return {
+                  source: `/uploads/${slug}/${parsedFile.name}`,
+                  notes: reason,
+                  clusterId: imageCluster.id,
+                  isBrocken: true,
+                  group: -1,
+                  status: PatientImageStatus.BROKEN,
+                };
+              })
             );
           } else {
             for (const {
@@ -134,22 +117,27 @@ export const addPatient = async (
               geometry,
               outliers,
               normal,
+              studyDate,
             } of value as ClusterResult['clusters']) {
               const imageCluster = await PatientImageCluster.create({
                 name: group || String(id),
-                id,
+                cluster: id,
                 patientId: patient.id,
+                studyDate,
               });
               await PatientImage.bulkCreate(
-                files.map(({ file }) => ({
-                  source: `/uploads/${slug}/${file}`,
-                  clusterId: imageCluster.id,
-                  details: {
-                    geometry,
-                    outliers,
-                    normal,
-                  },
-                }))
+                files.map(({ file }) => {
+                  const parsedFile = path.parse(file);
+                  return {
+                    source: `/uploads/${slug}/${parsedFile.name}`,
+                    clusterId: imageCluster.id,
+                    details: {
+                      geometry,
+                      outliers,
+                      normal,
+                    },
+                  };
+                })
               );
             }
           }

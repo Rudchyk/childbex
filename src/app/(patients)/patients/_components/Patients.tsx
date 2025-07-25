@@ -14,7 +14,7 @@ import { AddPatient } from './AddPatient/AddPatient';
 import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
-import { ExtendedPatient, UserRoles } from '@/types';
+import { Patient, UserRoles } from '@/types';
 import { useNotifications } from '@/lib/modules/NotificationsModule';
 import {
   UpdatePatientData,
@@ -31,7 +31,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import NextLink from 'next/link';
 
 interface PatientProps {
-  data: ExtendedPatient[];
+  data: Patient[];
 }
 
 export const Patients: FC<PatientProps> = ({ data }) => {
@@ -46,12 +46,12 @@ export const Patients: FC<PatientProps> = ({ data }) => {
     status: UpdatePatientActionStates.IDLE,
   });
   const handleRowUpdate = async (
-    updatedRow: ExtendedPatient,
-    originalRow: ExtendedPatient,
+    updatedRow: Patient,
+    originalRow: Patient,
     params: {
       rowId: GridRowId;
     }
-  ): Promise<ExtendedPatient> => {
+  ): Promise<Patient> => {
     const update: UpdatePatientData['data'] = {};
     const fieldsToUpdate: (keyof typeof update)[] = ['name', 'slug', 'notes'];
 
@@ -76,14 +76,12 @@ export const Patients: FC<PatientProps> = ({ data }) => {
     }
   };
 
-  const columns: GridColDef<ExtendedPatient>[] = [
+  const columns: GridColDef<Patient>[] = [
     {
       field: 'id',
       headerName: 'ID',
       width: 50,
-      renderCell: ({
-        value,
-      }: GridCellParams<ExtendedPatient, ExtendedPatient['id']>) => (
+      renderCell: ({ value }: GridCellParams<Patient, Patient['id']>) => (
         <Stack justifyContent="center" alignItems="center" height="100%">
           <Tooltip title={value}>
             <IconButton onClick={() => copyToClipboard(value)}>
@@ -107,7 +105,7 @@ export const Patients: FC<PatientProps> = ({ data }) => {
       renderCell: ({
         value,
         row,
-      }: GridCellParams<ExtendedPatient, ExtendedPatient['slug']>) => (
+      }: GridCellParams<Patient, Patient['slug']>) => (
         <Stack
           direction="row"
           justifyContent="flex-start"
@@ -136,25 +134,23 @@ export const Patients: FC<PatientProps> = ({ data }) => {
       field: 'creator',
       headerName: 'Creator',
       flex: 1,
-      renderCell: ({
-        value,
-      }: GridCellParams<ExtendedPatient, ExtendedPatient['creator']>) => (
+      renderCell: ({ value }: GridCellParams<Patient, Patient['creator']>) => (
         <Tooltip title={value?.email}>
           <span>{value?.name}</span>
         </Tooltip>
       ),
     },
     {
-      field: 'images',
-      headerName: 'Images',
+      field: 'clusters',
+      headerName: 'Clusters',
       flex: 1,
-      valueFormatter: (value: ExtendedPatient['images']) => value?.length || 0,
+      valueFormatter: (value: Patient['clusters']) => value?.length || 0,
     },
     {
       field: 'createdAt',
       headerName: 'Created At',
       flex: 1,
-      valueFormatter: (value: ExtendedPatient['createdAt']) =>
+      valueFormatter: (value: Patient['createdAt']) =>
         value ? format(value, 'dd/MM/yyyy, HH:mm:ss') : '',
     },
     {
