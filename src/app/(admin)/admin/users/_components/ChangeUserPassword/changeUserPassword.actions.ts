@@ -3,7 +3,7 @@
 import { syncDb } from '@/db';
 import { changeUserPasswordFormSchema } from './changeUserPassword.schema';
 import { ValidationError } from 'yup';
-import { UserModel } from '@/db/models/User.model';
+import { User } from '@/db/models/User.model';
 import { ChangeUserPasswordActionStates } from './ChangeUserPasswordActionStates.enum';
 import { decode } from 'next-auth/jwt';
 
@@ -24,7 +24,7 @@ export const changeUserPassword = async (
   try {
     await syncDb();
 
-    const user = await UserModel.findByPk(id);
+    const user = await User.findByPk(id);
 
     if (!user) {
       return {

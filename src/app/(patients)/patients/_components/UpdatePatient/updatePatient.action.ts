@@ -1,7 +1,7 @@
 'use server';
 
 import { syncDb } from '@/db';
-import { PatientModel, Patient } from '@/db/models/Patient.model';
+import { Patient } from '@/db/models/Patient.model';
 import { UpdatePatientActionStates } from './UpdatePatientActionStates.enum';
 import * as Yup from 'yup';
 import { toSlugIfCyr } from '@/lib/utils';
@@ -23,9 +23,9 @@ export const updatePatient = async (
   try {
     await syncDb();
 
-    const Patient = await PatientModel.findByPk(id);
+    const patient = await Patient.findByPk(id);
 
-    if (!Patient) {
+    if (!patient) {
       return {
         status: UpdatePatientActionStates.PATIENT_DO_NOT_EXIST,
       };
@@ -54,7 +54,7 @@ export const updatePatient = async (
       return { status: UpdatePatientActionStates.NOTHING_TO_UPDATE };
     }
 
-    await Patient.update(update);
+    await patient.update(update);
 
     return { status: UpdatePatientActionStates.SUCCESS };
   } catch (error) {

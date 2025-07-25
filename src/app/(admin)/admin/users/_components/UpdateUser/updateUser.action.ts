@@ -1,9 +1,11 @@
 'use server';
 
 import { syncDb } from '@/db';
-import { PublicUser, UserModel, UserRoles } from '@/db/models/User.model';
+import { User } from '@/db/models/User.model';
 import { UpdateUserActionStates } from './UpdateUserActionStates.enum';
 import * as Yup from 'yup';
+import type { PublicUser } from '@/types';
+import { UserRoles } from '@/types';
 
 export interface UpdateUserActionState {
   status: UpdateUserActionStates;
@@ -22,7 +24,7 @@ export const updateUser = async (
   try {
     await syncDb();
 
-    const user = await UserModel.findByPk(id);
+    const user = await User.findByPk(id);
 
     if (!user) {
       return {

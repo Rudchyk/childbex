@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
-import { UserModel, UserRoles } from '@/db/models/User.model';
+import { User } from '@/db/models/User.model';
+import { UserRoles } from '@/types';
 
 export async function GET() {
   try {
     const { SUPER_USER_EMAIL, SUPER_USER_PASSWORD } = process.env;
 
     if (SUPER_USER_EMAIL && SUPER_USER_PASSWORD) {
-      await UserModel.create({
+      await User.create({
         name: 'Sergii Rudchyk',
         email: SUPER_USER_EMAIL,
         password: SUPER_USER_PASSWORD,
@@ -14,7 +15,7 @@ export async function GET() {
       });
     }
 
-    return NextResponse.json({ message: 'OK' });
+    return NextResponse.json('OK');
   } catch (error) {
     const err = error as Error;
     return NextResponse.json({ message: err?.message || err?.name });

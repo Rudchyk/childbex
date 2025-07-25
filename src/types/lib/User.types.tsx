@@ -1,4 +1,4 @@
-import { ModelTimestamps, ModelSoftDeleted } from './Model.types';
+import { Timestamps, SoftDeletion } from './Model.types';
 
 export enum UserRoles {
   SUPER = 'super',
@@ -7,18 +7,12 @@ export enum UserRoles {
   DOCTOR = 'doctor',
 }
 
-export interface User {
+export interface User extends Timestamps, SoftDeletion {
   id: string;
   email: string;
   name: string;
   role: UserRoles;
-}
-
-export interface UserModelAttributes
-  extends User,
-    ModelTimestamps,
-    ModelSoftDeleted {
   password: string;
 }
 
-export type PublicUser = Omit<UserModelAttributes, 'password'>;
+export type PublicUser = Omit<User, 'password'>;

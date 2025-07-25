@@ -5,7 +5,7 @@ import { addUserFormDataSchema } from './addUserForm.schema';
 import { decode } from 'next-auth/jwt';
 import { ValidationError } from 'yup';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
-import { UserModel } from '@/db/models/User.model';
+import { User } from '@/db/models/User.model';
 import { AddUserActionStates } from './AddUserActionStates.enum';
 import { omit } from 'lodash';
 
@@ -26,7 +26,7 @@ export const addUser = async (
         secret: process.env.NEXT_PUBLIC_SECRET || '',
       })) || {};
     const validated = await addUserFormDataSchema.noUnknown().validate(payload);
-    const user = await UserModel.findOne({
+    const user = await User.findOne({
       where: {
         email: validated.email,
       },
@@ -40,7 +40,7 @@ export const addUser = async (
 
     const newUserCreationAttributes = omit(validated, 'confirmPassword');
 
-    await UserModel.create(newUserCreationAttributes);
+    await User.create(newUserCreationAttributes);
 
     return { status: AddUserActionStates.SUCCESS };
   } catch (error) {

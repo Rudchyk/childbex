@@ -2,7 +2,7 @@
 
 import { syncDb } from '@/db';
 import { DeletePatientActionStates } from './DeletePatientActionStates.enum';
-import { PatientModel } from '@/db/models/Patient.model';
+import { Patient } from '@/db/models/Patient.model';
 
 export interface DeleteProfileActionState {
   status: DeletePatientActionStates;
@@ -16,7 +16,7 @@ export const deleteProfile = async (
   try {
     await syncDb();
 
-    const result = await PatientModel.findByPk(id);
+    const result = await Patient.findByPk(id);
 
     if (!result) {
       return {

@@ -2,7 +2,7 @@ import { NextAuthOptions, Session } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import type { JWT } from 'next-auth/jwt';
 import { decode } from 'next-auth/jwt';
-import { UserModel } from '@/db/models/User.model';
+import { User } from '@/db/models/User.model';
 import { sequelize, syncDb } from '@/db';
 import SequelizeAdapter from '@auth/sequelize-adapter';
 import { ModelStatic } from 'sequelize';
@@ -29,7 +29,7 @@ export const authOptions: NextAuthOptions = {
         const { email, password } = await loginFormSchema.validate(creds);
 
         await syncDb();
-        const user = await UserModel.findOne({
+        const user = await User.findOne({
           where: { email },
         });
 
@@ -76,7 +76,7 @@ export const authOptions: NextAuthOptions = {
   //@ts-ignore
   adapter: SequelizeAdapter(sequelize, {
     models: {
-      User: UserModel as ModelStatic<any>,
+      User: User as ModelStatic<any>,
     },
   }),
 };

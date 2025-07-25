@@ -1,7 +1,7 @@
 'use server';
 
 import { syncDb } from '@/db';
-import { PatientModel } from '@/db/models/Patient.model';
+import { Patient } from '@/db/models/Patient.model';
 import { TrashedPatientsActionStates } from './TrashedPatientsActionStates.enum';
 import { TrashedPatientsActionTypes } from './TrashedPatientsActionTypes.enum';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
@@ -27,7 +27,7 @@ export const trashedPatients = async (
     await syncDb();
     const { id, type } = data;
 
-    const result = await PatientModel.findByPk(id, { paranoid: false });
+    const result = await Patient.findByPk(id, { paranoid: false });
 
     if (!result) {
       return {

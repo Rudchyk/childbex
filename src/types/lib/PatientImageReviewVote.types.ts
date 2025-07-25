@@ -1,4 +1,7 @@
-import { ModelTimestamps } from './Model.types';
+import { ForeignKey } from 'sequelize';
+import { Timestamps } from './Model.types';
+import { PatientImage } from './PatientImage.types';
+import { User } from './User.types';
 
 export enum PatientImageReviewVoteTypes {
   NORMAL = 'normal',
@@ -6,12 +9,14 @@ export enum PatientImageReviewVoteTypes {
   UNCERTAIN = 'uncertain',
 }
 
-export interface PatientImageReviewVote extends ModelTimestamps {
+export interface PatientImageReviewVote extends Timestamps {
   id: string;
-  patientImageId: string;
-  reviewerId: string;
-  value: PatientImageReviewVoteTypes;
-  comment?: string | null;
-}
+  patientImageId: ForeignKey<PatientImage['id']>;
+  reviewerId: ForeignKey<User['id']>;
+  vote: PatientImageReviewVoteTypes;
+  comment: string | null;
 
-export type PatientImageReviewVoteModelAttributes = PatientImageReviewVote;
+  // Associations:
+  image?: PatientImage;
+  reviewer?: User;
+}

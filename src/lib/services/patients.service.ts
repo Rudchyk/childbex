@@ -1,53 +1,43 @@
 import { syncDb } from '@/db';
-import { PatientModel } from '@/db/models/Patient.model';
-import { PatientImageModel } from '@/db/models/PatientImage.model';
-import { UserModel } from '@/db/models/User.model';
-import { ExtendedPatient, PatientModelAttributes } from '@/types';
+import { Patient } from '@/db/models/Patient.model';
+import { PatientImageCluster } from '@/db/models/PatientImageCluster.model';
+import { User } from '@/db/models/User.model';
 import { FindOptions } from 'sequelize';
 
 export const findExtendedPatients = async (
-  props?: FindOptions<PatientModelAttributes>
-): Promise<ExtendedPatient[]> => {
+  props?: FindOptions<Patient>
+): Promise<Patient[]> => {
   await syncDb();
-  const result = await PatientModel.findAll({
+  return await Patient.findAll({
     ...props,
     include: [
       {
-        model: UserModel,
+        model: User,
         as: 'creator',
       },
       {
-        model: PatientImageModel,
-        as: 'images',
-        separate: true,
-        order: [['source', 'ASC']],
+        model: PatientImageCluster,
+        as: 'clusters',
       },
     ],
   });
-  return result.map((r) => r.toJSON());
 };
 
-export const findExtendedPatient = async (
-  slug: PatientModelAttributes['slug']
-): Promise<ExtendedPatient | undefined> => {
+export const findExtendedPatient = async (slug: Patient['slug']) => {
   await syncDb();
-  const result = await PatientModel.findOne({
+  return await Patient.findOne({
     where: {
       slug,
     },
     include: [
       {
-        model: UserModel,
+        model: User,
         as: 'creator',
       },
       {
-        model: PatientImageModel,
-        as: 'images',
-        separate: true,
-        order: [['source', 'ASC']],
+        model: PatientImageCluster,
+        as: 'clusters',
       },
     ],
   });
-
-  return result?.toJSON() as ExtendedPatient;
 };

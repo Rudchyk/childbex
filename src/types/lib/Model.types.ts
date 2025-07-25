@@ -1,8 +1,8 @@
-export interface ModelTimestamps {
-  createdAt?: Date | null;
-  updatedAt?: Date | null;
+export interface Timestamps {
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-export interface ModelSoftDeleted {
-  deletedAt?: Date | null;
+export interface SoftDeletion {
+  deletedAt: Date | null;
 }

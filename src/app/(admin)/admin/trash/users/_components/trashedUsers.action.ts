@@ -1,7 +1,7 @@
 'use server';
 
 import { syncDb } from '@/db';
-import { UserModel } from '@/db/models/User.model';
+import { User } from '@/db/models/User.model';
 import { TrashedUsersActionStates } from './TrashedUsersActionStates.enum';
 import { TrashedUsersActionTypes } from './TrashedUsersActionTypes.enum';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
@@ -24,7 +24,7 @@ export const trashedUsers = async (
     await syncDb();
     const { id, type } = data;
 
-    const user = await UserModel.findByPk(id, { paranoid: false });
+    const user = await User.findByPk(id, { paranoid: false });
 
     if (!user) {
       return {

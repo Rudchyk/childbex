@@ -24,7 +24,7 @@ interface ClusterSlice {
   pixelSpacing?: [number, number];
 }
 
-interface Cluster {
+export interface Cluster {
   id: number;
   normal: [number, number, number];
   files: ClusterSlice[];
@@ -37,7 +37,7 @@ interface Cluster {
   outliers?: { file: string; reason: string }[];
 }
 
-interface ClusterResult {
+export interface ClusterResult {
   clusters: Cluster[];
   broken: { file: string; reason: string }[];
 }

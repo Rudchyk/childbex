@@ -1,20 +1,16 @@
-import { ModelTimestamps, ModelSoftDeleted } from './Model.types';
-import { User } from './User.types';
-import { PatientImage } from './PatientImage.types';
+import type { Timestamps, SoftDeletion } from './Model.types';
+import type { User } from './User.types';
+import type { PatientImage } from './PatientImage.types';
+import type { ForeignKey, NonAttribute } from 'sequelize';
 
-export interface Patient {
+export interface Patient extends Timestamps, SoftDeletion {
   id: string;
   name: string;
   slug: string;
-  creatorId: string;
-  notes?: string | null;
-}
+  creatorId: ForeignKey<User['id']>;
+  notes: string | null;
 
-export type PatientModelAttributes = Patient &
-  ModelTimestamps &
-  ModelSoftDeleted;
-
-export interface ExtendedPatient extends PatientModelAttributes {
-  creator: User;
-  images?: PatientImage[];
+  // Associations:
+  clusters?: NonAttribute<PatientImage[]>;
+  creator?: NonAttribute<User>;
 }

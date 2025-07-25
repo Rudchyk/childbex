@@ -7,11 +7,7 @@ import {
 } from './addPatientForm.schema';
 import { ValidationError } from 'yup';
 import { ValidationError as SequelizeValidationError } from 'sequelize';
-import { PatientModel } from '@/db/models/Patient.model';
-import {
-  PatientImageModel,
-  PatientImageModelCreationAttributes,
-} from '@/db/models/PatientImage.model';
+import { Patient } from '@/db/models/Patient.model';
 import { AddPatientActionStates } from './AddPatientActionStates.enum';
 import { toSlugIfCyr, unpackArchive, packArchive } from '@/lib/utils';
 import { getServerSession } from 'next-auth';
@@ -19,8 +15,14 @@ import { authOptions } from '@/lib/auth/auth.options';
 import path from 'path';
 import fs from 'fs';
 import { ARCHIVES_ROOT, UPLOAD_ROOT } from '@/lib/constants/constants';
-import { clusterByOrientation } from '@/lib/services/dicom.service';
+import {
+  clusterByOrientation,
+  ClusterResult,
+} from '@/lib/services/dicom.service';
 import { tmpdir } from 'os';
+import { PatientImageCluster } from '@/db/models/PatientImageCluster.model';
+import { patientBrokenImageClusterName, PatientImageStatus } from '@/types';
+import { PatientImage } from '@/db/models/PatientImage.model';
 
 export interface AddPatientActionState {
   status: AddPatientActionStates;
@@ -46,7 +48,7 @@ export const addPatient = async (
     const { name, slug: validatedSlug, notes, archive } = validated;
     const slug = validatedSlug || toSlugIfCyr(name);
 
-    const existedPatient = await PatientModel.findOne({
+    const existedPatient = await Patient.findOne({
       where: {
         slug,
       },
@@ -65,7 +67,7 @@ export const addPatient = async (
       }
     }
 
-    const patient = await PatientModel.create({
+    const patient = await Patient.create({
       slug,
       name,
       notes,
@@ -104,47 +106,55 @@ export const addPatient = async (
       const imagesList = fs.readdirSync(destDir);
       const inputFiles = imagesList.map((f) => path.join(destDir, f));
       const result = clusterByOrientation(inputFiles);
-      const brokenItemsMapping = Object.fromEntries(
-        result.broken.map((item) => {
-          const parsedFile = path.parse(item.file);
-          return [parsedFile.name, item.reason];
-        })
-      );
-      const usableItemsMapping: Record<
-        string,
-        { geometry: object; cluster?: number; group?: string }
-      > = {};
-      result.clusters.forEach(({ files = [], id, geometry, group }) => {
-        files.forEach(({ file }) => {
-          const parsedFile = path.parse(file);
-          usableItemsMapping[parsedFile.name] = {
-            cluster: id,
-            group,
-            geometry,
-          };
-        });
-      });
-      const patientImages = imagesList.map((imageName) => {
-        const base: PatientImageModelCreationAttributes = {
-          source: `/uploads/${slug}/${imageName}`,
-          patientId: patient.id,
-          group: '0',
-        };
-        const reason = brokenItemsMapping[imageName];
-        if (reason) {
-          base.isBrocken = true;
-          base.notes = reason;
-        } else {
-          const usable = usableItemsMapping[imageName];
-          base.cluster = usable.cluster;
-          base.group = usable.group;
-          base.details = usable.geometry;
+
+      for (const [key, value] of Object.entries(result)) {
+        const isBrocken = key === patientBrokenImageClusterName;
+        if (value && Array.isArray(value) && value) {
+          if (isBrocken) {
+            const imageCluster = await PatientImageCluster.create({
+              name: key,
+              id: -1,
+              patientId: patient.id,
+            });
+            await PatientImage.bulkCreate(
+              value.map(({ reason, file }: ClusterResult['broken'][0]) => ({
+                source: `/uploads/${slug}/${file}`,
+                notes: reason,
+                clusterId: imageCluster.id,
+                isBrocken: true,
+                group: -1,
+                status: PatientImageStatus.BROKEN,
+              }))
+            );
+          } else {
+            for (const {
+              id,
+              group,
+              files,
+              geometry,
+              outliers,
+              normal,
+            } of value as ClusterResult['clusters']) {
+              const imageCluster = await PatientImageCluster.create({
+                name: group || String(id),
+                id,
+                patientId: patient.id,
+              });
+              await PatientImage.bulkCreate(
+                files.map(({ file }) => ({
+                  source: `/uploads/${slug}/${file}`,
+                  clusterId: imageCluster.id,
+                  details: {
+                    geometry,
+                    outliers,
+                    normal,
+                  },
+                }))
+              );
+            }
+          }
         }
-
-        return base as PatientImageModelCreationAttributes;
-      });
-
-      await PatientImageModel.bulkCreate(patientImages);
+      }
     }
     return { status: AddPatientActionStates.SUCCESS };
   } catch (error) {

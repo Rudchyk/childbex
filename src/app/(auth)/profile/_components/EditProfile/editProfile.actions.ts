@@ -8,7 +8,7 @@ import {
   EditEmailProfileFormData,
 } from './editProfileForms.schemas';
 import { ValidationError } from 'yup';
-import { User, UserModel } from '@/db/models/User.model';
+import { User } from '@/db/models/User.model';
 import { EditProfileActionStates } from './EditProfileActionStates.enum';
 
 export interface EditProfileActionState {
@@ -28,7 +28,7 @@ export const editProfile = async (
   try {
     await syncDb();
 
-    const user = await UserModel.findByPk(id);
+    const user = await User.findByPk(id);
 
     if (!user) {
       return {

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { UserModel } from '@/db/models/User.model';
+import { User } from '@/db/models/User.model';
 import { syncDb } from '@/db';
 
 export async function GET(
@@ -9,7 +9,7 @@ export async function GET(
   try {
     await syncDb();
     const { id } = await params;
-    const user = await UserModel.findByPk(id);
+    const user = await User.findByPk(id);
 
     if (!user) {
       return NextResponse.json({ message: 'Not found' }, { status: 404 });

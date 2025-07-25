@@ -135,6 +135,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     setCanScroll(false);
     setLoadedSlicesMapping({});
     setLoadedItemsMapping({});
+    setLoadErrorEvents([]);
   };
 
   useEffect(() => {

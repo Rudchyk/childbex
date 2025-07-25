@@ -1,8 +1,9 @@
 'use server';
 
 import { syncDb } from '@/db';
-import { UserModel, UserRoles } from '@/db/models/User.model';
+import { User } from '@/db/models/User.model';
 import { DeleteProfileActionStates } from './DeleteProfileActionStates.enum';
+import { UserRoles } from '@/types';
 
 export interface DeleteProfileActionState {
   status: DeleteProfileActionStates;
@@ -16,7 +17,7 @@ export const deleteProfile = async (
   try {
     await syncDb();
 
-    const user = await UserModel.findByPk(id);
+    const user = await User.findByPk(id);
 
     if (!user) {
       return {

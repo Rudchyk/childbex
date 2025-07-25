@@ -2,73 +2,86 @@ import {
   Association,
   BelongsToGetAssociationMixin,
   DataTypes,
-  ForeignKey,
   HasManyCreateAssociationMixin,
   HasManyGetAssociationsMixin,
+  InferAttributes,
+  InferCreationAttributes,
   Model,
-  Optional,
 } from 'sequelize';
 import { sequelize } from '@/db';
 import {
-  PatientImageModelAttributes,
+  PatientImage as PatientImageAttributes,
   PatientImageReviewVoteTypes,
   PatientImageStatus,
 } from '@/types';
-import { PatientModel } from './Patient.model';
+import { Patient } from './Patient.model';
 import fs from 'fs';
-import { UserModel } from './User.model';
-import { PatientImageReviewVoteModel } from './PatientImageReview.model';
+import { User } from './User.model';
+import { PatientImageCluster } from './PatientImageCluster.model';
+import { PatientImageReviewVote } from './PatientImageReviewVote.model';
+import { basicTimestampFields } from '../helpers/timestamps';
 
-export * from '@/types/lib/PatientImage.types';
-
-export type PatientImageModelCreationAttributes = Optional<
-  PatientImageModelAttributes,
-  | 'id'
-  | 'status'
-  | 'votesCount'
-  | 'normalVotes'
-  | 'abnormalVotes'
-  | 'uncertainVotes'
-  | 'isReview'
->;
-
-export class PatientImageModel
+export class PatientImage
   extends Model<
-    PatientImageModelAttributes,
-    PatientImageModelCreationAttributes
+    InferAttributes<PatientImage>,
+    InferCreationAttributes<
+      PatientImage,
+      {
+        omit:
+          | 'id'
+          | 'status'
+          | 'isBrocken'
+          | 'isAbnormal'
+          | 'adminResolutionId'
+          | 'resolutionComment'
+          | 'resolvedAt'
+          | 'votesCount'
+          | 'normalVotes'
+          | 'abnormalVotes'
+          | 'uncertainVotes'
+          | 'createdAt'
+          | 'updatedAt';
+      }
+    >
   >
-  implements PatientImageModelAttributes
+  implements PatientImageAttributes
 {
-  declare id: string;
-  declare source: string;
-  declare patientId: ForeignKey<PatientModel['id']>;
-  declare notes?: string | null;
-  declare group?: string | null;
-  declare cluster?: number | null;
-  declare isBrocken?: boolean | null;
-  declare isAbnormal?: boolean | null;
-  declare isReview: boolean;
-  declare details?: object | null;
-  declare status: PatientImageStatus;
-  declare adminResolutionId?: ForeignKey<UserModel['id']> | null;
-  declare resolutionComment?: string | null;
-  declare resolvedAt?: Date | null;
-  declare votesCount: number;
-  declare normalVotes: number;
-  declare abnormalVotes: number;
-  declare uncertainVotes: number;
+  declare id: PatientImageAttributes['id'];
+  declare source: PatientImageAttributes['source'];
+  declare notes: PatientImageAttributes['notes'];
+  declare clusterId: PatientImageAttributes['clusterId'];
+  declare isBrocken: PatientImageAttributes['isBrocken'];
+  declare isAbnormal: PatientImageAttributes['isAbnormal'];
+  declare details: PatientImageAttributes['details'];
+  declare status: PatientImageAttributes['status'];
+  declare adminResolutionId: PatientImageAttributes['adminResolutionId'];
+  declare resolutionComment: PatientImageAttributes['resolutionComment'];
+  declare resolvedAt: PatientImageAttributes['resolvedAt'];
+  declare votesCount: PatientImageAttributes['votesCount'];
+  declare normalVotes: PatientImageAttributes['normalVotes'];
+  declare abnormalVotes: PatientImageAttributes['abnormalVotes'];
+  declare uncertainVotes: PatientImageAttributes['uncertainVotes'];
 
-  declare getPatient: BelongsToGetAssociationMixin<PatientModel>;
-  declare getVotes: HasManyGetAssociationsMixin<PatientImageReviewVoteModel>;
-  declare createVote: HasManyCreateAssociationMixin<PatientImageReviewVoteModel>;
-  declare getAdminResolver: BelongsToGetAssociationMixin<UserModel>;
+  // Sequelize‑generated:
+  declare readonly createdAt: PatientImageAttributes['createdAt'];
+  declare readonly updatedAt: PatientImageAttributes['updatedAt'];
 
-  // Статичні асоціації
+  declare getPatient: BelongsToGetAssociationMixin<Patient>;
+  declare getVotes: HasManyGetAssociationsMixin<PatientImageReviewVote>;
+  declare createVote: HasManyCreateAssociationMixin<PatientImageReviewVote>;
+  declare getResolver: BelongsToGetAssociationMixin<User>;
+
+  // Статичні асоціації // TODO:?
   declare static associations: {
-    patient: Association<PatientImageModel, PatientModel>;
-    votes: Association<PatientImageModel, PatientImageReviewVoteModel>;
-    adminResolver: Association<PatientImageModel, UserModel>;
+    patient: Association<PatientImage, Patient>;
+    votes: Association<PatientImage, PatientImageReviewVote>;
+    resolver: Association<PatientImage, User>;
   };
+
+  // Associations:
+  declare patient?: PatientImageAttributes['cluster'];
+  declare votes?: PatientImageAttributes['votes'];
+  declare resolver?: PatientImageAttributes['resolver'];
 
   public calculateStatus(): PatientImageStatus {
     const totalVotes = this.votesCount || 0;
@@ -114,13 +127,13 @@ export class PatientImageModel
   public async updateVoteCounts(): Promise<void> {
     const votes = await this.getVotes();
     this.normalVotes = votes.filter(
-      (v) => v.value === PatientImageReviewVoteTypes.NORMAL
+      (v) => v.vote === PatientImageReviewVoteTypes.NORMAL
     ).length;
     this.abnormalVotes = votes.filter(
-      (v) => v.value === PatientImageReviewVoteTypes.ABNORMAL
+      (v) => v.vote === PatientImageReviewVoteTypes.ABNORMAL
     ).length;
     this.uncertainVotes = votes.filter(
-      (v) => v.value === PatientImageReviewVoteTypes.UNCERTAIN
+      (v) => v.vote === PatientImageReviewVoteTypes.UNCERTAIN
     ).length;
     this.votesCount = votes.length;
     const status = this.calculateStatus();
@@ -142,7 +155,7 @@ export class PatientImageModel
   }
 }
 
-PatientImageModel.init(
+PatientImage.init(
   {
     id: {
       type: DataTypes.UUID,
@@ -154,36 +167,25 @@ PatientImageModel.init(
       type: DataTypes.STRING,
       allowNull: false,
     },
-    patientId: {
-      type: DataTypes.UUID,
-      allowNull: false,
-      references: {
-        model: PatientModel,
-        key: 'id',
-      },
-      onDelete: 'CASCADE',
-    },
     notes: {
       type: DataTypes.TEXT,
       allowNull: true,
     },
-    cluster: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-    },
-    group: {
-      type: DataTypes.STRING,
-      allowNull: true,
+    clusterId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      references: {
+        model: PatientImageCluster,
+        key: 'id',
+      },
+      onDelete: 'CASCADE',
     },
     isBrocken: {
       type: DataTypes.BOOLEAN,
-      allowNull: true,
+      allowNull: false,
+      defaultValue: false,
     },
     isAbnormal: {
-      type: DataTypes.BOOLEAN,
-      allowNull: true,
-    },
-    isReview: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
@@ -195,12 +197,12 @@ PatientImageModel.init(
     status: {
       type: DataTypes.ENUM(...Object.values(PatientImageStatus)),
       allowNull: false,
-      defaultValue: PatientImageStatus.NORMAL,
+      defaultValue: PatientImageStatus.NOT_REVIEWED,
     },
     adminResolutionId: {
       type: DataTypes.UUID,
       references: {
-        model: UserModel,
+        model: User,
         key: 'id',
       },
       allowNull: true,
@@ -233,11 +235,12 @@ PatientImageModel.init(
       allowNull: false,
       defaultValue: 0,
     },
+    ...basicTimestampFields,
   },
   {
     sequelize,
     tableName: 'patients_images',
-    timestamps: false,
+    timestamps: true,
     hooks: {
       afterDestroy({ source }) {
         fs.unlinkSync(source);
@@ -261,24 +264,24 @@ PatientImageModel.init(
   }
 );
 
-PatientModel.hasMany(PatientImageModel, {
-  foreignKey: 'patientId',
+PatientImageCluster.hasMany(PatientImage, {
+  foreignKey: 'clusterId',
   as: 'images',
   onDelete: 'CASCADE',
   hooks: true,
 });
 
-PatientImageModel.belongsTo(PatientModel, {
-  foreignKey: 'patientId',
-  as: 'patient',
+PatientImage.belongsTo(PatientImageCluster, {
+  foreignKey: 'clusterId',
+  as: 'images',
 });
 
-UserModel.hasMany(PatientImageModel, {
+User.hasMany(PatientImage, {
   foreignKey: 'adminResolutionId',
-  as: 'adminResolver',
+  as: 'resolver',
 });
 
-PatientImageModel.belongsTo(UserModel, {
+PatientImage.belongsTo(User, {
   foreignKey: 'adminResolutionId',
-  as: 'adminResolver',
+  as: 'resolver',
 });
