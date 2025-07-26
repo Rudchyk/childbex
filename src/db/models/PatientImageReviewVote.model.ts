@@ -107,6 +107,12 @@ PatientImageReviewVote.init(
         }
       },
     },
+    indexes: [
+      {
+        unique: true,
+        fields: ['patientImageId', 'reviewerId'],
+      },
+    ],
   }
 );
 
@@ -119,12 +125,12 @@ PatientImage.hasMany(PatientImageReviewVote, {
 
 PatientImageReviewVote.belongsTo(PatientImage, {
   foreignKey: 'patientImageId',
-  as: 'votes',
+  as: 'patientImage',
 });
 
 User.hasMany(PatientImageReviewVote, {
   foreignKey: 'reviewerId',
-  as: 'reviewer',
+  as: 'reviewers',
 });
 
 PatientImageReviewVote.belongsTo(User, {

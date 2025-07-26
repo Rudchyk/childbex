@@ -14,5 +14,6 @@ DELETE FROM patients_images
 
 sergii.rudchyk3@gmail.com
 sergii.rudchyk@gmail.com
+sergii.rudchyk2@gmail.com
 111111111
 222222222

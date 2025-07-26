@@ -6,8 +6,9 @@ import { FC, useState } from 'react';
 import { PatientImage, PatientImageCluster } from '@/types';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
-import { Box, Paper } from '@mui/material';
+import { Box, Divider, Paper, Typography } from '@mui/material';
 import { PatientImagesTags } from './PatientImagesTags';
+import { PatientImageReview } from './PatientImageReview';
 
 interface PatientImagesProps {
   data: PatientImage[];
@@ -52,9 +53,28 @@ export const PatientImages: FC<PatientImagesProps> = ({
           bottom: '10%',
           left: 5,
           width: 300,
+          zIndex: 50,
         }}
       >
-        <PatientImagesTags imagesCluster={imagesCluster} />
+        <Box height="100%" overflow="auto">
+          <Typography variant="subtitle1" px={1} pt={1}>
+            Tags:
+          </Typography>
+          <PatientImagesTags
+            slotsProps={{
+              StackProps: {
+                direction: 'column',
+                alignItems: 'start',
+                spacing: 1,
+                px: 1,
+                pb: 1,
+              },
+            }}
+            imagesCluster={imagesCluster}
+          />
+          <Divider />
+          {imagesCluster.inReview && <PatientImageReview item={currentItem} />}
+        </Box>
       </Box>
       <DicomViewer
         list={data.map(({ source }) => source)}

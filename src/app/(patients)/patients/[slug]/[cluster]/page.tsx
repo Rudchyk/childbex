@@ -49,7 +49,9 @@ export default async function Page({ params }: PageProps) {
   const _imagesCluster = imagesCluster.toJSON();
   return (
     <Stack spacing={2}>
-      <Typography variant="h1">{patient.name}</Typography>
+      <Typography variant="h1" textAlign="center">
+        {patient.name}
+      </Typography>
       {isBrocken ? (
         <PatientBrockenImages data={data} imagesCluster={_imagesCluster} />
       ) : (

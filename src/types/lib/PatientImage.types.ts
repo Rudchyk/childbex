@@ -1,5 +1,6 @@
 import { Timestamps } from './Model.types';
 import type { PatientImageCluster } from './PatientImageCluster.types';
+import type { PatientImageReviewVote } from './PatientImageReviewVote.types';
 import type { User } from './User.types';
 import type { ForeignKey } from 'sequelize';
 
@@ -31,6 +32,6 @@ export interface PatientImage extends Timestamps {
 
   // Associations:
   cluster?: PatientImageCluster[];
-  votes?: any[];
+  votes?: PatientImageReviewVote[];
   resolver?: User;
 }

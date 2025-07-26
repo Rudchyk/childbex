@@ -19,6 +19,7 @@ import { useRouter } from 'next/navigation';
 import BoltIcon from '@mui/icons-material/Bolt';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import ShieldIcon from '@mui/icons-material/Shield';
+import MedicationIcon from '@mui/icons-material/Medication';
 
 export const AuthUser = () => {
   const session = useSession();
@@ -41,6 +42,8 @@ export const AuthUser = () => {
         return <ShieldIcon sx={{ color: 'white' }} />;
       case UserRoles.SUPER:
         return <BoltIcon sx={{ color: 'white' }} />;
+      case UserRoles.DOCTOR:
+        return <MedicationIcon sx={{ color: 'white' }} />;
       default:
         return null;
     }
@@ -51,7 +54,8 @@ export const AuthUser = () => {
         return theme.palette.error.main;
       case UserRoles.SUPER:
         return theme.palette.warning.main;
-      case UserRoles.USER:
+      case UserRoles.DOCTOR:
+        return theme.palette.primary.main;
       default:
         return null;
     }
