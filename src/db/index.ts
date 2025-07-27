@@ -9,7 +9,7 @@ const {
   DB_PORT = '5432',
 } = process.env;
 
-console.debug('NODE_ENV', process.env.NODE_ENV);
+// console.debug('NODE_ENV', process.env.NODE_ENV);
 
 export const sequelize = new Sequelize(DB_NAME!, DB_USER!, DB_PASS, {
   host: DB_HOST,
