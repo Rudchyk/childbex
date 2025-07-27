@@ -1,5 +1,6 @@
 export const publicPaths = {
   login: '/login',
+  init: '/init',
 };
 
 export const paths = {
