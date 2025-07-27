@@ -61,7 +61,9 @@ export const ChangePasswordProfile: FC<ChangePasswordProfileProps> = ({
       notifySuccess('Password updated successfully!');
       signOut({ callbackUrl: paths.login });
     }
-    toggleOpen();
+    if (state.status !== ChangePasswordProfileActionStates.IDLE) {
+      toggleOpen();
+    }
   }, [state]);
 
   return (

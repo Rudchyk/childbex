@@ -56,7 +56,9 @@ export const TrashAction: FC<TrashActionProps> = ({ id, type }) => {
       notifySuccess(`User was ${type}d successfully!`);
       router.refresh();
     }
-    toggleOpen();
+    if (state.status !== TrashedPatientsActionStates.IDLE) {
+      toggleOpen();
+    }
   }, [state]);
 
   return (

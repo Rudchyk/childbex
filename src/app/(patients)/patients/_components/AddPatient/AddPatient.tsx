@@ -53,8 +53,8 @@ export const AddPatient = () => {
       default:
         break;
     }
-    toggleOpen();
     if (state.status !== AddPatientActionStates.IDLE) {
+      toggleOpen();
       setLoading(false);
     }
   }, [state]);

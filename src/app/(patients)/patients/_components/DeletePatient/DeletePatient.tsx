@@ -47,7 +47,9 @@ export const DeletePatient: FC<DeletePatientProps> = ({ id }) => {
       default:
         break;
     }
-    toggleOpen();
+    if (state.status !== DeletePatientActionStates.IDLE) {
+      toggleOpen();
+    }
   }, [state]);
 
   return (

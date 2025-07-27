@@ -58,7 +58,9 @@ export const AddUser = () => {
       default:
         break;
     }
-    toggleOpen();
+    if (state.status !== AddUserActionStates.IDLE) {
+      toggleOpen();
+    }
   }, [state]);
 
   return (

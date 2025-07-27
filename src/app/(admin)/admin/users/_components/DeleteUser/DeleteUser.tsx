@@ -40,7 +40,9 @@ export const DeleteUser: FC<DeleteUserProps> = ({ id }) => {
       notifySuccess('User was deleted successfully!');
       router.refresh();
     }
-    toggleOpen();
+    if (state.status !== DeleteUserActionStates.IDLE) {
+      toggleOpen();
+    }
   }, [state]);
 
   return (

@@ -43,7 +43,9 @@ export const DeleteProfile: FC<DeleteProfileProps> = ({ id }) => {
       notifySuccess('Profile deleted successfully!');
       signOut({ callbackUrl: paths.login });
     }
-    toggleOpen();
+    if (state.status !== DeleteProfileActionStates.IDLE) {
+      toggleOpen();
+    }
   }, [state]);
 
   if (data?.user.role === UserRoles.SUPER) {

@@ -57,7 +57,9 @@ export const ChangeUserPassword: FC<ChangeUserPasswordProps> = ({ id }) => {
       default:
         break;
     }
-    toggleOpen();
+    if (state.status !== ChangeUserPasswordActionStates.IDLE) {
+      toggleOpen();
+    }
   }, [state]);
 
   return (
