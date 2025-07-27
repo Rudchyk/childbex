@@ -10,7 +10,6 @@ const Page: React.FC = async () => {
     paranoid: false,
     where: { deletedAt: { [Op.ne]: null } },
   });
-  console.log('🚀 ~ Page ~ result:', result);
   return (
     <Stack spacing={1}>
       <Typography variant="h1">Trashed patients</Typography>
