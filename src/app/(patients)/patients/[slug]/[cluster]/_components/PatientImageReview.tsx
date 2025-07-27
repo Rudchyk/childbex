@@ -1,8 +1,9 @@
 import { defaultDateFormat } from '@/lib/constants/dates';
 import { PatientImage, PatientImageStatus, UserRoles } from '@/types';
 import {
-  Chip,
+  Box,
   ChipProps,
+  CircularProgress,
   Divider,
   Stack,
   Table,
@@ -66,7 +67,9 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
     {
       label: 'Status',
       value: (
-        <Chip color={getStatusColor()} label={item?.status?.toUpperCase()} />
+        <Typography color={getStatusColor()} variant="subtitle2">
+          {item?.status?.toUpperCase()}
+        </Typography>
       ),
     },
   ];
@@ -89,6 +92,15 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
   const userVote = item?.votes?.find(
     ({ reviewerId }) => reviewerId === session?.data?.user.id
   );
+
+  if (session.status === 'loading') {
+    return (
+      <Box sx={{ p: 3 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
   return (
     <>
       <Stack spacing={1} py={1}>
@@ -101,7 +113,7 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
         <Typography px={2} variant="subtitle1">
           Info:
         </Typography>
-        <Table size="small">
+        <Table size="small" sx={{ mb: 2 }}>
           <TableBody>
             {info.map(({ label, value }, index) => (
               <TableRow key={label + index}>
@@ -118,8 +130,7 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
             <Typography px={2} variant="subtitle1">
               Resolution info:
             </Typography>
-
-            <Table size="small">
+            <Table size="small" sx={{ mb: 2 }}>
               <TableBody>
                 {resolutionInfo.map(({ label, value }, index) => (
                   <TableRow key={label + index}>
@@ -133,7 +144,12 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
             </Table>
           </>
         )}
-        <Stack spacing={1} direction="row" justifyContent="space-between">
+        <Stack
+          spacing={1}
+          direction="row"
+          justifyContent="space-between"
+          alignItems="center"
+        >
           <Typography px={2} variant="subtitle1">
             Review info:
           </Typography>

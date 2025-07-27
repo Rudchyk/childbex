@@ -8,6 +8,7 @@ import { PatientImage } from '@/db/models/PatientImage.model';
 import { PatientBrockenImages } from './_components/PatientBrockenImages';
 import { PatientImages } from './_components/PatientImages';
 import { PatientImageReviewVote } from '@/db/models/PatientImageReviewVote.model';
+import { User } from '@/db/models/User.model';
 
 interface PageProps {
   params: Promise<{ slug: string; cluster: string }>;
@@ -34,6 +35,12 @@ export default async function Page({ params }: PageProps) {
           {
             model: PatientImageReviewVote,
             as: 'votes',
+            include: [
+              {
+                model: User,
+                as: 'reviewer',
+              },
+            ],
           },
         ],
       },

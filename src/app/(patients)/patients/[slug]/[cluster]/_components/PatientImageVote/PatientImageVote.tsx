@@ -24,7 +24,7 @@ import {
   PatientImageVoteActionState,
   PatientImageVoteData,
 } from './patientImageVote.actions';
-// import { useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
 interface PatientImageVoteProps {
   patientImageId: string;
@@ -35,7 +35,7 @@ export const PatientImageVote: FC<PatientImageVoteProps> = ({
   patientImageId,
   userVote,
 }) => {
-  // const router = useRouter();
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [vote, setVote] = useState(PatientImageReviewVoteTypes.NORMAL);
   const [comment, setComment] = useState('');
@@ -78,8 +78,8 @@ export const PatientImageVote: FC<PatientImageVoteProps> = ({
         break;
       case PatientImageVoteActionStates.SUCCESS:
         notifySuccess('Vote updated successfully!');
-        // router.refresh();
-        window.location.reload();
+        router.refresh();
+        // window.location.reload();
         break;
       default:
         break;

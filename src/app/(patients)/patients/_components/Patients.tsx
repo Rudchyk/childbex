@@ -188,12 +188,7 @@ export const Patients: FC<PatientProps> = ({ data }) => {
       default:
         break;
     }
-    if (
-      ![
-        UpdatePatientActionStates.SUCCESS,
-        UpdatePatientActionStates.IDLE,
-      ].includes(state.status)
-    ) {
+    if (![UpdatePatientActionStates.IDLE].includes(state.status)) {
       router.refresh();
     }
   }, [state]);

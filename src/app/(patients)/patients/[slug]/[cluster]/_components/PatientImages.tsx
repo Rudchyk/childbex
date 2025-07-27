@@ -1,7 +1,7 @@
 'use client';
 
 import { DicomViewer } from '@/lib/components';
-import { FC, useState } from 'react';
+import { FC, useMemo, useState } from 'react';
 // import { PatientDWVToolbar } from './PatientDWVToolbar';
 import { PatientImage, PatientImageCluster } from '@/types';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
@@ -19,28 +19,13 @@ export const PatientImages: FC<PatientImagesProps> = ({
   data,
   imagesCluster,
 }) => {
-  const [itemsMapping, setItemsMapping] = useState(
-    Object.fromEntries(data.map((item) => [item.source, item]))
+  const itemsMapping = useMemo(
+    () => Object.fromEntries(data.map((item) => [item.source, item])),
+    [data]
   );
-  const [currentItem, setCurrentItem] = useState<PatientImage | undefined>();
+  const [currentSource, setCurrentSource] = useState<string | undefined>();
   const onCurrentItemChange = (newCurrentSource: string) => {
-    const item = itemsMapping[newCurrentSource];
-    if (item) {
-      setCurrentItem(item);
-    } else {
-      console.warn(`${newCurrentSource} does note exist!`);
-    }
-  };
-  const handleOnItemUpdate = (source: string) => {
-    console.log('source', source);
-
-    // setItemsMapping({
-    //   ...itemsMapping,
-    //   [source]: {
-    //     ...itemsMapping[source],
-    //     type,
-    //   },
-    // });
+    setCurrentSource(newCurrentSource);
   };
   return (
     <>
@@ -73,7 +58,11 @@ export const PatientImages: FC<PatientImagesProps> = ({
             imagesCluster={imagesCluster}
           />
           <Divider />
-          {imagesCluster.inReview && <PatientImageReview item={currentItem} />}
+          {imagesCluster.inReview &&
+            !!currentSource &&
+            !!itemsMapping[currentSource] && (
+              <PatientImageReview item={itemsMapping[currentSource]} />
+            )}
         </Box>
       </Box>
       <DicomViewer

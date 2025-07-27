@@ -38,7 +38,15 @@ export const trashedPatients = async (
     switch (type) {
       case TrashedPatientsActionTypes.DELETE:
         const destDir = path.join(UPLOAD_ROOT, result.slug);
-        fs.rmdirSync(destDir, { recursive: true });
+        try {
+          fs.rmdirSync(destDir, { recursive: true });
+        } catch (error) {
+          console.info(
+            '[rmdirSync]',
+            destDir,
+            (error as Error | SequelizeValidationError).message
+          );
+        }
         await result.destroy({ force: true });
         break;
       case TrashedPatientsActionTypes.RESTORE:

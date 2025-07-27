@@ -100,6 +100,11 @@ export class PatientImage
       return PatientImageStatus.ADMIN_RESOLVED;
     }
 
+    // Перевіряємо рівність голосів між normal і abnormal
+    if (normalCount === abnormalCount && normalCount > 0) {
+      return PatientImageStatus.CONFLICTED;
+    }
+
     // Логіка визначення конфлікту (можна налаштувати)
     const significantVotes = normalCount + abnormalCount;
     const conflictThreshold = 0.3; // 30% від загальної кількості значущих голосів
@@ -113,14 +118,13 @@ export class PatientImage
       }
     }
 
-    // Визначення результату по більшості
     if (abnormalCount > normalCount && abnormalCount > uncertainCount) {
       return PatientImageStatus.ABNORMAL;
-    } else if (normalCount >= abnormalCount && normalCount >= uncertainCount) {
-      // Нормальне зображення має пріоритет при рівності голосів
+    } else if (normalCount > abnormalCount && normalCount > uncertainCount) {
       return PatientImageStatus.NORMAL;
     } else {
-      return PatientImageStatus.NORMAL; // По замовчуванні нормальне
+      // Якщо uncertain має найбільше голосів або інші рівності
+      return PatientImageStatus.CONFLICTED;
     }
   }
 
@@ -143,11 +147,8 @@ export class PatientImage
       case PatientImageStatus.ABNORMAL:
         this.isAbnormal = true;
         break;
-      case PatientImageStatus.NORMAL:
-        this.isAbnormal = false;
-        break;
       default:
-        this.isAbnormal = null;
+        this.isAbnormal = false;
         break;
     }
 

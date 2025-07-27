@@ -48,6 +48,9 @@ export const findExtendedPatient = async (
         ...options?.patientImageClusterOptions,
       },
     ],
+    order: [
+      [{ model: PatientImageCluster, as: 'clusters' }, 'createdAt', 'ASC'],
+    ],
   });
   return result;
 };
