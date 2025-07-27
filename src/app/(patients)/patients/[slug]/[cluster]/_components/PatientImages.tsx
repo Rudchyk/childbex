@@ -2,7 +2,6 @@
 
 import { DicomViewer } from '@/lib/components';
 import { FC, useMemo, useState } from 'react';
-// import { PatientDWVToolbar } from './PatientDWVToolbar';
 import { PatientImage, PatientImageCluster } from '@/types';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
