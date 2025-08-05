@@ -13,13 +13,17 @@ const handle = app.getRequestHandler();
 app.prepare().then(() => {
   const server = express();
 
+  app.get('/', (req, res) => {
+    res.send({ message: 'Welcome to server!' });
+  });
+
   // Serve /uploads as static
   // server.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
   // Default catch-all to handle all other routes
-  server.all('*', (req, res) => {
-    return handle(req, res);
-  });
+  // server.all('*', (req, res) => {
+  //   return handle(req, res);
+  // });
 
   server.listen(port, () => {
     console.log(`> Ready on http://localhost:${port}`);
