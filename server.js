@@ -14,7 +14,7 @@ app.prepare().then(() => {
   const server = express();
 
   // Serve /uploads as static
-  server.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+  // server.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
   // Default catch-all to handle all other routes
   server.all('*', (req, res) => {
