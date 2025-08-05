@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "dev-old": "next dev --turbopack",
-    "dev": "next dev",
-    "build": "next build",
-    "start": "NODE_ENV=production node server.js",
+    "dev": "nodemon",
+    "build": "next build && tsc --project tsconfig.server.json",
+    "start": "cross-env NODE_ENV=production node dist/server.js",
     "lint": "next lint",
     "clean": "rm -rf .next"
   },
@@ -29,10 +29,12 @@
     "bcrypt": "^6.0.0",
     "canvas": "^3.1.2",
     "copy-webpack-plugin": "^13.0.0",
+    "cross-env": "^10.0.0",
     "cyrillic-doctor": "^1.0.3",
     "date-fns": "^4.1.0",
     "dicom-parser": "^1.8.21",
     "dwv": "^0.32.0",
+    "express": "^5.1.0",
     "lodash": "^4.17.21",
     "next": "15.3.5",
     "next-auth": "^4.24.11",
@@ -53,6 +55,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@types/bcrypt": "^5.0.2",
+    "@types/express": "^5.0.3",
     "@types/lodash": "^4.17.20",
     "@types/node": "^20.19.7",
     "@types/pg": "^8.15.4",
@@ -63,7 +66,9 @@
     "@types/tar-fs": "^2.0.4",
     "eslint": "^9",
     "eslint-config-next": "15.3.5",
+    "nodemon": "^3.1.10",
     "sass": "^1.89.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }

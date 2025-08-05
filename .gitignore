@@ -16,7 +16,7 @@ public/assets/workers
 *.tar
 *.tgz
 *.gz
-
+dist/*
 
 # testing
 /coverage
