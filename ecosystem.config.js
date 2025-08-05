@@ -2,11 +2,9 @@ module.exports = {
   apps: [
     {
       name: 'childbex',
-      script: 'npm',
-      args: 'start',
+      script: './server.js',
       env: {
         NODE_ENV: 'production',
-        PORT: 3002,
       },
     },
   ],
