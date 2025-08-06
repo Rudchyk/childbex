@@ -43,6 +43,8 @@ pm2 start ecosystem.config.js --only dev.childbex.com
 ```bash
 git reset --hard HEAD
 pm2 restart dev.childbex.com; pm2 logs dev.childbex.com;
+git pull; npm run build; pm2 restart dev.childbex.com; pm2 logs dev.childbex.com;
+pm2 restart dev.childbex.com --update-env; pm2 logs dev.childbex.com;
 tail -n 1000 /root/.pm2/logs/dev.childbex.com-out.log
 tail -n 1000 /root/.pm2/logs/dev.childbex.com-error.log
 ```

@@ -38,8 +38,11 @@ export const trashedPatients = async (
     switch (type) {
       case TrashedPatientsActionTypes.DELETE:
         const destDir = path.join(UPLOAD_ROOT, result.slug);
+        console.log('🚀 ~ trashedPatients ~ destDir:', destDir);
+        const isExists = fs.existsSync(destDir);
+        console.log('🚀 ~ trashedPatients ~ isExists:', isExists);
         try {
-          if (fs.existsSync(destDir)) {
+          if (isExists) {
             fs.rmdirSync(destDir, { recursive: true });
           }
         } catch (error) {

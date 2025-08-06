@@ -244,7 +244,10 @@ PatientImage.init(
     timestamps: true,
     hooks: {
       afterDestroy({ source }) {
-        fs.unlinkSync(source);
+        console.log('🚀 ~ afterDestroy ~ source:', source);
+        if (fs.existsSync(source)) {
+          fs.unlinkSync(source);
+        }
       },
       afterUpdate: async (instance) => {
         // Автоматично оновлюємо статус після зміни голосів
