@@ -39,7 +39,9 @@ export const trashedPatients = async (
       case TrashedPatientsActionTypes.DELETE:
         const destDir = path.join(UPLOAD_ROOT, result.slug);
         try {
-          fs.rmdirSync(destDir, { recursive: true });
+          if (fs.existsSync(destDir)) {
+            fs.rmdirSync(destDir, { recursive: true });
+          }
         } catch (error) {
           console.info(
             '[rmdirSync]',
@@ -58,6 +60,7 @@ export const trashedPatients = async (
 
     return { status: TrashedPatientsActionStates.SUCCESS };
   } catch (error) {
+    console.error('trashedPatients', error);
     return {
       status: TrashedPatientsActionStates.FAILED,
       message: (error as Error | SequelizeValidationError).message,

@@ -4,7 +4,7 @@ import { createServer } from 'http';
 import { parse } from 'url';
 import next from 'next';
 import helmet from 'helmet';
-import compression from 'compression';
+// import compression from 'compression';
 import morgan from 'morgan';
 import cors from 'cors';
 // import rateLimit from 'express-rate-limit';
@@ -44,7 +44,7 @@ app.prepare().then(() => {
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     })
   );
-  server.use(compression());
+  // server.use(compression());
   server.use(morgan(process.env.NODE_ENV === 'production' ? 'tiny' : 'dev'));
   // server.use(limiter);
   server.use(cors());
