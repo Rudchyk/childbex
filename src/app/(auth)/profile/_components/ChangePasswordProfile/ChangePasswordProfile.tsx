@@ -59,7 +59,7 @@ export const ChangePasswordProfile: FC<ChangePasswordProfileProps> = ({
       notifyError(`Failed validating your submission! ${state.message}`);
     } else if (state.status === ChangePasswordProfileActionStates.SUCCESS) {
       notifySuccess('Password updated successfully!');
-      signOut({ callbackUrl: paths.login });
+      signOut({ callbackUrl: paths.login, redirect: true });
     }
     if (state.status !== ChangePasswordProfileActionStates.IDLE) {
       toggleOpen();

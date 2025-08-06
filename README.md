@@ -37,6 +37,7 @@ pm2 start ecosystem.config.js --only dev.childbex.com
 - [robots.txt](http://localhost:3000/robots.txt)
 - [health](http://localhost:3000/health)
 - [uploads Logo.svg](http://localhost:3000/uploads/Logo.svg)
+- [API hello](https://dev.childbex.com/api/hello)
 
 #### Helpers
 

@@ -5,6 +5,7 @@ import { authOptions } from './auth.options';
 import { User } from '@/db/models/User.model';
 import { signOut } from 'next-auth/react';
 import { AuthProvider } from './AuthProvider';
+import { paths } from '../constants/paths';
 
 export const Auth = async ({ children }: { children: React.ReactNode }) => {
   const session = await getServerSession(authOptions);
@@ -13,7 +14,7 @@ export const Auth = async ({ children }: { children: React.ReactNode }) => {
 
   if (session && !user) {
     console.error('session user does not exist!');
-    signOut();
+    signOut({ callbackUrl: paths.login, redirect: true });
   }
 
   return <AuthProvider>{children}</AuthProvider>;

@@ -5,7 +5,8 @@ import { useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { paths } from '../constants/paths';
 
-const signOutAction = () => signOut({ callbackUrl: paths.login });
+const signOutAction = () =>
+  signOut({ callbackUrl: paths.login, redirect: true });
 const checkHealth = async (id: string) => {
   try {
     const resp = await fetch(`/api/health/${id}`);

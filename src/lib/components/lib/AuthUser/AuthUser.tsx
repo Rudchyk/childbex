@@ -93,7 +93,7 @@ export const AuthUser = () => {
       <Tooltip title="Sign Out">
         <IconButton
           aria-label="signOut"
-          onClick={() => signOut({ callbackUrl: paths.login })}
+          onClick={() => signOut({ callbackUrl: paths.login, redirect: true })}
           color="inherit"
         >
           <LogoutIcon />

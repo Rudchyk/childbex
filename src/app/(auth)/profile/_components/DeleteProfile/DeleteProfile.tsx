@@ -41,7 +41,7 @@ export const DeleteProfile: FC<DeleteProfileProps> = ({ id }) => {
       notifyError('Unable to delete account!');
     } else if (state.status === DeleteProfileActionStates.SUCCESS) {
       notifySuccess('Profile deleted successfully!');
-      signOut({ callbackUrl: paths.login });
+      signOut({ callbackUrl: paths.login, redirect: true });
     }
     if (state.status !== DeleteProfileActionStates.IDLE) {
       toggleOpen();
