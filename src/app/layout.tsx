@@ -7,9 +7,15 @@ import { StoreProvider } from '@/lib/store/StoreProvider';
 import { Roboto } from 'next/font/google';
 import { Auth } from '@/lib/auth/Auth';
 
+const isNotIndexing = process.env.INDEXING === 'false';
+
 export const metadata: Metadata = {
   title: 'ChildBEX',
   description: 'ChildBEX',
+  robots: {
+    index: !isNotIndexing,
+    follow: !isNotIndexing,
+  },
 };
 
 const roboto = Roboto({

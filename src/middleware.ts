@@ -8,6 +8,19 @@ export default async function middleware(
   req: NextRequest
 ): Promise<NextResponse> {
   const { pathname } = req.nextUrl;
+  const isNotIndexing = process.env.INDEXING === 'false';
+  const getHeaders = () => {
+    if (isNotIndexing) {
+      return;
+    }
+    return {
+      headers: { 'X-Robots-Tag': 'noindex, nofollow' },
+    };
+  };
+  const res = NextResponse.next();
+  if (isNotIndexing) {
+    res.headers.set('X-Robots-Tag', 'noindex, nofollow');
+  }
 
   // Skip auth and static files
   if (
@@ -15,15 +28,15 @@ export default async function middleware(
     pathname.startsWith('/_next') ||
     pathname.includes('.')
   ) {
-    return NextResponse.next();
+    return res;
   }
 
   if (pathname.startsWith('/api')) {
-    return NextResponse.next();
+    return res;
   }
 
   if (Object.values(publicPaths).includes(pathname)) {
-    return NextResponse.next();
+    return res;
   }
 
   // Protect non-API pages with NextAuth session
@@ -34,21 +47,24 @@ export default async function middleware(
 
   if (session) {
     if ([publicPaths.login].includes(pathname)) {
-      return NextResponse.redirect(new URL('/', req.url));
+      return NextResponse.redirect(new URL('/', req.url), getHeaders());
     }
   } else {
     const loginUrl = new URL(publicPaths.login, req.url);
-    return NextResponse.redirect(loginUrl);
+    return NextResponse.redirect(loginUrl, getHeaders());
   }
 
   if (
     pathname.startsWith(paths.admin) &&
     ![UserRoles.ADMIN, UserRoles.SUPER].includes(session.role)
   ) {
-    return new NextResponse('Access Denied', { status: 401 });
+    return new NextResponse('Access Denied', {
+      status: 401,
+      ...getHeaders(),
+    });
   }
 
-  return NextResponse.next();
+  return res;
 }
 
 export const config = {
