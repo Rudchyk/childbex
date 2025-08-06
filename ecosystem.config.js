@@ -6,7 +6,6 @@ module.exports = {
       env: {
         PORT: 3000,
         NODE_ENV: 'production',
-        INDEXING: false,
       },
     },
     {
@@ -15,7 +14,6 @@ module.exports = {
       env: {
         PORT: 3001,
         NODE_ENV: 'production',
-        INDEXING: false,
       },
     },
   ],

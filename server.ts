@@ -51,7 +51,10 @@ app.prepare().then(() => {
   server.use(express.json({ limit: '10mb' }));
   server.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-  server.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+  server.use(
+    '/uploads',
+    express.static(path.join(__dirname, dev ? '' : '..', 'uploads'))
+  );
   server.get('/health', (req, res) => {
     res.status(200).json({
       status: 'OK',
