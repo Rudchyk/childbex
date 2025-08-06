@@ -3,7 +3,7 @@ import path from 'path';
 import { createServer } from 'http';
 import { parse } from 'url';
 import next from 'next';
-import helmet from 'helmet';
+// import helmet from 'helmet';
 // import compression from 'compression';
 import morgan from 'morgan';
 // import cors from 'cors';
@@ -21,29 +21,29 @@ const handle = app.getRequestHandler();
 // });
 
 app.prepare().then(() => {
-  server.use(
-    helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'", 'data:', 'blob:'],
-          scriptSrc: [
-            "'self'",
-            "'unsafe-inline'",
-            "'unsafe-eval'",
-            'data:',
-            'blob:',
-          ],
-          styleSrc: ["'self'", "'unsafe-inline'", 'data:'],
-          imgSrc: ["'self'", 'data:', 'blob:'],
-          connectSrc: ["'self'", 'ws:', 'data:', 'blob:'],
-          fontSrc: ["'self'", 'data:'],
-          objectSrc: ["'none'"],
-        },
-      },
-      crossOriginEmbedderPolicy: false,
-      crossOriginResourcePolicy: { policy: 'cross-origin' },
-    })
-  );
+  // server.use(
+  //   helmet({
+  //     contentSecurityPolicy: {
+  //       directives: {
+  //         defaultSrc: ["'self'", 'data:', 'blob:'],
+  //         scriptSrc: [
+  //           "'self'",
+  //           "'unsafe-inline'",
+  //           "'unsafe-eval'",
+  //           'data:',
+  //           'blob:',
+  //         ],
+  //         styleSrc: ["'self'", "'unsafe-inline'", 'data:'],
+  //         imgSrc: ["'self'", 'data:', 'blob:'],
+  //         connectSrc: ["'self'", 'ws:', 'data:', 'blob:'],
+  //         fontSrc: ["'self'", 'data:'],
+  //         objectSrc: ["'none'"],
+  //       },
+  //     },
+  //     crossOriginEmbedderPolicy: false,
+  //     crossOriginResourcePolicy: { policy: 'cross-origin' },
+  //   })
+  // );
   // server.use(compression());
   server.use(morgan(process.env.NODE_ENV === 'production' ? 'tiny' : 'dev'));
   // server.use(limiter);
