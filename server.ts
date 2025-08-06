@@ -6,7 +6,7 @@ import next from 'next';
 import helmet from 'helmet';
 // import compression from 'compression';
 import morgan from 'morgan';
-import cors from 'cors';
+// import cors from 'cors';
 // import rateLimit from 'express-rate-limit';
 
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -47,7 +47,7 @@ app.prepare().then(() => {
   // server.use(compression());
   server.use(morgan(process.env.NODE_ENV === 'production' ? 'tiny' : 'dev'));
   // server.use(limiter);
-  server.use(cors());
+  // server.use(cors());
   server.use(express.json({ limit: '10mb' }));
   server.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
