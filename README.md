@@ -17,8 +17,6 @@ git clone https://github.com/Rudchyk/childbex.git
 cd childbex
 mv .env.example .env
 nano .env
-#If not allow indexing
-cp assets/robots.txt public/robots.txt
 npm run build
 ```
 
@@ -39,3 +37,9 @@ pm2 start ecosystem.config.js --only dev.childbex.com
 - [robots.txt](http://localhost:3000/robots.txt)
 - [health](http://localhost:3000/health)
 - [uploads Logo.svg](http://localhost:3000/uploads/Logo.svg)
+
+#### Helpers
+
+```bash
+git reset --hard HEAD
+```
