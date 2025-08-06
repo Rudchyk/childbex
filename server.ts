@@ -7,18 +7,18 @@ import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
+// import rateLimit from 'express-rate-limit';
 
 const port = parseInt(process.env.PORT || '3000', 10);
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const server = express();
 const handle = app.getRequestHandler();
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: 'Too many requests from this IP, please try again later.',
-});
+// const limiter = rateLimit({
+//   windowMs: 15 * 60 * 1000,
+//   max: 100,
+//   message: 'Too many requests from this IP, please try again later.',
+// });
 
 app.prepare().then(() => {
   server.use(
@@ -46,7 +46,7 @@ app.prepare().then(() => {
   );
   server.use(compression());
   server.use(morgan(process.env.NODE_ENV === 'production' ? 'tiny' : 'dev'));
-  server.use(limiter);
+  // server.use(limiter);
   server.use(cors());
   server.use(express.json({ limit: '10mb' }));
   server.use(express.urlencoded({ extended: true, limit: '10mb' }));
