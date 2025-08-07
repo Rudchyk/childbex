@@ -100,7 +100,6 @@ app.prepare().then(() => {
       limit: '500mb',
     })
   );
-  expressApp.use(express.urlencoded());
   expressApp.use(
     '/uploads',
     express.static(path.join(__dirname, isDev ? '' : '..', 'uploads'))
