@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { createServer } from 'http';
+import type { Server as HTTPSServer } from 'http';
 import { parse } from 'url';
 import next from 'next';
 import helmet from 'helmet';
@@ -19,15 +20,53 @@ const limiter = rateLimit({
   message: 'Too many requests from this IP, please try again later.',
 });
 
-// app.prepare().then(() => {
-//   server.use(cors());
-//   server.use(express.json({ limit: '10mb' }));
-//   server.use(express.urlencoded({ extended: true, limit: '10mb' }));
-// });
+export type PortType = string | boolean | number;
+
+interface ExtendedError extends Error {
+  code?: 'EACCES' | 'EADDRINUSE';
+  syscall: 'listen' | string;
+}
+
+const onError = (port: PortType) => (error: ExtendedError) => {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  const bind = typeof port === 'string' ? 'Pipe ' + port : 'Port ' + port;
+  const key = 'onError';
+
+  // handle specific listen errors with friendly messages
+  switch (error?.code) {
+    case 'EACCES':
+      console.error(`${bind} requires elevated privileges`, key);
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(`${bind} is already in use`, key);
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+};
+const onListening = (server: HTTPSServer) => () => {
+  const addr = server.address();
+
+  if (addr instanceof Object) {
+    const url = `http://localhost:${port}`;
+    console.info(
+      `Listening on \x1b[36m${url}\x1b[0m as ${process.env.NODE_ENV}`
+    );
+  } else if (typeof addr === 'string') {
+    console.info(`Listening on pipe ${addr}`);
+  } else {
+    console.info(`Listening on port ${port}`);
+  }
+};
 
 app.prepare().then(() => {
-  const server = express();
-  server.use(
+  const expressApp = express();
+  expressApp.use(
     helmet({
       contentSecurityPolicy: {
         directives: {
@@ -50,30 +89,29 @@ app.prepare().then(() => {
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     })
   );
-  server.use(cors());
-  server.use(compression());
-  server.use(morgan(isDev ? 'dev' : 'tiny'));
-  server.use(limiter);
-  server.use(
+  expressApp.use(cors());
+  expressApp.use(compression());
+  expressApp.use(morgan(isDev ? 'dev' : 'tiny'));
+  expressApp.use(limiter);
+  expressApp.use(express.json());
+  expressApp.use(express.urlencoded({ extended: true }));
+  expressApp.use(
     '/uploads',
     express.static(path.join(__dirname, isDev ? '' : '..', 'uploads'))
   );
-  server.get('/health', (req, res) => {
+  expressApp.get('/health', (req, res) => {
     res.status(200).json({
       status: 'OK',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
     });
   });
-  server.use((req, res) => {
+  expressApp.use((req, res) => {
     const parsedUrl = parse(req.url!, true);
     return handle(req, res, parsedUrl);
   });
-  createServer(server).listen(port);
+  const server = createServer(expressApp).listen(port);
 
-  console.log(
-    `> Server listening3 at http://localhost:${port} as ${
-      isDev ? 'development' : process.env.NODE_ENV
-    }`
-  );
+  server.on('error', onError(port));
+  server.on('listening', onListening(server));
 });
