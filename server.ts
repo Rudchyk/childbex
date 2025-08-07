@@ -1,5 +1,5 @@
 import express from 'express';
-// import path from 'path';
+import path from 'path';
 import { createServer } from 'http';
 import { parse } from 'url';
 import next from 'next';
@@ -78,6 +78,17 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const server = express();
+  server.use(
+    '/uploads',
+    express.static(path.join(__dirname, dev ? '' : '..', 'uploads'))
+  );
+  server.get('/health', (req, res) => {
+    res.status(200).json({
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+    });
+  });
   server.use((req, res) => {
     const parsedUrl = parse(req.url!, true);
     return handle(req, res, parsedUrl);
@@ -85,7 +96,7 @@ app.prepare().then(() => {
   createServer(server).listen(port);
 
   console.log(
-    `> Server listening1 at http://localhost:${port} as ${
+    `> Server listening3 at http://localhost:${port} as ${
       dev ? 'development' : process.env.NODE_ENV
     }`
   );
