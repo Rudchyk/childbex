@@ -5,7 +5,7 @@ import { parse } from 'url';
 import next from 'next';
 // import helmet from 'helmet';
 // import compression from 'compression';
-// import morgan from 'morgan';
+import morgan from 'morgan';
 // import cors from 'cors';
 // import rateLimit from 'express-rate-limit';
 
@@ -78,6 +78,9 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const server = express();
+  server.use(morgan(process.env.NODE_ENV === 'production' ? 'tiny' : 'dev'));
+  server.use(express.json({ limit: '10mb' }));
+  server.use(express.urlencoded({ extended: true, limit: '10mb' }));
   server.use(
     '/uploads',
     express.static(path.join(__dirname, dev ? '' : '..', 'uploads'))
