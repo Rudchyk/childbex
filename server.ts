@@ -1,3 +1,4 @@
+import './dotenv';
 import express from 'express';
 import path from 'path';
 import { createServer } from 'http';
@@ -9,6 +10,7 @@ import compression from 'compression';
 import morgan from 'morgan';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import bodyParser from 'body-parser';
 import { logger } from './src/lib/services/logger.service';
 
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -112,7 +114,7 @@ app.prepare().then(() => {
       uptime: process.uptime(),
     });
   });
-  expressApp.get('/error', (req, res) => {
+  expressApp.get('/error', bodyParser.json({ limit: '50mb' }), (req, res) => {
     try {
       throw new Error('Error');
     } catch (error) {
