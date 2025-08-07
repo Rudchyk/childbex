@@ -107,7 +107,7 @@ app.prepare().then(() => {
     express.static(path.join(__dirname, isDev ? '' : '..', 'uploads'))
   );
   expressApp.get('/health', (req, res) => {
-    logger.info({ url: req.url, method: req.method }, 'health request');
+    logger.info('health request');
     res.status(200).json({
       status: 'OK',
       timestamp: new Date().toISOString(),
