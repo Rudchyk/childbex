@@ -48,6 +48,8 @@ pm2 restart dev.childbex.com; pm2 logs dev.childbex.com;
 nano /data/dev.childbex.com/.env
 git pull; npm run build; pm2 restart dev.childbex.com; pm2 logs dev.childbex.com;
 pm2 restart dev.childbex.com --update-env; pm2 logs dev.childbex.com;
+pm2 restart childbex --update-env; pm2 logs childbex;
 tail -n 1000 /root/.pm2/logs/dev.childbex.com-out.log
 tail -n 1000 /root/.pm2/logs/dev.childbex.com-error.log
+PORT=3001 NODE_ENV=development pm2 start npm --name dev.childbex2 -- run dev
 ```
