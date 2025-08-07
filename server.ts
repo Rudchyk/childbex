@@ -117,7 +117,7 @@ app.prepare().then(() => {
       throw new Error('Error');
     } catch (error) {
       logger.fatal(error, (error as Error).message);
-      return res.status(503).json((error as Error).message);
+      return res.status(503).json(error);
     }
   });
   expressApp.use((req, res) => {
