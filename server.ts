@@ -1,4 +1,4 @@
-// import express from 'express';
+import express from 'express';
 // import path from 'path';
 import { createServer } from 'http';
 import { parse } from 'url';
@@ -12,7 +12,6 @@ import next from 'next';
 const port = parseInt(process.env.PORT || '3000', 10);
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
-// const server = express();
 const handle = app.getRequestHandler();
 // const limiter = rateLimit({
 //   windowMs: 15 * 60 * 1000,
@@ -78,10 +77,12 @@ const handle = app.getRequestHandler();
 // });
 
 app.prepare().then(() => {
-  createServer((req, res) => {
+  const server = express();
+  server.use((req, res) => {
     const parsedUrl = parse(req.url!, true);
-    handle(req, res, parsedUrl);
-  }).listen(port);
+    return handle(req, res, parsedUrl);
+  });
+  createServer(server).listen(port);
 
   console.log(
     `> Server listening1 at http://localhost:${port} as ${
