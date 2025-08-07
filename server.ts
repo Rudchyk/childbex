@@ -93,11 +93,11 @@ app.prepare().then(() => {
   expressApp.use(compression());
   expressApp.use(morgan(isDev ? 'dev' : 'tiny'));
   expressApp.use(limiter);
-  expressApp.use(
-    express.json({
-      limit: '500mb',
-    })
-  );
+  // expressApp.use(
+  //   express.json({
+  //     limit: '500mb',
+  //   })
+  // );
   expressApp.use(express.urlencoded({ extended: true, limit: '500mb' }));
   expressApp.use(
     '/uploads',
