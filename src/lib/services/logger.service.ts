@@ -1,30 +1,21 @@
 import pino from 'pino';
+import pretty from 'pino-pretty';
 
-// const isProd = process.env.NODE_ENV === 'production';
+const { PRETTY_LOGS, LOG_LEVEL, NODE_ENV } = process.env;
+const isProd = NODE_ENV === 'production';
+const isPretty = PRETTY_LOGS === 'true';
 
-// const prettyTransport = isProd
-//   ? pino.transport({
-//       target: require.resolve('pino-pretty'),
-//       options: {
-//         colorize: true,
-//         levelFirst: true,
-//       },
-//     })
-//   : undefined;
-const prettyTransport = pino.transport({
-  target: require.resolve('pino-pretty'),
-  options: {
-    colorize: true,
-    levelFirst: true,
-  },
-});
+const stream = isPretty
+  ? pretty({
+      colorize: true,
+      levelFirst: true,
+      ignore: 'pid,hostname',
+    })
+  : undefined;
 
 export const logger = pino(
   {
-    level:
-      process.env.LOG_LEVEL ?? process.env.NODE_ENV === 'production'
-        ? 'info'
-        : 'debug',
+    level: LOG_LEVEL || (isProd ? 'info' : 'debug'),
   },
-  prettyTransport
+  stream
 );
