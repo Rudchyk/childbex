@@ -56,7 +56,7 @@ const onListening = (server: HTTPSServer) => () => {
   if (typeof addr === 'string') {
     msg = `Listening on pipe ${addr}`;
   }
-  logger.info(
+  logger.debug(
     {
       url: addr instanceof Object ? `http://localhost:${port}` : undefined,
       mode: process.env.NODE_ENV,
@@ -105,7 +105,7 @@ app.prepare().then(() => {
     express.static(path.join(__dirname, isDev ? '' : '..', 'uploads'))
   );
   expressApp.get('/health', (req, res) => {
-    logger.info('health request');
+    logger.info({ url: req.url, method: req.method }, 'health request');
     res.status(200).json({
       status: 'OK',
       timestamp: new Date().toISOString(),
@@ -116,8 +116,8 @@ app.prepare().then(() => {
     try {
       throw new Error('Error');
     } catch (error) {
-      logger.error(error);
-      return res.status(503).json(error);
+      logger.fatal(error, (error as Error).message);
+      return res.status(503).json((error as Error).message);
     }
   });
   expressApp.use((req, res) => {

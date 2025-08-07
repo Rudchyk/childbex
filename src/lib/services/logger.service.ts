@@ -3,7 +3,9 @@ import pretty from 'pino-pretty';
 
 const { PRETTY_LOGS, LOG_LEVEL, NODE_ENV } = process.env;
 const isProd = NODE_ENV === 'production';
+console.log('🚀 ~ isProd:', isProd);
 const isPretty = PRETTY_LOGS === 'true';
+console.log('🚀 ~ isPretty:', isPretty);
 
 const stream = isPretty
   ? pretty({
