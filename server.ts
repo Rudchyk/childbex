@@ -9,7 +9,7 @@ import compression from 'compression';
 import morgan from 'morgan';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import { logger, httpLogger } from './src/lib/services/logger.service';
+import { logger } from './src/lib/services/logger.service';
 
 const port = parseInt(process.env.PORT || '3000', 10);
 const isDev = process.env.NODE_ENV !== 'production';
@@ -93,7 +93,6 @@ app.prepare().then(() => {
   expressApp.use(cors());
   expressApp.use(compression());
   expressApp.use(morgan(isDev ? 'dev' : 'tiny'));
-  // expressApp.use(httpLogger);
   expressApp.use(limiter);
   expressApp.use(
     express.json({
@@ -105,7 +104,6 @@ app.prepare().then(() => {
     express.static(path.join(__dirname, isDev ? '' : '..', 'uploads'))
   );
   expressApp.get('/health', (req, res) => {
-    req.log.info('health route hit');
     res.status(200).json({
       status: 'OK',
       timestamp: new Date().toISOString(),
