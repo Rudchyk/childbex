@@ -9,6 +9,7 @@ import compression from 'compression';
 import morgan from 'morgan';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import { logger, httpLogger } from '@/lib/services/logger.service';
 
 const port = parseInt(process.env.PORT || '3000', 10);
 const isDev = process.env.NODE_ENV !== 'production';
@@ -54,13 +55,13 @@ const onListening = (server: HTTPSServer) => () => {
 
   if (addr instanceof Object) {
     const url = `http://localhost:${port}`;
-    console.info(
+    logger.info(
       `Listening on \x1b[36m${url}\x1b[0m as ${process.env.NODE_ENV}`
     );
   } else if (typeof addr === 'string') {
-    console.info(`Listening on pipe ${addr}`);
+    logger.info(`Listening on pipe ${addr}`);
   } else {
-    console.info(`Listening on port ${port}`);
+    logger.info(`Listening on port ${port}`);
   }
 };
 
@@ -92,6 +93,7 @@ app.prepare().then(() => {
   expressApp.use(cors());
   expressApp.use(compression());
   expressApp.use(morgan(isDev ? 'dev' : 'tiny'));
+  expressApp.use(httpLogger);
   expressApp.use(limiter);
   expressApp.use(
     express.json({
@@ -104,6 +106,7 @@ app.prepare().then(() => {
     express.static(path.join(__dirname, isDev ? '' : '..', 'uploads'))
   );
   expressApp.get('/health', (req, res) => {
+    req.log.info('health route hit');
     res.status(200).json({
       status: 'OK',
       timestamp: new Date().toISOString(),
