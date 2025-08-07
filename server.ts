@@ -9,7 +9,7 @@ import compression from 'compression';
 import morgan from 'morgan';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import { logger, httpLogger } from '@/lib/services/logger.service';
+import { logger, httpLogger } from './src/lib/services/logger.service';
 
 const port = parseInt(process.env.PORT || '3000', 10);
 const isDev = process.env.NODE_ENV !== 'production';
