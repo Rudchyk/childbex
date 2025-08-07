@@ -52,17 +52,18 @@ const onError = (port: PortType) => (error: ExtendedError) => {
 };
 const onListening = (server: HTTPSServer) => () => {
   const addr = server.address();
-
-  if (addr instanceof Object) {
-    const url = `http://localhost:${port}`;
-    logger.info(
-      `Listening on \x1b[36m${url}\x1b[0m as ${process.env.NODE_ENV}`
-    );
-  } else if (typeof addr === 'string') {
-    logger.info(`Listening on pipe ${addr}`);
-  } else {
-    logger.info(`Listening on port ${port}`);
+  let msg = `Listening on port ${port}`;
+  if (typeof addr === 'string') {
+    msg = `Listening on pipe ${addr}`;
   }
+  logger.info(
+    {
+      url: addr instanceof Object ? `http://localhost:${port}` : undefined,
+      mode: process.env.NODE_ENV,
+      port,
+    },
+    msg
+  );
 };
 
 app.prepare().then(() => {
@@ -104,11 +105,20 @@ app.prepare().then(() => {
     express.static(path.join(__dirname, isDev ? '' : '..', 'uploads'))
   );
   expressApp.get('/health', (req, res) => {
+    logger.info('health request');
     res.status(200).json({
       status: 'OK',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
     });
+  });
+  expressApp.get('/error', (req, res) => {
+    try {
+      throw new Error('Error');
+    } catch (error) {
+      logger.error(error);
+      return res.status(503).json(error);
+    }
   });
   expressApp.use((req, res) => {
     const parsedUrl = parse(req.url!, true);
