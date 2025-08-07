@@ -107,21 +107,24 @@ app.prepare().then(() => {
     express.static(path.join(__dirname, isDev ? '' : '..', 'uploads'))
   );
   expressApp.get('/health', (req, res) => {
-    logger.info('health request');
     res.status(200).json({
       status: 'OK',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
     });
   });
-  expressApp.get('/error', bodyParser.json({ limit: '50mb' }), (req, res) => {
-    try {
-      throw new Error('Error');
-    } catch (error) {
-      logger.fatal(error, (error as Error).message);
-      return res.status(503).json(error);
+  expressApp.get(
+    '/error',
+    bodyParser.urlencoded({ extended: true, limit: '50mb' }),
+    (req, res) => {
+      try {
+        throw new Error('Error');
+      } catch (error) {
+        logger.fatal(error, (error as Error).message);
+        return res.status(503).json(error);
+      }
     }
-  });
+  );
   expressApp.use((req, res) => {
     const parsedUrl = parse(req.url!, true);
     return handle(req, res, parsedUrl);
