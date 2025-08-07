@@ -93,8 +93,12 @@ app.prepare().then(() => {
   expressApp.use(compression());
   expressApp.use(morgan(isDev ? 'dev' : 'tiny'));
   expressApp.use(limiter);
-  expressApp.use(express.json());
-  expressApp.use(express.urlencoded({ extended: true }));
+  expressApp.use(
+    express.json({
+      limit: '500mb',
+    })
+  );
+  expressApp.use(express.urlencoded({ extended: true, limit: '500mb' }));
   expressApp.use(
     '/uploads',
     express.static(path.join(__dirname, isDev ? '' : '..', 'uploads'))
