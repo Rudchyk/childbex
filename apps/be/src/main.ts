@@ -1,18 +1,43 @@
 import express from 'express';
-import path from 'path';
+import compression from 'compression';
+import morgan from 'morgan';
+import {
+  errorHandler,
+  onError,
+  onListening,
+  port,
+} from './services/server.service';
+import { isProd } from './constants/defaults';
+import { serverRoutes, setupRoutes } from './routes/routes';
+import routes from './api/v1/routes';
+import { logger } from './services/logger.service';
 
-const host = process.env.HOST ?? 'localhost';
-const port = process.env.PORT ? Number(process.env.PORT) : 3000;
+const setupServer = async () => {
+  try {
+    const app = express();
 
-const app = express();
+    app.set('port', port);
 
-app.use(express.static(path.join(__dirname, '..', 'gui')));
-const path2 = path.join(__dirname, 'assets');
-app.use('/assets', express.static(path2));
-app.get('/api/hello', (req, res) => {
-  res.send({ message: 'Hello API' });
-});
+    app.use(compression());
+    app.use(morgan(isProd ? 'tiny' : 'dev'));
+    app.use(express.json());
 
-app.listen(port, host, () => {
-  console.log(`[ ready ] http://${host}:${port}`);
-});
+    setupRoutes(app);
+    app.use(routes);
+
+    app.use(errorHandler);
+
+    const server = app.listen(port);
+
+    server.on('error', onError);
+    server.on(
+      'listening',
+      onListening(server, { ...serverRoutes, api: '/docs' })
+    );
+  } catch (error) {
+    logger.error(error);
+    process.exit(1);
+  }
+};
+
+setupServer();

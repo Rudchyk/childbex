@@ -16,5 +16,13 @@
     "eslint.config.js",
     "eslint.config.cjs",
     "eslint.config.mjs"
+  ],
+  "references": [
+    {
+      "path": "../../libs/schemas/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/constants/tsconfig.lib.json"
+    }
   ]
 }

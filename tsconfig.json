@@ -8,6 +8,12 @@
     },
     {
       "path": "./apps/be"
+    },
+    {
+      "path": "./libs/schemas"
+    },
+    {
+      "path": "./libs/constants"
     }
   ]
 }

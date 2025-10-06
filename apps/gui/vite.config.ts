@@ -9,7 +9,7 @@ export default defineConfig(() => ({
     port: 4201,
     host: 'localhost',
     proxy: {
-      '/api': 'http://localhost:3000',
+      '/api': `http://localhost:${process.env.PORT}`,
     },
   },
   preview: {
