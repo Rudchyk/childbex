@@ -20,7 +20,7 @@
         "assets": [
           {
             "input": "apps/be/src/assets",
-            "glob": "**/*",
+            "glob": "**/*  !**/.gitkeep",
             "output": "./assets"
           }
         ],

@@ -13,14 +13,16 @@
     "gui:preview-all": "nx run gui:all",
     "gui:preview": "nx run gui:preview",
     "gui:test": "nx run gui:test",
+    "eco": "cp ecosystem.config.js dist/apps",
     "be": "nx run be:serve",
-    "be:build": "nx run be:build",
+    "be:build": "npm run eco && nx run be:build",
     "be:lint": "nx run be:lint",
     "be:project": "nx show project be",
     "be:project:web": "nx show project be --web",
     "be:prod": "npm run be:build && node dist/apps/be/main.js",
     "be:test": "nx run be:test",
-    "start": "nx run-many -t serve --projects=be,gui --parallel"
+    "start": "nx run-many -t serve --projects=be,gui --parallel",
+    "build": "nx run-many -t build --projects=be,gui --parallel"
   },
   "private": true,
   "devDependencies": {

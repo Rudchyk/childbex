@@ -1,3 +1,5 @@
+import './plugins/dotenv';
+
 import express from 'express';
 import compression from 'compression';
 import morgan from 'morgan';
