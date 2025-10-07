@@ -1,19 +1,19 @@
-import { FromSchema, JSONSchema } from 'json-schema-to-ts';
-import type { OpenAPIV3 } from 'openapi-types';
-import { S } from '../../utils/schema-helpers.js';
+import { Type, type Static } from '@sinclair/typebox';
 
-export const NameSchema = S.string();
+const KEY = 'name';
 
-export type Name = FromSchema<typeof NameSchema>;
+export const NameSchema = Type.String();
 
-export const NamePropertySchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['name'],
-  $id: 'name',
-  properties: {
-    name: NameSchema,
-  },
-} as const satisfies JSONSchema | OpenAPIV3.SchemaObject;
+export type Name = Static<typeof NameSchema>;
 
-export type NameProperty = FromSchema<typeof NamePropertySchema>;
+export const NamePropertySchema = Type.Object({
+  [KEY]: NameSchema,
+});
+
+export type NameProperty = Static<typeof NamePropertySchema>;
+
+export const NameOptionalPropertySchema = Type.Object({
+  [KEY]: Type.Optional(NameSchema),
+});
+
+export type NameOptionalProperty = Static<typeof NameOptionalPropertySchema>;

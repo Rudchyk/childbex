@@ -1,6 +1,5 @@
 import type { OpenAPIV3 } from 'express-openapi-validator/dist/framework/types';
 import { ErrorSchema } from '@libs/schemas';
-import type { JSONSchema } from 'json-schema-to-ts';
 
 interface GetResponseOptions extends OpenAPIV3.ResponseObject {
   schema?: OpenAPIV3.SchemaObject | unknown;
@@ -97,14 +96,3 @@ export const unauthorizedResponse = getResponse(401, {
   schema: ErrorSchema,
   example: unauthorizedResponseMessage,
 });
-
-export const getStringType = (props?: JSONSchema): JSONSchema => {
-  if (typeof props === 'object') {
-    return {
-      type: 'string',
-      ...props,
-    };
-  }
-
-  return props || false;
-};

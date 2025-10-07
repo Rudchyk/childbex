@@ -1,19 +1,17 @@
 import { Response } from 'fets';
 import { router } from '../router';
 import { apiRoutes } from '@libs/constants';
-import { NamePropertySchema } from '@libs/schemas';
+import { NamePropertySchema, Type } from '@libs/schemas';
 
 router.route({
   method: 'GET',
   path: apiRoutes.hello,
   schemas: {
     request: {
-      query: NamePropertySchema,
+      query: { ...NamePropertySchema },
     },
     responses: {
-      200: {
-        type: 'string',
-      },
+      200: Type.String(),
     },
   },
   handler(request) {

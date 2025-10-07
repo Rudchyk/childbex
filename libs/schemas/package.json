@@ -15,5 +15,7 @@
       "default": "./dist/index.js"
     }
   },
-  "dependencies": {}
+  "peerDependencies": {
+    "@sinclair/typebox": "^0.34.41"
+  }
 }

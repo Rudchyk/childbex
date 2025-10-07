@@ -1,25 +1,21 @@
-import { FromSchema, JSONSchema } from 'json-schema-to-ts';
-import type { OpenAPIV3 } from 'openapi-types';
-import { S } from '../../utils/schema-helpers.js';
+import { Type, type Static } from '@sinclair/typebox';
 
-export const ErrorSchema = {
-  type: 'object',
-  description: 'Error Object',
-  additionalProperties: false,
-  required: ['message'],
-  properties: {
-    message: S.string({
-      description: 'Error message',
-    }),
-    errors: {
-      type: 'object',
-      additionalProperties: true,
-      description: 'The list of errors',
-    },
-    status: S.number(),
-    statusCode: S.number(),
-    expose: S.boolean(),
-  },
-} as const satisfies JSONSchema | OpenAPIV3.SchemaObject;
+export const ErrorSchema = Type.Object({
+  message: Type.String({
+    description: 'Error message',
+  }),
+  errors: Type.Optional(
+    Type.Object(
+      {},
+      {
+        description: 'The list of errors',
+        additionalProperties: true,
+      }
+    )
+  ),
+  status: Type.Optional(Type.Number()),
+  statusCode: Type.Optional(Type.Number()),
+  expose: Type.Optional(Type.Boolean()),
+});
 
-export type Error = FromSchema<typeof ErrorSchema>;
+export type Error = Static<typeof ErrorSchema>;

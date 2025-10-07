@@ -1,3 +1,5 @@
 export * as schemas from './schemas/index.js';
 export * from './schemas/index.js';
-export * from './utils/schema-helpers.js';
+export * from './utils/typebox-helpers.js';
+export * from '@sinclair/typebox';
+export { Value } from '@sinclair/typebox/value';

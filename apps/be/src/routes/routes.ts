@@ -20,7 +20,9 @@ export const setupRoutes = (app: Express) => {
   const router = Router();
   logger.debug(__dirname);
 
-  router.use(express.static(path.join(__dirname, '..', 'gui')));
+  router.use(
+    express.static(path.join(__dirname, process.env.GUI_DIR || '../gui'))
+  );
   router.use(
     serverRoutes.assets,
     express.static(path.join(__dirname, 'assets'))

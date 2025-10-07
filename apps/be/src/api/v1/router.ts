@@ -14,6 +14,6 @@ export const router = createRouter({
         ...schemas,
       },
     },
-    endpoint: false,
+    // endpoint: false,
   },
 });
