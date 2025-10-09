@@ -13,6 +13,7 @@ import { isProd } from './constants/defaults';
 import { serverRoutes, setupRoutes } from './routes/routes';
 import routes from './api/v1/routes';
 import { logger } from './services/logger.service';
+import { libsSchemas } from '@childbex/libs-schemas';
 
 const setupServer = async () => {
   try {
@@ -23,6 +24,8 @@ const setupServer = async () => {
     app.use(compression());
     app.use(morgan(isProd ? 'tiny' : 'dev'));
     app.use(express.json());
+
+    console.log('libsSchemas', libsSchemas());
 
     setupRoutes(app);
     app.use(routes);

@@ -8,6 +8,9 @@
     },
     {
       "path": "./apps/be"
+    },
+    {
+      "path": "./libs/schemas"
     }
   ]
 }
