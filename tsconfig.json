@@ -10,6 +10,9 @@
       "path": "./apps/be"
     },
     {
+      "path": "./libs/constants"
+    },
+    {
       "path": "./libs/schemas"
     }
   ]

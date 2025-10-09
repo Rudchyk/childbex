@@ -30,7 +30,7 @@
           "watchDepsName": "watch-deps"
         }
       },
-      "exclude": ["libs/schemas/*"]
+      "exclude": ["libs/schemas/*", "libs/constants/*"]
     },
     {
       "plugin": "@nx/eslint/plugin",
@@ -60,7 +60,7 @@
     },
     {
       "plugin": "@nx/js/typescript",
-      "include": ["libs/schemas/*"],
+      "include": ["libs/schemas/*", "libs/constants/*"],
       "options": {
         "typecheck": {
           "targetName": "typecheck"

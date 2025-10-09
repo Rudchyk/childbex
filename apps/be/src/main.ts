@@ -4,7 +4,7 @@ import express from 'express';
 import compression from 'compression';
 import morgan from 'morgan';
 import {
-  // errorHandler,
+  errorHandler,
   onError,
   onListening,
   port,
@@ -13,7 +13,6 @@ import { isProd } from './constants/defaults';
 import { serverRoutes, setupRoutes } from './routes/routes';
 import routes from './api/v1/routes';
 import { logger } from './services/logger.service';
-import { libsSchemas } from '@childbex/libs-schemas';
 
 const setupServer = async () => {
   try {
@@ -25,12 +24,10 @@ const setupServer = async () => {
     app.use(morgan(isProd ? 'tiny' : 'dev'));
     app.use(express.json());
 
-    console.log('libsSchemas', libsSchemas());
-
     setupRoutes(app);
     app.use(routes);
 
-    // app.use(errorHandler);
+    app.use(errorHandler);
 
     const server = app.listen(port);
 

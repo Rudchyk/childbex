@@ -1,3 +1,4 @@
+import { schemas } from '@libs/schemas';
 import { createRouter } from 'fets';
 
 export const router = createRouter({
@@ -9,10 +10,9 @@ export const router = createRouter({
       version: '1.0.0',
     },
     components: {
-      // schemas: {
-      //   ...schemas,
-      // },
+      schemas: {
+        ...schemas,
+      },
     },
-    // endpoint: false,
   },
 });

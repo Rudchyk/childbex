@@ -1,7 +1,8 @@
 import { Outlet, createBrowserRouter } from 'react-router-dom';
-// import { NameSchema } from '@libs/schemas';
+import { NameSchema } from '@libs/schemas';
 import ErrorPage from '../pages/ErrorPage/ErrorPage';
 import { LoaderData } from '../types';
+import { guiRoutes } from '@libs/constants';
 
 const defaultOptions = {
   handle: {
@@ -11,7 +12,7 @@ const defaultOptions = {
 
 export default createBrowserRouter([
   {
-    path: '/',
+    path: guiRoutes.home,
     loader: () => ({ title: 'Home' }),
     element: <Outlet />,
     errorElement: <ErrorPage />,
@@ -19,13 +20,13 @@ export default createBrowserRouter([
     children: [
       {
         index: true,
-        // loader: () => ({ title: JSON.stringify(NameSchema) }),
+        loader: () => ({ title: JSON.stringify(NameSchema) }),
         lazy: () => import('../pages/HomePage/HomePage'),
         ...defaultOptions,
       },
       {
         loader: () => ({ title: 'About' }),
-        path: '/about',
+        path: guiRoutes.about,
         lazy: () => import('../pages/AboutPage/AboutPage'),
         ...defaultOptions,
       },

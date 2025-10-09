@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { logger } from './logger.service';
 import type { Server as HTTPSServer } from 'http';
-// import type { Error } from '@libs/schemas';
+import type { Error } from '@libs/schemas';
 
 const { NODE_ENV, PORT, HOST, IS_HTTPS } = process.env;
 
@@ -60,17 +60,17 @@ export const onListening =
     );
   };
 
-// export const errorHandler = (
-//   err: Error,
-//   req: Request,
-//   res: Response,
-//   next: NextFunction
-// ) => {
-//   logger.error(err, 'Global ERROR');
-//   return res.status(err.status || 500).json({
-//     message: err.message,
-//     errors: err.errors,
-//     statusCode: err.status,
-//     expose: err.expose,
-//   });
-// };
+export const errorHandler = (
+  err: Error,
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  logger.error(err, 'Global ERROR');
+  return res.status(err.status || 500).json({
+    message: err.message,
+    errors: err.errors,
+    statusCode: err.status,
+    expose: err.expose,
+  });
+};
