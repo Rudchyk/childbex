@@ -1,7 +1,10 @@
 import { schemas } from '@libs/schemas';
+import { apiRoute, apiDocRoute } from '@libs/constants';
 import { createRouter } from 'fets';
 
 export const router = createRouter({
+  landingPage: false,
+  base: apiRoute,
   openAPI: {
     openapi: '3.1.0',
     info: {
@@ -14,5 +17,8 @@ export const router = createRouter({
         ...schemas,
       },
     },
+  },
+  swaggerUI: {
+    endpoint: apiDocRoute,
   },
 });

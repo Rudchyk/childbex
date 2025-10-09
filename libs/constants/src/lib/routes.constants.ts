@@ -1,3 +1,7 @@
+export const apiRoute = '/api/v1';
+
+export const apiDocRoute = '/docs';
+
 export const apiRoutes = {
   hello: '/hello',
 };

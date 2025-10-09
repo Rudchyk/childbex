@@ -13,6 +13,7 @@ import { isProd } from './constants/defaults';
 import { serverRoutes, setupRoutes } from './routes/routes';
 import routes from './api/v1/routes';
 import { logger } from './services/logger.service';
+import { apiDocRoute, apiRoute } from '@libs/constants';
 
 const setupServer = async () => {
   try {
@@ -34,7 +35,7 @@ const setupServer = async () => {
     server.on('error', onError);
     server.on(
       'listening',
-      onListening(server, { ...serverRoutes, api: '/docs' })
+      onListening(server, { ...serverRoutes, api: apiRoute + apiDocRoute })
     );
   } catch (error) {
     logger.error(error);
