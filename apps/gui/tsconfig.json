@@ -3,15 +3,6 @@
   "include": [],
   "references": [
     {
-      "path": "../../libs/constants"
-    },
-    {
-      "path": "../../libs/schemas"
-    },
-    {
-      "path": "../../libs/utils"
-    },
-    {
       "path": "./tsconfig.app.json"
     },
     {

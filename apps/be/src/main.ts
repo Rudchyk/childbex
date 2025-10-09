@@ -4,7 +4,7 @@ import express from 'express';
 import compression from 'compression';
 import morgan from 'morgan';
 import {
-  errorHandler,
+  // errorHandler,
   onError,
   onListening,
   port,
@@ -27,7 +27,7 @@ const setupServer = async () => {
     setupRoutes(app);
     app.use(routes);
 
-    app.use(errorHandler);
+    // app.use(errorHandler);
 
     const server = app.listen(port);
 
