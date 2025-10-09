@@ -4,6 +4,12 @@
   "include": [],
   "references": [
     {
+      "path": "../../libs/constants2"
+    },
+    {
+      "path": "../../libs/utils"
+    },
+    {
       "path": "../../libs/schemas"
     },
     {
