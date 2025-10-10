@@ -9,6 +9,7 @@ interface CustomError {
 
 const Component = () => {
   const error = useRouteError() as CustomError;
+  console.log('dsfd');
 
   return (
     <DefaultLayout>

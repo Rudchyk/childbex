@@ -11,8 +11,6 @@ const defaultOptions = {
 
 export default createBrowserRouter([
   {
-    path: guiRoutes.home,
-    loader: () => ({ title: 'Home' }),
     element: <Outlet />,
     errorElement: <ErrorPage />,
     ...defaultOptions,

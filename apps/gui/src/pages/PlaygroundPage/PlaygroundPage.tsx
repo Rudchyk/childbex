@@ -18,8 +18,6 @@ export const Component = () => {
   const { data, isLoading, isError, error } = useGetHelloQuery({
     name: 'Sergii',
   });
-  console.log(error);
-
   const { msg, setMsg } = useBase();
   return (
     <DefaultLayout>
