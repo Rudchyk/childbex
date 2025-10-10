@@ -15,14 +15,16 @@ import { FetchBaseQueryError } from '@reduxjs/toolkit/query';
 import { Nav } from '../../components';
 
 export const Component = () => {
-  // const { data, isLoading, isError, error } = useGetHelloQuery({
-  //   name: 'Sergii',
-  // });
+  const { data, isLoading, isError, error } = useGetHelloQuery({
+    name: 'Sergii',
+  });
+  console.log(error);
+
   const { msg, setMsg } = useBase();
   return (
     <DefaultLayout>
       <PageTmpl>
-        <Stack>
+        <Stack spacing={2}>
           <Typography variant="h5">Hello from home</Typography>
           <Nav />
           <TextField
@@ -31,16 +33,18 @@ export const Component = () => {
             value={msg}
             onChange={(e) => setMsg(e.target.value)}
           />
-          {/* {isLoading ? (
+          {isLoading ? (
             <LinearProgress />
           ) : isError ? (
             <Alert variant="filled" severity="error">
-              {JSON.stringify((error as FetchBaseQueryError)?.data) ||
-                (error as SerializedError)?.message}
+              {(error as FetchBaseQueryError)?.data
+                ? JSON.stringify((error as FetchBaseQueryError).data)
+                : (error as SerializedError)?.message ||
+                  'Internal Server Error'}
             </Alert>
           ) : (
             <Typography variant="body1">{data}</Typography>
-          )} */}
+          )}
         </Stack>
       </PageTmpl>
     </DefaultLayout>
