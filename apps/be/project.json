@@ -22,7 +22,8 @@
             "input": "apps/be/src/assets",
             "glob": "**/*  !**/.gitkeep",
             "output": "./assets"
-          }
+          },
+          "ecosystem.config.js"
         ],
         "deleteOutputPath": true,
         "esbuildOptions": {
