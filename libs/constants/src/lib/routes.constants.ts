@@ -9,4 +9,6 @@ export const apiRoutes = {
 export const guiRoutes = {
   home: '/',
   about: '/about',
+  playground: '/playground',
+  brief: '/brief',
 };

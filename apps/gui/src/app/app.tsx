@@ -1,10 +1,13 @@
 import { LinearProgress } from '@mui/material';
 import router from '../routes/routes';
 import { RouterProvider } from 'react-router-dom';
+import { StoreProvider } from '../providers';
 
 export function App() {
   return (
-    <RouterProvider router={router} fallbackElement={<LinearProgress />} />
+    <StoreProvider>
+      <RouterProvider router={router} fallbackElement={<LinearProgress />} />
+    </StoreProvider>
   );
 }
 

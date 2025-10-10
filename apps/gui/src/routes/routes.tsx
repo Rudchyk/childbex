@@ -1,5 +1,4 @@
 import { Outlet, createBrowserRouter } from 'react-router-dom';
-import { NameSchema } from '@libs/schemas';
 import ErrorPage from '../pages/ErrorPage/ErrorPage';
 import { LoaderData } from '../types';
 import { guiRoutes } from '@libs/constants';
@@ -20,7 +19,7 @@ export default createBrowserRouter([
     children: [
       {
         index: true,
-        loader: () => ({ title: JSON.stringify(NameSchema) }),
+        loader: () => ({ title: '' }),
         lazy: () => import('../pages/HomePage/HomePage'),
         ...defaultOptions,
       },
@@ -28,6 +27,18 @@ export default createBrowserRouter([
         loader: () => ({ title: 'About' }),
         path: guiRoutes.about,
         lazy: () => import('../pages/AboutPage/AboutPage'),
+        ...defaultOptions,
+      },
+      {
+        loader: () => ({ title: 'Brief' }),
+        path: guiRoutes.brief,
+        lazy: () => import('../pages/BriefPage/BriefPage'),
+        ...defaultOptions,
+      },
+      {
+        loader: () => ({ title: 'Playground' }),
+        path: guiRoutes.playground,
+        lazy: () => import('../pages/PlaygroundPage/PlaygroundPage'),
         ...defaultOptions,
       },
     ],
