@@ -21,9 +21,7 @@ export const ThemeProvider: FC<ThemeProviderProps> = ({ children }) => {
   const { setMode } = useColorScheme();
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
   const theme = createTheme({
-    cssVariables: {
-      colorSchemeSelector: 'data',
-    },
+    cssVariables: true,
     colorSchemes: {
       light: {
         palette: lightPalette,
