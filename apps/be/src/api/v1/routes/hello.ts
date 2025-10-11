@@ -1,7 +1,11 @@
 import { Response } from 'fets';
 import { router } from '../router';
 import { apiRoutes } from '@libs/constants';
-import { NameOptionalPropertySchema, Type } from '@libs/schemas';
+import {
+  NameOptionalPropertySchema,
+  Type,
+  defaultResponses,
+} from '../schemas/schemas';
 
 router.route({
   method: 'GET',
@@ -12,6 +16,7 @@ router.route({
     },
     responses: {
       200: Type.String(),
+      ...defaultResponses,
     },
   },
   handler(request) {

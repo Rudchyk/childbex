@@ -1,5 +1,5 @@
-import { schemas } from '@libs/schemas';
 import { apiRoute, apiDocRoute } from '@libs/constants';
+import { schemas } from './schemas/schemas';
 import { createRouter } from 'fets';
 
 export const router = createRouter({

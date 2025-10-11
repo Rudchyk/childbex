@@ -1,5 +1,5 @@
 import { router } from './router';
 
-import './lib/hello';
+import './routes/hello';
 
 export default router;
