@@ -1,7 +1,10 @@
 {
   "name": "@childbex/source",
   "version": "0.0.0",
-  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/Rudchyk/childbex.git",
+    "type": "git"
+  },
   "scripts": {
     "graph": "nx graph",
     "gui": "nx run gui:dev",
