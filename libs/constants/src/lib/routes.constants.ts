@@ -11,4 +11,10 @@ export const guiRoutes = {
   about: '/about',
   playground: '/playground',
   brief: '/brief',
+  privacy: '/privacy',
+  terms: '/terms',
+  disclaimer: '/disclaimer',
+  compliance: '/compliance',
+  contacts: '/contacts',
+  cookies: '/cookies',
 };

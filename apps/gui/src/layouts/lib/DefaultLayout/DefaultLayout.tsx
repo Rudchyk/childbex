@@ -1,24 +1,40 @@
+'use client';
+
 import { ReactNode, FC } from 'react';
-import { Container, ContainerProps, Stack } from '@mui/material';
+import { Box, BoxProps, Container, ContainerProps, Stack } from '@mui/material';
+import { Header, Footer, Breadcrumbs } from '../../../components';
 
 export interface DefaultLayoutProps {
   children: ReactNode;
-  ContainerProps?: ContainerProps;
+  slotProps?: {
+    ContainerProps?: ContainerProps;
+    BoxProps?: BoxProps;
+  };
+  isHeader?: boolean;
+  isFooter?: boolean;
 }
 
 export const DefaultLayout: FC<DefaultLayoutProps> = ({
   children,
-  ContainerProps,
+  isHeader = true,
+  isFooter = true,
+  slotProps,
 }) => {
   return (
-    <Stack spacing={0} height="100%">
+    <Stack height="100%">
+      {isHeader && <Header />}
       <Container
-        sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}
+        maxWidth="lg"
         component="main"
-        {...ContainerProps}
+        {...slotProps?.ContainerProps}
+        sx={{ flexGrow: 1, ...slotProps?.ContainerProps?.sx }}
       >
-        {children}
+        <Box py={2} {...slotProps?.BoxProps}>
+          <Breadcrumbs />
+          {children}
+        </Box>
       </Container>
+      {isFooter && <Footer />}
     </Stack>
   );
 };

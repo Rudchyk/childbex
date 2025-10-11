@@ -22,13 +22,21 @@ export const baseSlice = createSlice({
   name: 'base',
   initialState,
   reducers: {
-    initializeBase(state, action: PayloadAction<BaseState>) {
-      Object.assign(state, action.payload);
-    },
     setMsg(state, action: PayloadAction<BaseState['msg']>) {
       state.msg = action.payload;
+    },
+    setMeta(
+      state,
+      action: PayloadAction<Partial<Pick<BaseState, 'description' | 'title'>>>
+    ) {
+      if (action.payload.description) {
+        state.description = action.payload.description;
+      }
+      if (action.payload.title) {
+        state.title = action.payload.title;
+      }
     },
   },
 });
 
-export const { initializeBase, setMsg } = baseSlice.actions;
+export const { setMsg, setMeta } = baseSlice.actions;

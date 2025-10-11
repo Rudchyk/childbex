@@ -1,6 +1,7 @@
-import { FC, ReactNode } from 'react';
+import { FC, ReactNode, useEffect } from 'react';
 import manifest from '../assets/manifest.json';
 import manifestUrl from '../assets/manifest.json?url';
+import { useBase } from '../store/slices';
 
 export interface HelmetProviderProps {
   children: ReactNode;
@@ -15,6 +16,15 @@ export interface HelmetProviderProps {
  */
 
 export const HeadProvider: FC<HelmetProviderProps> = ({ children }) => {
+  const { setMeta } = useBase();
+
+  useEffect(() => {
+    setMeta({
+      title: manifest.short_name,
+      description: manifest.name,
+    });
+  }, []);
+
   return (
     <>
       <title>{manifest.short_name}</title>
