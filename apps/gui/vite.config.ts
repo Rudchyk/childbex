@@ -1,8 +1,44 @@
 /// <reference types='vitest' />
-import { defineConfig } from 'vite';
+import { defineConfig, PluginOption } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig(() => ({
+function robotsTxtPlugin(allowCrawl: boolean): PluginOption {
+  console.log('allowCrawl', allowCrawl);
+
+  const buildSource = (allow: boolean) =>
+    // production: allow all  | development: disallow all
+    `User-agent: *\nDisallow:${allow ? '' : ' /'}\n`;
+
+  if (allowCrawl) {
+    return {
+      name: 'robots-txt',
+      apply: 'build',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'robots.txt',
+          source: buildSource(allowCrawl),
+        });
+      },
+    };
+  }
+  return {
+    name: 'robots-txt',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url === '/robots.txt') {
+          res.setHeader('Content-Type', 'text/plain');
+          res.end(buildSource(allowCrawl));
+          return;
+        }
+        next();
+      });
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
   root: __dirname,
   cacheDir: '../../node_modules/.vite/apps/gui',
   server: {
@@ -16,7 +52,7 @@ export default defineConfig(() => ({
     port: 4202,
     host: 'localhost',
   },
-  plugins: [react()],
+  plugins: [react(), robotsTxtPlugin(mode === 'production')],
   // Uncomment this if you are using workers.
   // worker: {
   //  plugins: [ nxViteTsPaths() ],

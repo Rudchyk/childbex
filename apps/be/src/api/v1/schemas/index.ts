@@ -1,1 +1,1 @@
-export * from './lib/Name.schemas';
+export * from './lib/LocalProp.schemas';
