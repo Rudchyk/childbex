@@ -19,7 +19,6 @@ const THEME_STORAGE_KEY = 'mui-mode';
 
 export const ThemeProvider: FC<ThemeProviderProps> = ({ children }) => {
   const { setMode, mode } = useColorScheme();
-  console.log('🚀 ~ ThemeProvider ~ mode:', mode);
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)');
   const theme = createTheme({
     cssVariables: {

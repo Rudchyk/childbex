@@ -1,5 +1,4 @@
 export * from './lib/PageTitle/PageTitle';
-export * from './lib/Nav/Nav';
 export * from './lib/UITabs/UITabs';
 export * from './lib/UIDialog/UIDialog';
 export * from './lib/Header/Header';

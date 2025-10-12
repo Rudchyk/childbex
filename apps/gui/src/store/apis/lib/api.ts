@@ -70,14 +70,14 @@ export const api = createApi({
   baseQuery: baseQueryWithReauth,
   tagTypes: Object.values(TagTypesEnum),
   endpoints: (builder) => ({
-    getHello: builder.query<string, NameOptionalProperty>({
+    getHello: builder.mutation<string, NameOptionalProperty>({
       query: (params) => ({
         url: apiRoutes.hello,
         params,
       }),
-      providesTags: [TagTypesEnum.DEV],
+      // providesTags: [TagTypesEnum.DEV],
     }),
   }),
 });
 
-export const { useGetHelloQuery } = api;
+export const { useGetHelloMutation } = api;

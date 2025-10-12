@@ -1,7 +1,6 @@
 import { Stack, Typography, Button, ButtonProps, Box } from '@mui/material';
 import { DefaultLayout } from '../../layouts';
 import { PageTmpl } from '../../templates';
-import { Nav } from '../../components';
 import { useNotifications } from '../../modules/notifications';
 
 export const Component = () => {
@@ -42,7 +41,6 @@ export const Component = () => {
   return (
     <DefaultLayout>
       <PageTmpl>
-        <Nav />
         <Stack spacing={2}>
           <Box component="section">
             <Typography variant="h6">Buttons</Typography>

@@ -3,6 +3,7 @@ import { ThemeSwitcher } from '../../../theme';
 import { useBase } from '../../../store/slices';
 import { Link as RouteLink } from 'react-router-dom';
 import { guiRoutes } from '@libs/constants';
+import { HeaderMenu } from '../HeaderMenu/HeaderMenu';
 
 export const Header = () => {
   const { title } = useBase();
@@ -18,8 +19,9 @@ export const Header = () => {
             <img alt={title} src="/logo-white.svg" width={139} height={30} />
           </Link>
         </Stack>
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" spacing={2} alignItems="center">
           <ThemeSwitcher />
+          <HeaderMenu />
         </Stack>
       </Toolbar>
     </AppBar>
