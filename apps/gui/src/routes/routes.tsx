@@ -22,7 +22,6 @@ export default createBrowserRouter([
         ...defaultOptions,
       },
       {
-        loader: () => ({ title: 'About' }),
         path: guiRoutes.about,
         lazy: () => import('../pages/AboutPage/AboutPage'),
         ...defaultOptions,
@@ -37,6 +36,11 @@ export default createBrowserRouter([
         loader: () => ({ title: 'Playground' }),
         path: guiRoutes.playground,
         lazy: () => import('../pages/PlaygroundPage/PlaygroundPage'),
+        ...defaultOptions,
+      },
+      {
+        path: guiRoutes.contacts,
+        lazy: () => import('../pages/ContactsPage/ContactsPage'),
         ...defaultOptions,
       },
     ],

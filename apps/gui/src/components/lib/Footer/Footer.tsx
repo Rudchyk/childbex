@@ -20,6 +20,7 @@ export const Footer: FC = () => {
     { label: 'Medical Disclaimer', href: guiRoutes.disclaimer },
     { label: 'Compliance', href: guiRoutes.compliance },
     { label: 'Contacts', href: guiRoutes.contacts },
+    { label: 'About us', href: guiRoutes.about },
     { label: 'Cookie Policy', href: guiRoutes.cookies },
   ];
   return (
