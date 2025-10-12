@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { logger } from './logger.service';
 import type { Server as HTTPSServer } from 'http';
+import path from 'path';
 import { type Error, ErrorSchema, Value } from '@libs/schemas';
 
 const { NODE_ENV, PORT, HOST, IS_HTTPS } = process.env;
@@ -67,12 +68,11 @@ export const errorHandler = (
   next: NextFunction
 ) => {
   logger.error(err, 'Global ERROR');
-  // TODO: delete after tests
-  // return res.status(err.status || 500).json({
-  //   message: err.message,
-  //   errors: err.errors,
-  //   statusCode: err.status,
-  //   expose: err.expose,
-  // });
-  return res.status(err.status || 500).json(Value.Cast(ErrorSchema, err));
+  const castedError = Value.Cast(ErrorSchema, err);
+  return res.status(err.status || 500).json({
+    message: castedError.message,
+    errors: castedError.errors,
+    statusCode: castedError.status,
+    expose: castedError.expose,
+  });
 };

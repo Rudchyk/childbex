@@ -1,6 +1,5 @@
 import { FC, ReactNode, useEffect } from 'react';
 import manifest from '../assets/manifest.json';
-import manifestUrl from '../assets/manifest.json?url';
 import { useBase } from '../store/slices';
 
 export interface HelmetProviderProps {
@@ -41,7 +40,7 @@ export const HeadProvider: FC<HelmetProviderProps> = ({ children }) => {
       <link rel="icon" type="image/svg+xml" href="favicon.svg" />
       <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       <meta name="apple-mobile-web-app-title" content={manifest.short_name} />
-      <link rel="manifest" href={manifestUrl} />
+      <link rel="manifest" href="/manifest.json" />
       {manifest.icons.map(({ sizes, type, src }) => (
         <link
           key={src + type}
