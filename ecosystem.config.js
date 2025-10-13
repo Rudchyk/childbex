@@ -1,7 +1,5 @@
 module.exports = {
   name: 'childbex',
-  script: './be/main.js',
-  env: {
-    NODE_ENV: 'production',
-  },
+  cwd: '/data/dev.childbex.com',
+  script: 'be/main.js',
 };
