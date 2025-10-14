@@ -1,15 +1,20 @@
 /// <reference types='vitest' />
-import { defineConfig, PluginOption, loadEnv } from 'vite';
+import { defineConfig, PluginOption, loadEnv, normalizePath } from 'vite';
 import react from '@vitejs/plugin-react';
+import path from 'node:path';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
 
-function robotsTxtPlugin(allowCrawl: boolean): PluginOption {
-  console.log('allowCrawl', allowCrawl);
+type Robots = 'allow' | 'disallow' | undefined;
+
+function robotsTxtPlugin(isProd: boolean, robots?: Robots): PluginOption {
+  console.log('ROBOTS', robots);
+  console.log('isProd', isProd);
 
   const buildSource = (allow: boolean) =>
     // production: allow all  | development: disallow all
     `User-agent: *\nDisallow:${allow ? '' : ' /'}\n`;
 
-  if (allowCrawl) {
+  if (isProd) {
     return {
       name: 'robots-txt',
       apply: 'build',
@@ -17,7 +22,7 @@ function robotsTxtPlugin(allowCrawl: boolean): PluginOption {
         this.emitFile({
           type: 'asset',
           fileName: 'robots.txt',
-          source: buildSource(allowCrawl),
+          source: buildSource(robots === 'allow'),
         });
       },
     };
@@ -29,7 +34,7 @@ function robotsTxtPlugin(allowCrawl: boolean): PluginOption {
       server.middlewares.use((req, res, next) => {
         if (req.url === '/robots.txt') {
           res.setHeader('Content-Type', 'text/plain');
-          res.end(buildSource(allowCrawl));
+          res.end(buildSource(robots === 'allow'));
           return;
         }
         next();
@@ -40,9 +45,6 @@ function robotsTxtPlugin(allowCrawl: boolean): PluginOption {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const allowCrawl = env.VITE_ROBOTS
-    ? env.VITE_ROBOTS === 'allow'
-    : mode === 'production';
   return {
     root: __dirname,
     cacheDir: '../../node_modules/.vite/apps/gui',
@@ -57,7 +59,20 @@ export default defineConfig(({ mode }) => {
       port: 4202,
       host: 'localhost',
     },
-    plugins: [react(), robotsTxtPlugin(allowCrawl)],
+    plugins: [
+      react(),
+      robotsTxtPlugin(mode === 'production', env.VITE_ROBOTS as Robots),
+      viteStaticCopy({
+        targets: [
+          {
+            src: normalizePath(
+              path.resolve(__dirname, 'src/assets/manifest.json')
+            ),
+            dest: '.',
+          },
+        ],
+      }),
+    ],
     // Uncomment this if you are using workers.
     // worker: {
     //  plugins: [ nxViteTsPaths() ],
