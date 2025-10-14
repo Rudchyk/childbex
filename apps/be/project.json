@@ -15,13 +15,20 @@
         "target": "node20",
         "format": ["cjs"],
         "bundle": true,
+        "clean": true,
         "main": "apps/be/src/main.ts",
         "tsConfig": "apps/be/tsconfig.app.json",
         "assets": [
           {
             "input": "apps/be/src/assets",
-            "glob": "**/*  !**/.gitkeep",
-            "output": "./assets"
+            "glob": "**/*",
+            "output": "assets",
+            "ignore": [".gitkeep", "**/.gitkeep"]
+          },
+          {
+            "input": "apps/be/src",
+            "glob": "ecosystem.config.js",
+            "output": "/"
           }
         ],
         "deleteOutputPath": true,
