@@ -43,6 +43,12 @@ export default createBrowserRouter([
         lazy: () => import('../pages/ContactsPage/ContactsPage'),
         ...defaultOptions,
       },
+      {
+        loader: () => ({ title: 'Dashboard' }),
+        path: guiRoutes.dashboard,
+        lazy: () => import('../pages/DashboardPage/DashboardPage'),
+        ...defaultOptions,
+      },
     ],
   },
 ]);

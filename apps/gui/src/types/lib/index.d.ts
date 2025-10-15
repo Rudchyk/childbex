@@ -1,7 +1,10 @@
 import { SSRSettings } from '@types';
 import Keycloak from 'keycloak-js';
 import { Socket } from 'socket.io-client';
-import { PaletteColor, PaletteColorOptions } from '@mui/material/styles/createPalette';
+import {
+  PaletteColor,
+  PaletteColorOptions,
+} from '@mui/material/styles/createPalette';
 
 export {};
 

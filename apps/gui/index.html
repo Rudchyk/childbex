@@ -17,6 +17,9 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      parent.postMessage(location.href, location.origin);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

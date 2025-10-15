@@ -17,4 +17,5 @@ export const guiRoutes = {
   compliance: '/compliance',
   contacts: '/contacts',
   cookies: '/cookies',
+  dashboard: '/dashboard',
 };
