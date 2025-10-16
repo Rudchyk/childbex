@@ -3,7 +3,8 @@ import { ThemeSwitcher } from '../../../theme';
 import { useBase } from '../../../store/slices';
 import { Link as RouteLink } from 'react-router-dom';
 import { guiRoutes } from '@libs/constants';
-import { HeaderMenu } from '../HeaderMenu/HeaderMenu';
+import { HeaderAuth } from './HeaderAuth';
+import { NavMenu } from './NavMenu';
 
 export const Header = () => {
   const { title } = useBase();
@@ -21,7 +22,8 @@ export const Header = () => {
         </Stack>
         <Stack direction="row" spacing={2} alignItems="center">
           <ThemeSwitcher />
-          <HeaderMenu />
+          <NavMenu />
+          <HeaderAuth />
         </Stack>
       </Toolbar>
     </AppBar>
