@@ -1,8 +1,8 @@
 import React from 'react';
-import { useAuth } from './useAuth';
+import { useAuth, ROLES } from './useAuth';
 
 export const AuthRoleGate: React.FC<{
-  authRole: string;
+  authRole: ROLES;
   children: React.ReactNode;
 }> = ({ authRole, children }) => {
   const { hasRole } = useAuth();
