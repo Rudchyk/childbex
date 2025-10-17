@@ -12,6 +12,7 @@ import { isProd } from './constants/defaults';
 import { serverRoutes, setupRoutes } from './routes/routes';
 import routes from './api/v1/routes';
 import { logger } from './services/logger.service';
+import { setupSecurity } from './services/security.service';
 import { apiDocRoute, apiRoute } from '@libs/constants';
 
 const setupServer = async () => {
@@ -24,6 +25,7 @@ const setupServer = async () => {
     app.use(morgan(isProd ? 'tiny' : 'dev'));
     app.use(express.json());
 
+    setupSecurity(app);
     setupRoutes(app);
     app.use(routes);
 
