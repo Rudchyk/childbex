@@ -10,7 +10,7 @@ import {
 } from './services/server.service';
 import { isProd } from './constants/defaults';
 import { serverRoutes, setupRoutes } from './routes/routes';
-import routes from './api/v1/routes';
+import { setupAPIRoutes } from './api/v1/api';
 import { logger } from './services/logger.service';
 import { setupSecurity } from './services/security.service';
 import { apiDocRoute, apiRoute } from '@libs/constants';
@@ -25,9 +25,9 @@ const setupServer = async () => {
     app.use(morgan(isProd ? 'tiny' : 'dev'));
     app.use(express.json());
 
-    setupSecurity(app);
+    const security = setupSecurity(app);
     setupRoutes(app);
-    app.use(routes);
+    setupAPIRoutes(app, security.keycloak);
 
     app.use(errorHandler);
 
@@ -36,7 +36,11 @@ const setupServer = async () => {
     server.on('error', onError);
     server.on(
       'listening',
-      onListening(server, { ...serverRoutes, api: apiRoute + apiDocRoute })
+      onListening(server, {
+        ...serverRoutes,
+        api: apiRoute + apiDocRoute,
+        apiSpec: apiRoute + '/openapi.json',
+      })
     );
   } catch (error) {
     logger.error(error);

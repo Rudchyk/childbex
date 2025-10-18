@@ -1,5 +1,5 @@
-import { Response, HTTPError } from 'fets';
-import { router } from '../router';
+import { Response } from 'fets';
+import { router } from '../apiRouter';
 import Keycloak from 'keycloak-connect';
 import { apiRoutes } from '@libs/constants';
 import { security } from '../../../services/security.service';
@@ -8,22 +8,13 @@ import {
   Type,
   defaultResponses,
 } from '../schemas/schemas';
+import { getSecurityServiceUnavailableError } from '../lib/helpers';
 
 const tags = ['Security'];
 
-const getSecurityServiceUnavailableError = () =>
-  new HTTPError(
-    503,
-    'Service Unavailable',
-    {},
-    {
-      message: 'Security service is not initialized',
-    }
-  );
-
 router.route({
   method: 'GET',
-  path: apiRoutes.security,
+  path: apiRoutes.securityConfig,
   tags,
   schemas: {
     responses: {

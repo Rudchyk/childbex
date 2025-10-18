@@ -12,6 +12,8 @@ const {
   KEYCLOAK_CLIENT = '',
 } = process.env;
 
+export const securityIssuer = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`;
+
 export class Security {
   private config: KeycloakConfig = {
     realm: KEYCLOAK_REALM,

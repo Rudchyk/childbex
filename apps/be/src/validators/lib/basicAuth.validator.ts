@@ -4,11 +4,11 @@ const basicAuthUnauthorizedStatus = 401;
 
 type Credentials = [login: string, password: string, token: string];
 
-const basicAuthCredentials = (process.env.BASIC_AUTH || ':').split(
+export const basicAuthCredentials = (process.env.BASIC_AUTH || ':').split(
   ':'
 ) as Credentials;
 
-const parseBasicAuthAuthorization = (auth: string): Credentials => {
+export const parseBasicAuthAuthorization = (auth: string): Credentials => {
   const token = auth.split(' ').pop();
 
   if (!token) {
