@@ -31,7 +31,10 @@ export const setupRoutes = (app: Express) => {
     serverRoutes.assets,
     express.static(path.join(__dirname, 'assets'))
   );
-  router.use(apiRoute, express.static(path.join(__dirname, 'html')));
+  router.use(
+    apiRoute,
+    express.static(path.join(__dirname, 'html', 'oauth2-redirect'))
+  );
   router.get('*', (req, res, next) => {
     if (
       req.path.startsWith(apiRoute) ||

@@ -40,7 +40,6 @@ export const router = createRouter({
         [SecuritiesKeysEnum.KEYCLOAK]: {
           type: 'openIdConnect',
           openIdConnectUrl: `${securityIssuer}/.well-known/openid-configuration`,
-          // 'x-redirectUrl': `${keycloakUrl}/oauth2-redirect22222222222222.html`,
         },
       },
       schemas: {
@@ -51,6 +50,7 @@ export const router = createRouter({
   swaggerUI: {
     endpoint: apiDocRoute,
     displayOperationId: false,
+    // oauth2RedirectUrl: '/oauth2-redirect/oauth2-redirect.html',
   },
   plugins: [BasicAuthenticationPlugin],
 });
