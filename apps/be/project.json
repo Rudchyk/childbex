@@ -26,6 +26,12 @@
             "ignore": [".gitkeep", "**/.gitkeep"]
           },
           {
+            "input": "apps/be/src/html",
+            "glob": "**/*",
+            "output": "html",
+            "ignore": [".gitkeep", "**/.gitkeep"]
+          },
+          {
             "input": "apps/be/src",
             "glob": "ecosystem.config.js",
             "output": "/"

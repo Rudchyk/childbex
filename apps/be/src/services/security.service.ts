@@ -13,6 +13,11 @@ const {
 } = process.env;
 
 export const securityIssuer = `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}`;
+export const keycloakUrl = KEYCLOAK_URL;
+
+/**
+ * https://www.keycloak.org/securing-apps/nodejs-adapter
+ */
 
 export class Security {
   private config: KeycloakConfig = {

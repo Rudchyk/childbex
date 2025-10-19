@@ -35,7 +35,7 @@ router.route({
   tags,
   security: [
     {
-      [SecuritiesKeysEnum.BASIC_AUTH]: {},
+      [SecuritiesKeysEnum.BASIC_AUTH]: [],
     },
   ],
   schemas: {
@@ -60,8 +60,8 @@ router.route({
   tags,
   security: [
     {
-      [SecuritiesKeysEnum.KEYCLOAK]: {},
-      [SecuritiesKeysEnum.KEYCLOAK_BEARER]: {},
+      [SecuritiesKeysEnum.KEYCLOAK]: [],
+      [SecuritiesKeysEnum.KEYCLOAK_BEARER]: [],
     },
   ],
   schemas: {
@@ -77,5 +77,31 @@ router.route({
   handler: (request) => {
     const { name } = request.query;
     return Response.json(`hello: ${name} 2222`);
+  },
+});
+
+router.route({
+  method: 'GET',
+  path: '/basic-hello3',
+  tags,
+  security: [
+    {
+      [SecuritiesKeysEnum.KEYCLOAK]: ['realm:admin'],
+      [SecuritiesKeysEnum.KEYCLOAK_BEARER]: ['realm:admin'],
+    },
+  ],
+  schemas: {
+    request: {
+      query: { ...NameOptionalPropertySchema },
+    },
+    responses: {
+      200: Type.String(),
+      ...unauthorizedResponse,
+      ...defaultResponses,
+    },
+  },
+  handler: (request) => {
+    const { name } = request.query;
+    return Response.json(`hello: ${name} 3333`);
   },
 });

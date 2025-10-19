@@ -3,8 +3,11 @@ import { schemas } from './schemas/schemas';
 import { createRouter, registerFormats } from 'fets';
 import { SecuritiesKeysEnum } from './lib/SecuritiesKeysEnum';
 import { BasicAuthenticationPlugin } from './plugins/BasicAuthenticationPlugin';
-import { KeycloakPlugin } from './plugins/KeycloakPlugin';
-import { securityIssuer, security } from '../../services/security.service';
+import {
+  securityIssuer,
+  security,
+  keycloakUrl,
+} from '../../services/security.service';
 
 registerFormats();
 
@@ -37,6 +40,7 @@ export const router = createRouter({
         [SecuritiesKeysEnum.KEYCLOAK]: {
           type: 'openIdConnect',
           openIdConnectUrl: `${securityIssuer}/.well-known/openid-configuration`,
+          // 'x-redirectUrl': `${keycloakUrl}/oauth2-redirect22222222222222.html`,
         },
       },
       schemas: {
@@ -48,5 +52,5 @@ export const router = createRouter({
     endpoint: apiDocRoute,
     displayOperationId: false,
   },
-  plugins: [BasicAuthenticationPlugin, KeycloakPlugin],
+  plugins: [BasicAuthenticationPlugin],
 });

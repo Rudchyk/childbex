@@ -1,8 +1,7 @@
 import { HTTPError, RouterPlugin } from 'fets';
 import { SecuritiesKeysEnum } from '../lib/SecuritiesKeysEnum';
-import { security as securityService } from '../../../services/security.service';
 import {
-  basicAuthCredentials,
+  getBasicAuthCredentials,
   parseBasicAuthAuthorization,
 } from '../../../validators';
 
@@ -28,7 +27,7 @@ export const BasicAuthenticationPlugin: RouterPlugin<unknown, any> = {
         );
       }
       const [login, password] = parseBasicAuthAuthorization(authHeader);
-
+      const basicAuthCredentials = getBasicAuthCredentials('API_BASIC_AUTH');
       if (
         login !== basicAuthCredentials[0] ||
         password !== basicAuthCredentials[1]

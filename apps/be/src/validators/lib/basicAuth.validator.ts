@@ -2,11 +2,10 @@ import type { Request, Response, NextFunction } from 'express';
 
 const basicAuthUnauthorizedStatus = 401;
 
-type Credentials = [login: string, password: string, token: string];
+export type Credentials = [login: string, password: string, token: string];
 
-export const basicAuthCredentials = (process.env.BASIC_AUTH || ':').split(
-  ':'
-) as Credentials;
+export const getBasicAuthCredentials = (envPropName = 'BASIC_AUTH') =>
+  (process.env[envPropName] || ':').split(':') as Credentials;
 
 export const parseBasicAuthAuthorization = (auth: string): Credentials => {
   const token = auth.split(' ').pop();
@@ -48,7 +47,7 @@ export const basicAuthValidator = (
   }
 
   const [login, password] = parseBasicAuthAuthorization(auth);
-
+  const basicAuthCredentials = getBasicAuthCredentials();
   if (
     login === basicAuthCredentials[0] &&
     password === basicAuthCredentials[1]

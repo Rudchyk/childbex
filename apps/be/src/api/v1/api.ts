@@ -7,12 +7,39 @@ import { security, KeycloakType } from '../../services/security.service';
 
 import './routes/config';
 import './routes/hello';
+import { SecuritiesKeysEnum } from './lib/SecuritiesKeysEnum';
 
 export const setupAPIRoutes = (app: Express, keycloak: KeycloakType) => {
-  // app.use(apiRoute, (req: Request, res: Response, next: NextFunction) => {
-  //   return keycloak.protect();
-  // });
-  app.use(apiRoute + apiDocRoute, basicAuthValidator);
   const boo = router.openAPIDocument;
+  Object.entries(router.openAPIDocument.paths || {}).forEach(
+    ([path, methods]) => {
+      if (path && methods) {
+        Object.values(methods).forEach((props) => {
+          if (!Array.isArray(props) && 'security' in props && props.security) {
+            const route = apiRoute + path;
+            props.security?.forEach((securityItem) => {
+              if (Array.isArray(securityItem[SecuritiesKeysEnum.KEYCLOAK])) {
+                app.use(
+                  route,
+                  keycloak.protect(...securityItem[SecuritiesKeysEnum.KEYCLOAK])
+                );
+              } else if (
+                Array.isArray(securityItem[SecuritiesKeysEnum.KEYCLOAK_BEARER])
+              ) {
+                app.use(
+                  route,
+                  keycloak.protect(
+                    ...securityItem[SecuritiesKeysEnum.KEYCLOAK_BEARER]
+                  )
+                );
+              }
+            });
+          }
+        });
+      }
+    }
+  );
+
+  app.use(apiRoute + apiDocRoute, basicAuthValidator);
   app.use(router);
 };
