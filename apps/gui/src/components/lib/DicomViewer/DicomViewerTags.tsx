@@ -1,6 +1,6 @@
 import { ToggleButton } from '@mui/material';
 import { FC } from 'react';
-import { useToggle } from 'usehooks-ts';
+import { useToggle } from '../../../hooks';
 import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
 import { UIDialog } from '../UIDialog/UIDialog';
 import { DicomViewerTagsTable } from './DicomViewerTagsTable';

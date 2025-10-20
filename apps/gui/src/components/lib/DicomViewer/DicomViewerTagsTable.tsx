@@ -147,15 +147,13 @@ export const DicomViewerTagsTable: FC<DicomViewerTagsTableProps> = ({
     const metaArray = getMetaArray(instanceNumber);
     const updatedList = metaArray.filter(function (item: any) {
       for (const key in item) {
-        if (item.hasOwnProperty(key)) {
-          let value = item[key];
-          if (typeof value !== 'undefined') {
-            if (typeof value !== 'string') {
-              value = value.toString();
-            }
-            if (value.toLowerCase().indexOf(searchLo) !== -1) {
-              return true;
-            }
+        let value = item[key];
+        if (typeof value !== 'undefined') {
+          if (typeof value !== 'string') {
+            value = value.toString();
+          }
+          if (value.toLowerCase().indexOf(searchLo) !== -1) {
+            return true;
           }
         }
       }

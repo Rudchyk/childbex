@@ -7,10 +7,10 @@ import {
   useState,
 } from 'react';
 import { Box, LinearProgress, Stack } from '@mui/material';
-import { App, AppOptions, Index, ToolConfig, ViewConfig } from 'dwv';
+import { App, AppOptions, DataElement, Index, ViewConfig } from 'dwv';
 import { DicomViewerFooter } from './DicomViewerFooter';
-// import { DicomViewerTools } from './DicomViewerTools';
-// import { DicomViewerSidebar } from './DicomViewerSidebar';
+import { DicomViewerTools } from './DicomViewerTools';
+import { DicomViewerSidebar } from './DicomViewerSidebar';
 import {
   DicomLoadErrorEvent,
   DicomLoadErrorEvents,
@@ -18,10 +18,13 @@ import {
   DicomLoadProgressEvent,
   DicomPositionChangeEvent,
   DicomLoadEndEvent,
+  DicomLoadEvent,
+  DicomRenderendEvent,
+  DicomLoadStartEvent,
 } from './DicomViewer.types';
 
 import './DicomViewer.css';
-import { getImageUid } from './DicomViewer.utils';
+import { getImageUid, getSeriesDescription } from './DicomViewer.utils';
 import { DicomViewerDropbox } from './DicomViewerDropbox';
 
 interface DicomViewerProps {
@@ -35,6 +38,8 @@ interface DicomViewerProps {
 /**
  * https://ivmartel.github.io/dwv/
  * https://github.com/ivmartel/dwv
+ * https://github.com/ivmartel/dwv-react
+ * TODO: create grouping by seriesDescription for files
  */
 
 export const DicomViewer: FC<DicomViewerProps> = ({
@@ -46,15 +51,6 @@ export const DicomViewer: FC<DicomViewerProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<App>(null);
-  const tools: ToolConfig = {
-    Scroll: {},
-    ZoomAndPan: {},
-    WindowLevel: {},
-    Draw: {
-      options: ['Rectangle'],
-      type: 'factory',
-    },
-  };
   const [loadedItemsMapping, setLoadedItemsMapping] = useState<
     Record<string, string>
   >({});
@@ -66,13 +62,26 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     source: string;
     index: number;
   }
+  const tools: AppOptions['tools'] = {
+    Scroll: {
+      options: undefined,
+    },
+    WindowLevel: {
+      options: undefined,
+    },
+    ZoomAndPan: {
+      options: undefined,
+    },
+    Draw: {
+      options: ['Rectangle'],
+    },
+  };
   const defaultSelectedTool = 'Select Tool';
   const [items, setItems] = useState<Item[]>([]);
   const [sliceCount, setSliceCount] = useState<number>(0);
-  // const [loadErrorEvents, setLoadErrorEvents] = useState<DicomLoadErrorEvents>(
-  //   []
-  // );
-  const [loadErrorEvents, setLoadErrorEvents] = useState<any>([]);
+  const [loadErrorEvents, setLoadErrorEvents] = useState<DicomLoadErrorEvents>(
+    []
+  );
   const [loadProgress, setLoadProgress] = useState(0);
   const [isLoadSuccessful, setIsLoadSuccessful] = useState(false);
   const [isShowDropbox, setIsShowDropbox] = useState(false);
@@ -81,7 +90,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   const [canWindowLevel, setCanWindowLevel] = useState(false);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [currentMetaData, setCurrentMetaData] = useState<
-    Record<string, unknown>
+    Record<string, DataElement>
   >({});
   const [currentImageId, setCurrentImageId] = useState<string | undefined>();
   const onChangeShape = (shape: string) => {
@@ -90,20 +99,24 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     }
   };
   const onChangeTool = (tool: string) => {
-    console.log('🚀 ~ onChangeTool ~ tool:', tool);
-    // if (appRef.current) {
-    //   setSelectedTool(tool);
-    //   appRef.current.setTool(tool);
-    //   switch (tool) {
-    //     case 'Draw':
-    //       onChangeShape(tools.Draw.options[0]);
-    //       break;
-    //     default:
-    //       const lg = appRef.current.getActiveLayerGroup();
-    //       lg.setActiveViewLayer(0);
-    //       break;
-    //   }
-    // }
+    if (appRef.current) {
+      setSelectedTool(tool);
+      appRef.current.setTool(tool);
+      switch (tool) {
+        case 'Draw':
+          if (tools['Draw']?.options) {
+            onChangeShape(tools.Draw.options[0]);
+          }
+          break;
+        default:
+          // eslint-disable-next-line no-case-declarations
+          const lg = appRef.current.getActiveLayerGroup();
+          if (lg) {
+            lg.setActiveLayer(0);
+          }
+          break;
+      }
+    }
   };
   const canRunTool = (tool: string) => {
     switch (tool) {
@@ -117,7 +130,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   };
   const onReset = () => {
     if (appRef.current) {
-      appRef.current.resetLayout();
+      appRef.current.resetZoomPan();
     }
   };
   const onLoadFiles = (files: File[]) => {
@@ -152,71 +165,73 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     const viewConfig0 = new ViewConfig(containerRef?.current?.id ?? '');
     const viewConfigs = { '*': [viewConfig0] };
     const options = new AppOptions(viewConfigs);
-    options.tools = {
-      Scroll: {
-        options: undefined,
-      },
-    };
+    options.tools = tools;
     app.init(options);
-    // app.init({
-    //   dataViewConfigs: { '*': [{ divId: containerRef?.current?.id || '' }] },
-    //   tools,
+    // app.addEventListener('loadstart', (event: DicomLoadStartEvent) => {
+    //   console.log('loadstart', event);
     // });
-
-    app.addEventListener('loadprogress', (event: DicomLoadProgressEvent) => {
-      setLoadProgress(event.loaded);
-    });
-    app.addEventListener('load', () => {
-      setIsLoadSuccessful(true);
-    });
-    // app.addEventListener('loadend', (event: DicomLoadEndEvent) => {
-    app.addEventListener('loadend', (event: any) => {
-      console.log(event, 'event');
-      const vl = app.getViewLayersByDataId(event.loadid);
-      console.log('🚀 ~ DicomViewer ~ vl:', vl);
-      const vlItem = vl[0];
-      console.log('🚀 ~ DicomViewer ~ vlItem:', vlItem);
-      const vc = vlItem.getViewController();
-      // const vc = vlItem.getViewController();
+    // app.addEventListener('renderend', (event: DicomRenderendEvent) => {
+    //   console.log('renderend', event);
+    // });
+    app.addEventListener('loadend', (event: DicomLoadEndEvent) => {
+      // console.log('loadend', event);
+      const metaRoot = app.getMetaData(event.dataid);
+      if (metaRoot) {
+        setCurrentMetaData(metaRoot);
+      }
+      const data = app.getData(event.dataid);
+      const image = data?.image;
+      const vls = app.getViewLayersByDataId(event.dataid);
+      const vl = vls[0];
+      const vc = vl.getViewController();
       const canScroll = vc.canScroll();
-      const canWindowLevel = vc.isMonochrome();
-      const image = app.getData(event.loadid);
-      console.log('🚀 ~ DicomViewer ~ image:', image);
-      // const geometry = image.getGeometry();
-      // const size = geometry.getSize();
-      // const sliceCount = size.get(2);
-      const vals = vc.getCurrentIndex().getValues();
-      const metaRoot = app.getMetaData(event.loadid) as typeof currentMetaData;
-      console.log('🚀 ~ DicomViewer ~ metaRoot:', metaRoot);
-      // const _loadedSlicesMapping: typeof loadedSlicesMapping = {};
-      // for (let i = 0; i < sliceCount; i++) {
-      //   const vals2 = [...vals];
-      //   vals2[2] = i;
-      //   const intdex = new Index(vals2);
-      //   const currentImageUid = image.getImageUid(intdex);
-      //   _loadedSlicesMapping[i] = currentImageUid;
-      // }
-      if (canWindowLevel) {
+      const canMonochrome = vc.isMonochrome();
+      if (canMonochrome) {
         setCanWindowLevel(true);
       }
       if (canScroll) {
         setCanScroll(true);
       }
       onChangeTool(canScroll ? 'Scroll' : 'ZoomAndPan');
-      // setSliceCount(sliceCount);
-      // setLoadedSlicesMapping(_loadedSlicesMapping);
-      // setCurrentImageId(_loadedSlicesMapping[sliceCount - 1]);
+      const vals = vc.getCurrentIndex().getValues();
+      if (image) {
+        const geometry = image.getGeometry();
+        const size = geometry.getSize();
+        const sliceCount = size.get(2);
+        const _loadedSlicesMapping: typeof loadedSlicesMapping = {};
+        for (let i = 0; i < sliceCount; i++) {
+          const idxVals = [...vals];
+          idxVals[2] = i;
+          const index = new Index(idxVals);
+          const uid = image.getImageUid(index);
+          _loadedSlicesMapping[i] = uid;
+        }
+        setLoadedSlicesMapping(_loadedSlicesMapping);
+        setCurrentImageId(_loadedSlicesMapping[sliceCount - 1]);
+        setSliceCount(sliceCount);
+        setIsShowDropbox(sliceCount === 0);
+      }
+
       setIsDataLoaded(true);
-      setCurrentMetaData(metaRoot);
-      setIsShowDropbox(sliceCount === 0);
+    });
+
+    app.addEventListener('loadprogress', (event: DicomLoadProgressEvent) => {
+      // console.log('loadprogress', event);
+      setLoadProgress(event.loaded);
+    });
+    app.addEventListener('load', (event: DicomLoadEvent) => {
+      // console.log('load', event);
+      setIsLoadSuccessful(true);
     });
     app.addEventListener(
       'positionchange',
       (event: DicomPositionChangeEvent) => {
+        // console.log('positionchange', event);
         setCurrentImageId(event.data.imageUid);
       }
     );
     app.addEventListener('loaditem', (event: DicomLoadItemEvent) => {
+      // console.log('loaditem', event);
       let name = '';
       if (typeof event.source === 'string') {
         name = event.source;
@@ -225,20 +240,26 @@ export const DicomViewer: FC<DicomViewerProps> = ({
           name = event.source.name;
         }
       }
-      const uid = getImageUid(event.data, 0);
+      app.setActiveLayerGroup(1);
+      const uid = getImageUid(event.data);
+      // const seriesDescription = getSeriesDescription(event.data);
+      // console.log('🚀 ~ DicomViewer ~ seriesDescription:', seriesDescription);
       if (uid) {
         setLoadedItemsMapping((state) => ({ ...state, [uid]: name }));
       }
     });
-    // app.addEventListener('loaderror', (event: DicomLoadErrorEvent) => {
-    //   setLoadErrorEvents((state) => [...state, event]);
-    // });
-    // app.addEventListener('loadabort', (event: DicomLoadErrorEvent) => {
-    //   setLoadErrorEvents((state) => [...state, event]);
-    // });
-    // app.addEventListener('keydown', (event: KeyboardEvent) => {
-    //   app.defaultOnKeydown(event);
-    // });
+    app.addEventListener('loaderror', (event: DicomLoadErrorEvent) => {
+      // console.log('loaderror', event);
+      setLoadErrorEvents((state) => [...state, event]);
+    });
+    app.addEventListener('loadabort', (event: DicomLoadErrorEvent) => {
+      // console.log('loadabort', event);
+      setLoadErrorEvents((state) => [...state, event]);
+    });
+    app.addEventListener('keydown', (event: KeyboardEvent) => {
+      // console.log('keydown', event);
+      app.defaultOnKeydown(event);
+    });
 
     window.addEventListener('resize', app.onResize);
 
@@ -279,7 +300,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       {loadProgress !== 100 && loadProgress !== 0 && (
         <LinearProgress variant="determinate" value={loadProgress} />
       )}
-      {/* <DicomViewerTools
+      <DicomViewerTools
         tools={tools}
         selectedTool={selectedTool}
         onChangeTool={onChangeTool}
@@ -290,7 +311,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
         isLoadSuccessful={isLoadSuccessful}
         loadErrorEvents={loadErrorEvents}
         onClean={isClean ? onClean : undefined}
-      /> */}
+      />
       {toolbar}
       <Box
         ref={containerRef}
@@ -299,12 +320,12 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       >
         <DicomViewerDropbox isShow={isShowDropbox} onLoadFiles={onLoadFiles} />
       </Box>
-      {/* <DicomViewerSidebar
+      <DicomViewerSidebar
         app={appRef.current}
         currentImageId={currentImageId}
         items={items}
         icon={sidebarItemIcon}
-      /> */}
+      />
       <DicomViewerFooter />
     </Stack>
   );

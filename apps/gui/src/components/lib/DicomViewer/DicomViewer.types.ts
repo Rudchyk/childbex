@@ -1,3 +1,5 @@
+import { DataElement } from 'dwv';
+
 export interface DicomLoadErrorEvent {
   error: Error;
   loadid: number;
@@ -9,13 +11,26 @@ export interface DicomLoadErrorEvent {
 export type DicomLoadErrorEvents = DicomLoadErrorEvent[];
 
 export interface DicomLoadItemEvent {
-  data: object;
+  data: Record<string, DataElement>;
   isfirstitem: boolean;
-  loadid: number;
-  loadtype: string;
+  dataid: string;
+  loadtype: 'image' | string;
   source: string | File;
-  type: string;
+  type: 'loaditem';
   warn: unknown;
+}
+
+export interface DicomRenderendEvent {
+  dataid: string;
+  layerid: string;
+  srclayerid: string;
+  type: 'loadprogress';
+}
+export interface DicomLoadEvent {
+  dataid: string;
+  loadtype: 'image' | string;
+  source: string | File;
+  type: 'load';
 }
 
 export interface DicomLoadProgressEvent {
@@ -25,23 +40,23 @@ export interface DicomLoadProgressEvent {
   item: {
     loaded: number;
     total: number;
-    source: string;
+    source: string | File;
   };
-  loadtype: string;
-  loadid: number;
+  loadtype: 'image' | string;
+  dataid: string;
   type: 'loadprogress';
 }
 
 export interface DicomLoadStartEvent {
-  source: string[];
-  loadtype: string;
-  loadid: number;
+  dataid: string;
+  loadtype: 'image' | string;
+  source: string[] | FileList;
   type: 'loadstart';
 }
 export interface DicomLoadEndEvent {
-  source: string[];
-  loadtype: string;
-  loadid: number;
+  dataid: string;
+  loadtype: 'image' | string;
+  source: string[] | FileList;
   type: 'loadend';
 }
 export interface DicomPositionChangeEvent {
@@ -52,5 +67,5 @@ export interface DicomPositionChangeEvent {
     imageUid: string;
   };
   srclayerid: string;
-  dataid: number;
+  dataid: string;
 }

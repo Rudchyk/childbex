@@ -1,5 +1,3 @@
-'use client';
-
 import { FC, ReactElement, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   Box,
@@ -55,11 +53,15 @@ export const DicomViewerSidebar: FC<DicomViewerSidebarProps> = ({
   const jumpTo = (i: number) => {
     if (app) {
       const lg = app.getActiveLayerGroup();
-      const vl = lg.getActiveViewLayer();
-      const vc = vl.getViewController();
-      const vals = vc.getCurrentIndex().getValues();
-      vals[2] = i;
-      vc.setCurrentIndex(new Index(vals), false);
+      if (lg) {
+        const vl = lg.getActiveViewLayer();
+        if (vl) {
+          const vc = vl.getViewController();
+          const vals = vc.getCurrentIndex().getValues();
+          vals[2] = i;
+          vc.setCurrentIndex(new Index(vals), false);
+        }
+      }
     }
   };
 
