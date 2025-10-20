@@ -1,3 +1,4 @@
+export * from './lib/VisuallyHiddenInput/VisuallyHiddenInput';
 export * from './lib/PageTitle/PageTitle';
 export * from './lib/UITabs/UITabs';
 export * from './lib/UIDialog/UIDialog';
@@ -6,3 +7,4 @@ export * from './lib/Footer/Footer';
 export * from './lib/DialogForm/DialogForm';
 export * from './lib/DialogAreYouSure/DialogAreYouSure';
 export * from './lib/Breadcrumbs/Breadcrumbs';
+export * from './lib/DicomViewer/DicomViewer';

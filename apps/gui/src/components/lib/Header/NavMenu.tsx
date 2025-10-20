@@ -13,6 +13,10 @@ export const NavMenu = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuItems = [
     {
+      to: guiRoutes.dwv,
+      text: 'DWV',
+    },
+    {
       to: guiRoutes.playground,
       text: 'Playground',
     },

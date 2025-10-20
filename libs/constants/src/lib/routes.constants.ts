@@ -19,4 +19,5 @@ export const guiRoutes = {
   contacts: '/contacts',
   cookies: '/cookies',
   dashboard: '/dashboard',
+  dwv: '/dwv',
 };

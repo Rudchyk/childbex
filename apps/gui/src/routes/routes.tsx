@@ -49,6 +49,12 @@ export default createBrowserRouter([
         lazy: () => import('../pages/DashboardPage/DashboardPage'),
         ...defaultOptions,
       },
+      {
+        loader: () => ({ title: 'Dicom Viewer' }),
+        path: guiRoutes.dwv,
+        lazy: () => import('../pages/DWVPage/DWVPage'),
+        ...defaultOptions,
+      },
     ],
   },
 ]);
