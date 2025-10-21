@@ -9,8 +9,9 @@ import {
   defaultResponses,
 } from '../schemas/schemas';
 import { getSecurityServiceUnavailableError } from '../lib/helpers';
+import { Tags } from '../lib/tags.service';
 
-const tags = ['Security'];
+const tags = [Tags.SECURITY];
 
 router.route({
   method: 'GET',

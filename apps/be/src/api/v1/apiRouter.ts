@@ -3,15 +3,9 @@ import { schemas } from './schemas/schemas';
 import { createRouter, registerFormats } from 'fets';
 import { SecuritiesKeysEnum } from './lib/SecuritiesKeysEnum';
 import { BasicAuthenticationPlugin } from './plugins/BasicAuthenticationPlugin';
-import {
-  securityIssuer,
-  security,
-  keycloakUrl,
-} from '../../services/security.service';
+import { securityIssuer } from '../../services/security.service';
 
 registerFormats();
-
-// export const security = [{ [SecuritiesKeysEnum.KEYCLOAK]: [] }];
 
 export const router = createRouter({
   landingPage: false,

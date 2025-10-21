@@ -1,10 +1,11 @@
-import slug from 'slug';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-//@ts-ignore
-import { isHasCyrillic } from 'cyrillic-doctor';
+// import * as slug from 'slug';
+// // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// //@ts-ignore
+// import { isHasCyrillic } from 'cyrillic-doctor';
 
-slug.setLocale('uk');
-
-export function toSlugIfCyr(str: string) {
-  return isHasCyrillic(str) ? slug(str) : slug(str, { lower: true });
-}
+// export function toSlugIfCyr(str: string) {
+//   slug.default.setLocale('uk');
+//   return isHasCyrillic(str)
+//     ? slug.default(str)
+//     : slug.default(str, { lower: true });
+// }

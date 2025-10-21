@@ -13,7 +13,7 @@ logger.debug(
     username,
     database,
   },
-  '⏩DB'
+  'DB'
 );
 
 export const sequelize: Sequelize = new Sequelize(

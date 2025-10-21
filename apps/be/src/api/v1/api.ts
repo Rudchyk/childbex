@@ -3,10 +3,11 @@ import { apiDocRoute, apiRoute } from '@libs/constants';
 import { basicAuthValidator } from '../../validators';
 import { router } from './apiRouter';
 import type { KeycloakType } from '../../services/security.service';
+import { SecuritiesKeysEnum } from './lib/SecuritiesKeysEnum';
 
 import './routes/config';
 import './routes/hello';
-import { SecuritiesKeysEnum } from './lib/SecuritiesKeysEnum';
+import './routes/patients';
 
 export const setupAPIRoutes = (app: Express, keycloak: KeycloakType) => {
   Object.entries(router.openAPIDocument.paths || {}).forEach(

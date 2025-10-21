@@ -7,8 +7,9 @@ import {
   unauthorizedResponse,
 } from '../schemas/schemas';
 import { SecuritiesKeysEnum } from '../lib/SecuritiesKeysEnum';
+import { Tags } from '../lib/tags.service';
 
-const tags = ['Development'];
+const tags = [Tags.DEVELOPMENT];
 
 router.route({
   method: 'GET',

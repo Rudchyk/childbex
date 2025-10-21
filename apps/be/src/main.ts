@@ -42,7 +42,7 @@ const setupServer = async () => {
       onListening(server, {
         ...serverRoutes,
         api: apiRoute + apiDocRoute,
-        apiSpec: apiRoute + '/openapi.json',
+        // apiSpec: apiRoute + '/openapi.json',
       })
     );
   } catch (error) {
