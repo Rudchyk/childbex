@@ -5,6 +5,7 @@ export const apiDocRoute = '/docs';
 export const apiRoutes = {
   securityConfig: '/security/config',
   securityVerify: '/security/verify',
+  patients: '/patients',
 };
 
 export const guiRoutes = {

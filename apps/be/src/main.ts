@@ -14,10 +14,13 @@ import { setupAPIRoutes } from './api/v1/api';
 import { logger } from './services/logger.service';
 import { setupSecurity } from './services/security.service';
 import { apiDocRoute, apiRoute } from '@libs/constants';
+import { dbSetup } from './db/sequelize';
 
 const setupServer = async () => {
   try {
     const app = express();
+
+    await dbSetup();
 
     app.set('port', port);
 
