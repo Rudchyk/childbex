@@ -24,7 +24,7 @@ router.route({
   method: 'GET',
   path: apiRoutes.patients,
   tags,
-  // ...keycloakSecurity,
+  ...keycloakSecurity,
   schemas: {
     request: {
       query: Type.Partial(PatientCreationAttributesSchema),
