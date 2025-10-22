@@ -1,4 +1,4 @@
-import { Response } from 'fets';
+import { HTTPError, Response } from 'fets';
 import { router } from '../apiRouter';
 import { apiRoutes } from '@libs/constants';
 import { Patient } from '../../../db/models/Patient.model';
@@ -68,20 +68,34 @@ router.route({
       throw getUnauthorizedError();
     }
     const body = await request.formData();
-    const name = body.get('name');
+    let name = body.get('name');
     const slug = body.get('slug');
     const notes = body.get('notes');
     const archive = body.get('archive');
+    if (!name && archive?.name) {
+      const chain = archive.name.split('.');
+      name = chain[0];
+    }
     logger.debug(
       {
         archiveName: archive?.name,
         type: archive?.type,
         size: archive?.size,
         lastModified: archive?.lastModified,
-        boo: name,
+        patientName: name,
       },
       'formData'
     );
+    if (!name) {
+      throw new HTTPError(
+        400,
+        'Invalid request',
+        {},
+        {
+          message: 'Patient name is missing.',
+        }
+      );
+    }
     await Patient.create({
       name,
       slug,

@@ -4,7 +4,7 @@ import { PatientCreationAttributesSchema } from './Patient.schemas.js';
 export const CreatePatientRequestBodySchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['name'],
+  required: [],
   properties: {
     name: PatientCreationAttributesSchema.properties.name,
     slug: PatientCreationAttributesSchema.properties.slug,
