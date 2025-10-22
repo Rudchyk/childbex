@@ -13,19 +13,26 @@ export const setupAPIRoutes = (app: Express, keycloak: KeycloakType) => {
   Object.entries(router.openAPIDocument.paths || {}).forEach(
     ([path, methods]) => {
       if (path && methods) {
-        Object.values(methods).forEach((props) => {
+        Object.entries(methods).forEach(([key, props]) => {
           if (!Array.isArray(props) && 'security' in props && props.security) {
             const route = apiRoute + path;
+            const method = key.toLowerCase() as
+              | 'get'
+              | 'post'
+              | 'put'
+              | 'delete'
+              | 'patch';
+
             props.security?.forEach((securityItem) => {
               if (Array.isArray(securityItem[SecuritiesKeysEnum.KEYCLOAK])) {
-                app.use(
+                app[method](
                   route,
                   keycloak.protect(...securityItem[SecuritiesKeysEnum.KEYCLOAK])
                 );
               } else if (
                 Array.isArray(securityItem[SecuritiesKeysEnum.KEYCLOAK_BEARER])
               ) {
-                app.use(
+                app[method](
                   route,
                   keycloak.protect(
                     ...securityItem[SecuritiesKeysEnum.KEYCLOAK_BEARER]

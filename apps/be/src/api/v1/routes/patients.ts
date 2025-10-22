@@ -17,6 +17,7 @@ import { Tags } from '../lib/tags.service';
 import { logger } from '../../../services/logger.service';
 import { Grant } from 'keycloak-connect';
 import { Ctx } from '../lib/types';
+import { getUnauthorizedError } from '../lib/helpers';
 
 const tags = [Tags.PATIENTS];
 
@@ -62,7 +63,10 @@ router.route({
     const context = ctx as Ctx;
     const grant = context.req.kauth?.grant as Grant;
     const access_token = grant?.access_token;
-    const content = access_token.content;
+    const content = access_token?.content;
+    if (!content) {
+      throw getUnauthorizedError();
+    }
     const body = await request.formData();
     const name = body.get('name');
     const slug = body.get('slug');

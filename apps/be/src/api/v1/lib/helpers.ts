@@ -9,3 +9,13 @@ export const getSecurityServiceUnavailableError = () =>
       message: 'Security service is not initialized',
     }
   );
+
+export const getUnauthorizedError = () =>
+  new HTTPError(
+    401,
+    'Unauthorized',
+    {},
+    {
+      message: 'Authorization Required',
+    }
+  );

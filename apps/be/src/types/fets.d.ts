@@ -18,7 +18,7 @@ declare module 'keycloak-connect' {
   }
 
   interface Grant {
-    access_token: Token;
+    access_token?: Token;
     refresh_token?: Token;
     id_token?: Token;
     expires_in?: number;
