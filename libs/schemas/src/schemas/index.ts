@@ -5,3 +5,6 @@ export * from './lib/Timestamps.schemas.js';
 export * from './lib/ID.schema.js';
 export * from './lib/Patient.schemas.js';
 export * from './lib/CreatePatientRequestBody.schema.js';
+export * from './lib/PatientImageCluster.schemas.js';
+export * from './lib/PatientImage.schema.js';
+export * from './lib/PatientImageReviewVote.schema.js';

@@ -61,6 +61,7 @@
     "@types/react-dom": "19.0.0",
     "@types/slug": "^5.0.9",
     "@types/swagger-ui-express": "^4.1.8",
+    "@types/tar-fs": "^2.0.4",
     "@vitejs/plugin-react": "^4.2.0",
     "@vitest/ui": "^3.0.0",
     "ajv": "^8.0.0",
@@ -108,6 +109,7 @@
     "@reduxjs/toolkit": "^2.9.0",
     "compression": "^1.8.1",
     "cyrillic-doctor": "^1.0.3",
+    "dicom-parser": "^1.8.21",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "express-session": "^1.18.2",
@@ -117,6 +119,7 @@
     "lodash": "^4.17.21",
     "memorystore": "^1.6.7",
     "morgan": "^1.10.1",
+    "node-stream-zip": "^1.15.0",
     "notistack": "^3.0.2",
     "pg": "^8.16.3",
     "pg-hstore": "^2.3.4",
@@ -128,8 +131,10 @@
     "react-redux": "^9.2.0",
     "react-router-dom": "6.29.0",
     "redux": "^5.0.1",
+    "sanitize-filename": "^1.6.3",
     "sequelize": "^6.37.7",
     "slug": "^11.0.1",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "tar-fs": "^3.1.1"
   }
 }

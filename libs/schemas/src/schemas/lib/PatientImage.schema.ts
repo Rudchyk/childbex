@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { PatientSchema } from './Patient.schemas.js';
-import { PatientImageClusterSchema } from './PatientImageCluster.schemas.js';
-import { PatientImageReviewVoteSchema } from './PatientImageReviewVote.schema.js';
+import { PatientImageCluster } from './PatientImageCluster.schemas.js';
+import { PatientImageReviewVote } from './PatientImageReviewVote.schema.js';
 import { TimestampsSchema } from './Timestamps.schemas.js';
 
 export enum PatientImageStatus {
@@ -23,16 +23,18 @@ export const PatientImageSchema = Type.Object({
   details: Type.Object(Type.Unknown()),
   status: Type.Enum(PatientImageStatus),
   adminResolutionId: Type.Union([Type.String(), Type.Null()]),
+  adminResolutionName: Type.Union([Type.String(), Type.Null()]),
   resolutionComment: Type.Union([Type.String(), Type.Null()]),
-  // resolvedAt: Type.Optional(Type.Null(Type.Date())),
-  // votesCount: Type.Boolean(),
-  // normalVotes: Type.Boolean(),
-  // abnormalVotes: Type.Boolean(),
-  // uncertainVotes: Type.Boolean(),
-  // ...TimestampsSchema.properties,
-  // cluster: Type.Optional(PatientImageClusterSchema),
-  // patient: Type.Optional(PatientSchema),
-  // votes: Type.Optional(Type.Array(PatientImageReviewVoteSchema)),
+  resolvedAt: Type.Optional(Type.Null(Type.Date())),
+  votesCount: Type.Number(),
+  normalVotes: Type.Number(),
+  abnormalVotes: Type.Number(),
+  uncertainVotes: Type.Number(),
+  ...TimestampsSchema.properties,
+  patient: Type.Optional(PatientSchema),
 });
 
-export type PatientImage = Static<typeof PatientSchema>;
+export type PatientImage = Static<typeof PatientImageSchema> & {
+  cluster?: PatientImageCluster;
+  votes?: PatientImageReviewVote[];
+};

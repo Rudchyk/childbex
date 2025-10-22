@@ -18,6 +18,7 @@ import { logger } from '../../../services/logger.service';
 import { Grant } from 'keycloak-connect';
 import { Ctx } from '../lib/types';
 import { getUnauthorizedError } from '../lib/helpers';
+import { usePatientAssets } from '../../../services/patients.service';
 
 const tags = [Tags.PATIENTS];
 
@@ -76,16 +77,6 @@ router.route({
       const chain = archive.name.split('.');
       name = chain[0];
     }
-    logger.debug(
-      {
-        archiveName: archive?.name,
-        type: archive?.type,
-        size: archive?.size,
-        lastModified: archive?.lastModified,
-        patientName: name,
-      },
-      'formData'
-    );
     if (!name) {
       throw new HTTPError(
         400,
@@ -96,7 +87,7 @@ router.route({
         }
       );
     }
-    await Patient.create({
+    const result = await Patient.create({
       name,
       slug,
       notes,
@@ -104,6 +95,7 @@ router.route({
       creatorName:
         content.name || content.preferred_username || content.email || '',
     });
+    usePatientAssets(result.slug, archive);
     return Response.json(null, { status: 204 });
   },
 });

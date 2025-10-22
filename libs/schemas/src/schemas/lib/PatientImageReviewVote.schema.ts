@@ -11,7 +11,7 @@ export enum PatientImageReviewVoteTypes {
 export const PatientImageReviewVoteSchema = Type.Object({
   id: Type.String({ format: 'uuid' }),
   patientImageId: Type.String({ format: 'uuid' }),
-  reviewerId: Type.String({ format: 'uuid' }),
+  reviewerId: Type.String(),
   reviewerName: Type.String(),
   vote: Type.Enum(PatientImageReviewVoteTypes),
   comment: Type.Optional(Type.String()),

@@ -1,9 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { PatientSchema } from './Patient.schemas.js';
-import {
-  TimestampsSchema,
-  DeletedAtPropertySchema,
-} from './Timestamps.schemas.js';
+import { PatientImageSchema } from './PatientImage.schema.js';
+import { TimestampsSchema } from './Timestamps.schemas.js';
 
 export const PatientImageClusterSchema = Type.Object({
   id: Type.String({ format: 'uuid' }),
@@ -14,8 +12,8 @@ export const PatientImageClusterSchema = Type.Object({
   studyDate: Type.Date(),
   inReview: Type.Boolean(),
   ...TimestampsSchema.properties,
-  images: Type.Optional(PatientSchema),
+  images: Type.Optional(Type.Array(PatientImageSchema)),
   patient: Type.Optional(PatientSchema),
 });
 
-export type Patient = Static<typeof PatientSchema>;
+export type PatientImageCluster = Static<typeof PatientImageClusterSchema>;

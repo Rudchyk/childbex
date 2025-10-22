@@ -1,11 +1,4 @@
-import {
-  DataTypes,
-  Model,
-  Op,
-  Association,
-  NonAttribute,
-  // Association,
-} from 'sequelize';
+import { DataTypes, Model, Op, Association, NonAttribute } from 'sequelize';
 import { sequelize } from '../sequelize';
 import { PatientCreationAttributes, Patient as IPatient } from '@libs/schemas';
 import { timestampFields, deletedAtPropertyField } from '../helpers/timestamps';
@@ -22,13 +15,14 @@ export class Patient
     Omit<PatientCreationAttributes, 'notes' | 'slug'> &
       Partial<Pick<PatientCreationAttributes, 'notes' | 'slug'>>
   >
-  implements Patient
+  implements IPatient
 {
   declare id: IPatient['id'];
   declare name: IPatient['name'];
   declare slug: IPatient['slug'];
   declare notes: IPatient['notes'];
   declare creatorId: IPatient['creatorId'];
+  declare creatorName: IPatient['creatorName'];
 
   // Sequelize‑generated:
   declare readonly createdAt: IPatient['createdAt'];
