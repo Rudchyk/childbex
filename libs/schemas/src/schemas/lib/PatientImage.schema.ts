@@ -3,6 +3,7 @@ import { PatientSchema } from './Patient.schemas.js';
 import { PatientImageCluster } from './PatientImageCluster.schemas.js';
 import { PatientImageReviewVote } from './PatientImageReviewVote.schema.js';
 import { TimestampsSchema } from './Timestamps.schemas.js';
+import { IDSchema } from './ID.schema.js';
 
 export enum PatientImageStatus {
   NOT_REVIEWED = 'not_reviewed',
@@ -14,13 +15,13 @@ export enum PatientImageStatus {
 }
 
 export const PatientImageSchema = Type.Object({
-  id: Type.String({ format: 'uuid' }),
+  id: IDSchema,
   source: Type.String(),
   notes: Type.Optional(Type.String()),
-  clusterId: Type.String({ format: 'uuid' }),
+  clusterId: IDSchema,
   isBrocken: Type.Boolean(),
   isAbnormal: Type.Boolean(),
-  details: Type.Object(Type.Unknown()),
+  details: Type.Union([Type.Object({}), Type.Null()]),
   status: Type.Enum(PatientImageStatus),
   adminResolutionId: Type.Union([Type.String(), Type.Null()]),
   adminResolutionName: Type.Union([Type.String(), Type.Null()]),

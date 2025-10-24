@@ -2,14 +2,15 @@ import { Type, type Static } from '@sinclair/typebox';
 import { PatientSchema } from './Patient.schemas.js';
 import { PatientImageSchema } from './PatientImage.schema.js';
 import { TimestampsSchema } from './Timestamps.schemas.js';
+import { IDSchema } from './ID.schema.js';
 
 export const PatientImageClusterSchema = Type.Object({
-  id: Type.String({ format: 'uuid' }),
+  id: IDSchema,
   cluster: Type.Number(),
   name: Type.String(),
-  patientId: Type.String({ format: 'uuid' }),
-  notes: Type.Optional(Type.String()),
-  studyDate: Type.Date(),
+  patientId: IDSchema,
+  notes: Type.String(),
+  studyDate: Type.Union([Type.Date(), Type.Null()]),
   inReview: Type.Boolean(),
   ...TimestampsSchema.properties,
   images: Type.Optional(Type.Array(PatientImageSchema)),

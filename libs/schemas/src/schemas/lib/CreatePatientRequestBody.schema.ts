@@ -1,22 +1,14 @@
-import { FromSchema } from 'fets';
 import { PatientCreationAttributesSchema } from './Patient.schemas.js';
+import { Type, type Static } from '@sinclair/typebox';
 
-export const CreatePatientRequestBodySchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: [],
-  properties: {
-    name: PatientCreationAttributesSchema.properties.name,
-    slug: PatientCreationAttributesSchema.properties.slug,
-    notes: PatientCreationAttributesSchema.properties.notes,
-    archive: {
-      type: 'string',
-      format: 'binary',
-      maxLength: 1024 * 1024 * 500, // 5MB
-    },
-  },
-} as const;
+const { name, slug, notes } = PatientCreationAttributesSchema.properties;
 
-export type CreatePatientRequestBody = FromSchema<
+export const CreatePatientRequestBodySchema = Type.Object({
+  name,
+  slug: Type.Optional(slug),
+  notes: Type.Optional(notes),
+});
+
+export type CreatePatientRequestBody = Static<
   typeof CreatePatientRequestBodySchema
 >;

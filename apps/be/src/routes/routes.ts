@@ -36,15 +36,15 @@ export const setupRoutes = (app: Express) => {
     express.static(path.join(__dirname, 'html', 'oauth2-redirect'))
   );
   router.get('*', (req, res, next) => {
-    if (
-      req.path.startsWith(apiRoute) ||
-      req.path.startsWith(serverRoutes.assets) ||
-      [serverRoutes.test, serverRoutes.metrics, serverRoutes.boom].includes(
-        req.path
-      )
-    ) {
-      return next();
-    }
+    // if (
+    //   req.path.startsWith(apiRoute) ||
+    //   req.path.startsWith(serverRoutes.assets) ||
+    //   [serverRoutes.test, serverRoutes.metrics, serverRoutes.boom].includes(
+    //     req.path
+    //   )
+    // ) {
+    //   return next();
+    // }
     return res.sendFile(path.join(clientDir, 'index.html'));
   });
   router.get(serverRoutes.test, basicAuthValidator, testController);

@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { TimestampsSchema } from './Timestamps.schemas.js';
 import { PatientImageSchema } from './PatientImage.schema.js';
+import { IDSchema } from './ID.schema.js';
 
 export enum PatientImageReviewVoteTypes {
   NORMAL = 'normal',
@@ -9,8 +10,8 @@ export enum PatientImageReviewVoteTypes {
 }
 
 export const PatientImageReviewVoteSchema = Type.Object({
-  id: Type.String({ format: 'uuid' }),
-  patientImageId: Type.String({ format: 'uuid' }),
+  id: IDSchema,
+  patientImageId: IDSchema,
   reviewerId: Type.String(),
   reviewerName: Type.String(),
   vote: Type.Enum(PatientImageReviewVoteTypes),

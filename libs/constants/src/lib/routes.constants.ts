@@ -6,6 +6,8 @@ export const apiRoutes = {
   securityConfig: '/security/config',
   securityVerify: '/security/verify',
   patients: '/patients',
+  patient: '/patients/:id',
+  patientUpload: '/patients/:id/upload',
 };
 
 export const guiRoutes = {

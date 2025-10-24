@@ -3,13 +3,13 @@ import {
   TimestampsSchema,
   DeletedAtPropertySchema,
 } from './Timestamps.schemas.js';
-import { IDPropertySchema } from './ID.schema.js';
+import { IDPropertySchema, IDSchema } from './ID.schema.js';
 
 export const PatientCreationAttributesSchema = Type.Object({
   name: Type.String(),
   slug: Type.String(),
   notes: Type.String(),
-  creatorId: Type.String(),
+  creatorId: IDSchema,
   creatorName: Type.String(),
 });
 
