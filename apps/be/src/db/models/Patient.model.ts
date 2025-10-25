@@ -1,20 +1,27 @@
-import { DataTypes, Model, Op, Association, NonAttribute } from 'sequelize';
+import {
+  DataTypes,
+  Model,
+  Op,
+  Association,
+  HasManyGetAssociationsMixin,
+} from 'sequelize';
 import { sequelize } from '../sequelize';
-import { PatientCreationAttributes, Patient as IPatient } from '@libs/schemas';
+import {
+  PatientCreationAttributes as PatientBaseCreationAttributes,
+  Patient as IPatient,
+} from '@libs/schemas';
 import { timestampFields, deletedAtPropertyField } from '../helpers/timestamps';
-// import { PatientImageCluster } from './PatientImageCluster.model';
-import slug from 'slug';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-//@ts-ignore
-import { isHasCyrillic } from 'cyrillic-doctor';
+import { toSlugIfCyr } from '@libs/helpers';
+import { PatientImageCluster } from './PatientImageCluster.model';
 
-slug.setLocale('uk');
+type PatientCreationAttributes = Omit<
+  PatientBaseCreationAttributes,
+  'notes' | 'slug'
+> &
+  Partial<Pick<PatientBaseCreationAttributes, 'notes' | 'slug'>>;
+
 export class Patient
-  extends Model<
-    IPatient,
-    Omit<PatientCreationAttributes, 'notes' | 'slug'> &
-      Partial<Pick<PatientCreationAttributes, 'notes' | 'slug'>>
-  >
+  extends Model<IPatient, PatientCreationAttributes>
   implements IPatient
 {
   declare id: IPatient['id'];
@@ -29,12 +36,11 @@ export class Patient
   declare readonly updatedAt: IPatient['updatedAt'];
   declare readonly deletedAt: IPatient['deletedAt'];
 
-  declare static associations: {
-    clusters: Association<Patient, any>;
-  };
+  declare getClusters: HasManyGetAssociationsMixin<PatientImageCluster>;
 
-  // Associations:
-  declare clusters?: NonAttribute<IPatient['clusters']>;
+  declare static associations: {
+    clusters: Association<Patient, PatientImageCluster>;
+  };
 }
 
 Patient.init(
@@ -77,11 +83,8 @@ Patient.init(
     timestamps: true,
     hooks: {
       beforeValidate: async (patient) => {
-        const base =
-          patient.slug ||
-          (isHasCyrillic(patient.name)
-            ? slug(patient.name)
-            : slug(patient.name, { lower: true }));
+        const possibleSlug = patient.slug || patient.name;
+        const base = toSlugIfCyr(possibleSlug);
         const rows = await Patient.findAll({
           where: {
             slug: { [Op.like]: `${base}%` },

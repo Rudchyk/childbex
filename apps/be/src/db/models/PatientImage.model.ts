@@ -5,8 +5,6 @@ import {
   ForeignKey,
   HasManyCreateAssociationMixin,
   HasManyGetAssociationsMixin,
-  InferAttributes,
-  InferCreationAttributes,
   Model,
 } from 'sequelize';
 import { sequelize } from '../sequelize';
@@ -16,18 +14,10 @@ import {
   PatientImage as IPatientImage,
 } from '@libs/schemas';
 import { Patient } from './Patient.model';
-import fs from 'fs';
 import { PatientImageCluster } from './PatientImageCluster.model';
 import { PatientImageReviewVote } from './PatientImageReviewVote.model';
 import { timestampFields } from '../helpers/timestamps';
-import {
-  access,
-  readdir,
-  readFile,
-  mkdir,
-  writeFile,
-  unlink,
-} from 'node:fs/promises';
+import { access, unlink } from 'node:fs/promises';
 
 export type PatientImageCreationAttributes = Pick<
   IPatientImage,
@@ -69,11 +59,6 @@ export class PatientImage
     cluster: Association<PatientImage, PatientImageCluster>;
     votes: Association<PatientImage, PatientImageReviewVote>;
   };
-
-  // Associations:
-  declare cluster?: IPatientImage['cluster'];
-  declare patient?: IPatientImage['patient'];
-  declare votes?: IPatientImage['votes'];
 
   public calculateStatus(): PatientImageStatus {
     const totalVotes = this.votesCount || 0;

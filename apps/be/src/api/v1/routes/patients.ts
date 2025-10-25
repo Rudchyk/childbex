@@ -1,6 +1,6 @@
 import { Response } from 'fets';
 import { router } from '../apiRouter';
-import { apiRoutes } from '@libs/constants';
+import { apiRoutes, TrashedPatientsActionTypes } from '@libs/constants';
 import { Patient } from '../../../db/models/Patient.model';
 import {
   Type,
@@ -16,8 +16,13 @@ import {
   IDPropertySchema,
   UpdatePatientRequestBodySchema,
   UpdatePatientRequestBody,
+  SlugPropertySchema,
+  GetPatientResponseSchema,
+  GetPatientResponse,
+  TrashedPatientsActionParamSchema,
+  Value,
 } from '@libs/schemas';
-import { keycloakSecurity } from '../lib/security.service';
+import { getKeycloakSecurity } from '../lib/security.service';
 import { Tags } from '../lib/tags.service';
 import { Grant } from 'keycloak-connect';
 import { Ctx } from '../lib/types';
@@ -26,7 +31,15 @@ import {
   getNotFoundError,
   getUnauthorizedError,
 } from '../lib/helpers';
-import { usePatientAssets } from '../../../services/patients.service';
+import {
+  uploadRoot,
+  usePatientAssets,
+} from '../../../services/patients.service';
+import path from 'path';
+import { rm } from 'node:fs/promises';
+import { PatientImageCluster } from '../../../db/models/PatientImageCluster.model';
+import { PatientImage } from '../../../db/models/PatientImage.model';
+import { Op } from 'sequelize';
 
 const tags = [Tags.PATIENTS];
 
@@ -36,7 +49,7 @@ router
     method: 'GET',
     path: apiRoutes.patients,
     tags,
-    ...keycloakSecurity,
+    ...getKeycloakSecurity(),
     schemas: {
       request: {
         query: Type.Partial(PatientCreationAttributesSchema),
@@ -59,7 +72,7 @@ router
     method: 'PUT',
     path: apiRoutes.patients,
     tags,
-    ...keycloakSecurity,
+    ...getKeycloakSecurity(),
     schemas: {
       request: {
         json: CreatePatientRequestBodySchema,
@@ -78,7 +91,12 @@ router
       if (!content) {
         throw getUnauthorizedError();
       }
-      const { name, slug, notes } = await request.json();
+      const body = await request.json();
+      const isValid = Value.Check(CreatePatientRequestBodySchema, body);
+      if (!isValid) {
+        throw getInvalidRequestError();
+      }
+      const { name, slug, notes } = body;
       const result = await Patient.create({
         name,
         slug,
@@ -95,7 +113,7 @@ router
     method: 'POST',
     path: apiRoutes.patientUpload,
     tags,
-    ...keycloakSecurity,
+    ...getKeycloakSecurity(),
     schemas: {
       request: {
         params: IDPropertySchema,
@@ -124,7 +142,7 @@ router
     method: 'DELETE',
     path: apiRoutes.patient,
     tags,
-    ...keycloakSecurity,
+    ...getKeycloakSecurity(),
     schemas: {
       request: {
         params: IDPropertySchema,
@@ -146,11 +164,57 @@ router
     },
   })
   .route({
+    description: 'Get a patient',
+    method: 'GET',
+    path: apiRoutes.patientBySlug,
+    tags,
+    ...getKeycloakSecurity(),
+    schemas: {
+      request: {
+        params: SlugPropertySchema,
+      },
+      responses: {
+        200: GetPatientResponseSchema,
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request) {
+      const { slug } = request.params;
+      const result = await Patient.findOne({
+        where: {
+          slug,
+        },
+        include: [
+          {
+            model: PatientImageCluster,
+            as: 'clusters',
+            include: [
+              {
+                model: PatientImage,
+                as: 'images',
+                attributes: ['id'],
+              },
+            ],
+          },
+        ],
+        order: [
+          [{ model: PatientImageCluster, as: 'clusters' }, 'createdAt', 'ASC'],
+        ],
+      });
+      if (!result) {
+        throw getNotFoundError('patient');
+      }
+      const res = result.toJSON<GetPatientResponse>();
+      return Response.json(res);
+    },
+  })
+  .route({
     description: 'Update a patient',
     method: 'PATCH',
     path: apiRoutes.patient,
     tags,
-    ...keycloakSecurity,
+    ...getKeycloakSecurity(),
     schemas: {
       request: {
         params: IDPropertySchema,
@@ -177,6 +241,89 @@ router
         throw getInvalidRequestError();
       }
       await patient.update(body);
+      return Response.json(patient.toJSON());
+    },
+  })
+  .route({
+    description: 'Get trashed patients',
+    method: 'GET',
+    path: apiRoutes.trashedPatients,
+    tags,
+    ...getKeycloakSecurity(['realm:admin']),
+    schemas: {
+      request: {
+        query: Type.Partial(PatientCreationAttributesSchema),
+      },
+      responses: {
+        200: PatientsSchema,
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request) {
+      const { query } = request;
+      const result = await Patient.findAll({
+        paranoid: false,
+        where: {
+          ...query,
+          deletedAt: { [Op.ne]: null },
+        },
+        include: [
+          {
+            model: PatientImageCluster,
+            as: 'clusters',
+          },
+        ],
+      });
+      return Response.json(result.map((i) => i.toJSON()));
+    },
+  })
+  .route({
+    description: 'Delete or restore a patient',
+    method: 'POST',
+    path: apiRoutes.trashedPatient,
+    tags,
+    ...getKeycloakSecurity(['realm:admin']),
+    schemas: {
+      request: {
+        params: IDPropertySchema,
+        query: TrashedPatientsActionParamSchema,
+      },
+      responses: {
+        200: PatientSchema,
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request) {
+      const { id } = request.params;
+      const { type } = request.query;
+      const patient = await Patient.findByPk(id, { paranoid: false });
+      if (!patient) {
+        throw getNotFoundError('patient');
+      }
+      let destDir;
+
+      switch (type) {
+        case TrashedPatientsActionTypes.DELETE:
+          destDir = path.join(uploadRoot, patient.slug);
+          console.log('🚀 ~ trashedPatients ~ destDir:', destDir);
+          // await access(destDir);
+          await rm(destDir, {
+            recursive: true,
+            force: true,
+            maxRetries: 3, // optional (helps on Windows)
+            retryDelay: 100, // optional (ms)
+          });
+          await patient.destroy({ force: true });
+          break;
+        case TrashedPatientsActionTypes.RESTORE:
+          await patient.restore();
+          break;
+        default:
+          break;
+      }
+
       return Response.json(patient.toJSON());
     },
   });

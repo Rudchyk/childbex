@@ -4,11 +4,12 @@ import {
   DeletedAtPropertySchema,
 } from './Timestamps.schemas.js';
 import { IDPropertySchema, IDSchema } from './ID.schema.js';
+import { SlugPropertySchema } from './Slug.schema.js';
 
 export const PatientCreationAttributesSchema = Type.Object({
-  name: Type.String(),
-  slug: Type.String(),
-  notes: Type.String(),
+  name: Type.String({ examples: ['Onyinye Eartha'] }),
+  ...SlugPropertySchema.properties,
+  notes: Type.String({ default: '' }),
   creatorId: IDSchema,
   creatorName: Type.String(),
 });
@@ -22,7 +23,6 @@ export const PatientSchema = Type.Object({
   ...PatientCreationAttributesSchema.properties,
   ...TimestampsSchema.properties,
   ...DeletedAtPropertySchema.properties,
-  clusters: Type.Optional(Type.Array(Type.Any())),
 });
 
 export type Patient = Static<typeof PatientSchema>;

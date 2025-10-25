@@ -7,7 +7,10 @@ export const apiRoutes = {
   securityVerify: '/security/verify',
   patients: '/patients',
   patient: '/patients/:id',
+  patientBySlug: '/patients/:slug',
   patientUpload: '/patients/:id/upload',
+  trashedPatients: '/patients/trash',
+  trashedPatient: '/patients/trash/:id',
 };
 
 export const guiRoutes = {

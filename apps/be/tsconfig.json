@@ -4,10 +4,13 @@
   "include": [],
   "references": [
     {
-      "path": "../../libs/constants"
+      "path": "../../libs/helpers"
     },
     {
       "path": "../../libs/schemas"
+    },
+    {
+      "path": "../../libs/constants"
     },
     {
       "path": "./tsconfig.app.json"

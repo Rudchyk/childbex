@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { TimestampsSchema } from './Timestamps.schemas.js';
-import { PatientImageSchema } from './PatientImage.schema.js';
 import { IDSchema } from './ID.schema.js';
+import { Nullable } from '../../utils/typebox-helpers.js';
 
 export enum PatientImageReviewVoteTypes {
   NORMAL = 'normal',
@@ -15,9 +15,8 @@ export const PatientImageReviewVoteSchema = Type.Object({
   reviewerId: Type.String(),
   reviewerName: Type.String(),
   vote: Type.Enum(PatientImageReviewVoteTypes),
-  comment: Type.Optional(Type.String()),
+  comment: Nullable(Type.String()),
   ...TimestampsSchema.properties,
-  image: Type.Optional(PatientImageSchema),
 });
 
 export type PatientImageReviewVote = Static<

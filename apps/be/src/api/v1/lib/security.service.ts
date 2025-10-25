@@ -1,10 +1,10 @@
 import { SecuritiesKeysEnum } from './SecuritiesKeysEnum';
 
-export const keycloakSecurity = {
+export const getKeycloakSecurity = (roles?: [string]) => ({
   security: [
     {
-      [SecuritiesKeysEnum.KEYCLOAK]: [],
-      [SecuritiesKeysEnum.KEYCLOAK_BEARER]: [],
+      [SecuritiesKeysEnum.KEYCLOAK]: roles ?? [],
+      [SecuritiesKeysEnum.KEYCLOAK_BEARER]: roles ?? [],
     },
   ],
-};
+});

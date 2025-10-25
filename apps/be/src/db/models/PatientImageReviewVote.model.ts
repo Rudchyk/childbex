@@ -2,51 +2,44 @@ import {
   Association,
   BelongsToGetAssociationMixin,
   DataTypes,
-  InferAttributes,
-  InferCreationAttributes,
   Model,
   NonAttribute,
 } from 'sequelize';
-import { sequelize } from '../index';
+import { sequelize } from '../sequelize';
 import {
-  PatientImageReviewVote as PatientImageReviewVoteAttributes,
+  PatientImageReviewVote as IPatientImageReviewVote,
   PatientImageReviewVoteTypes,
-} from '../../types';
+} from '@libs/schemas';
 import { PatientImage } from './PatientImage.model';
-import { User } from './User.model';
-import { basicTimestampFields } from '../helpers/timestamps';
+import { timestampFields } from '../helpers/timestamps';
+
+export type PatientImageReviewVoteCreationAttributes = Omit<
+  IPatientImageReviewVote,
+  'id' | 'createdAt' | 'updatedAt'
+>;
 
 export class PatientImageReviewVote
   extends Model<
-    InferAttributes<PatientImageReviewVote>,
-    InferCreationAttributes<
-      PatientImageReviewVote,
-      {
-        omit: 'id' | 'createdAt' | 'updatedAt';
-      }
-    >
+    IPatientImageReviewVote,
+    PatientImageReviewVoteCreationAttributes
   >
-  implements PatientImageReviewVoteAttributes
+  implements IPatientImageReviewVote
 {
-  declare id: PatientImageReviewVoteAttributes['id'];
-  declare patientImageId: PatientImageReviewVoteAttributes['patientImageId'];
-  declare reviewerId: PatientImageReviewVoteAttributes['reviewerId'];
-  declare vote: PatientImageReviewVoteAttributes['vote'];
-  declare comment: PatientImageReviewVoteAttributes['comment'];
+  declare id: IPatientImageReviewVote['id'];
+  declare patientImageId: IPatientImageReviewVote['patientImageId'];
+  declare reviewerId: IPatientImageReviewVote['reviewerId'];
+  declare reviewerName: IPatientImageReviewVote['reviewerName'];
+  declare vote: IPatientImageReviewVote['vote'];
+  declare comment: IPatientImageReviewVote['comment'];
 
   // Sequelize‑generated:
-  declare readonly createdAt: PatientImageReviewVoteAttributes['createdAt'];
-  declare readonly updatedAt: PatientImageReviewVoteAttributes['updatedAt'];
-
-  // Associations:
-  declare votes?: NonAttribute<PatientImageReviewVote[]>;
-  declare reviewer?: NonAttribute<User>;
+  declare readonly createdAt: IPatientImageReviewVote['createdAt'];
+  declare readonly updatedAt: IPatientImageReviewVote['updatedAt'];
 
   declare getPatientImage: BelongsToGetAssociationMixin<PatientImage>;
 
   declare static associations: {
     votes: Association<PatientImageReviewVote, PatientImage>;
-    reviewer: Association<PatientImageReviewVote, User>;
   };
 }
 
@@ -68,12 +61,12 @@ PatientImageReviewVote.init(
       onDelete: 'CASCADE',
     },
     reviewerId: {
-      type: DataTypes.UUID,
+      type: DataTypes.STRING,
       allowNull: false,
-      references: {
-        model: User,
-        key: 'id',
-      },
+    },
+    reviewerName: {
+      type: DataTypes.STRING,
+      allowNull: false,
     },
     vote: {
       type: DataTypes.ENUM(...Object.values(PatientImageReviewVoteTypes)),
@@ -83,7 +76,7 @@ PatientImageReviewVote.init(
       type: DataTypes.TEXT,
       allowNull: true,
     },
-    ...basicTimestampFields,
+    ...timestampFields,
   },
   {
     sequelize,
@@ -126,14 +119,4 @@ PatientImage.hasMany(PatientImageReviewVote, {
 PatientImageReviewVote.belongsTo(PatientImage, {
   foreignKey: 'patientImageId',
   as: 'patientImage',
-});
-
-User.hasMany(PatientImageReviewVote, {
-  foreignKey: 'reviewerId',
-  as: 'reviewers',
-});
-
-PatientImageReviewVote.belongsTo(User, {
-  foreignKey: 'reviewerId',
-  as: 'reviewer',
 });

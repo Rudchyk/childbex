@@ -1,17 +1,18 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { Nullable } from '../../utils/typebox-helpers.js';
 
 export const CreatedAtPropertySchema = Type.Object({
-  createdAt: Type.String(),
+  createdAt: Type.String({ format: 'date-time' }),
 });
 export type CreatedAtProperty = Static<typeof CreatedAtPropertySchema>;
 
 export const UpdatedAtPropertySchema = Type.Object({
-  updatedAt: Type.String(),
+  updatedAt: Type.String({ format: 'date-time' }),
 });
 export type UpdatedAtProperty = Static<typeof UpdatedAtPropertySchema>;
 
 export const DeletedAtPropertySchema = Type.Object({
-  deletedAt: Type.String(),
+  deletedAt: Nullable(Type.String({ format: 'date-time' })),
 });
 export type DeletedAtProperty = Static<typeof DeletedAtPropertySchema>;
 

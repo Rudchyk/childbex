@@ -2,8 +2,8 @@ import {
   Association,
   DataTypes,
   ForeignKey,
+  HasManyGetAssociationsMixin,
   Model,
-  NonAttribute,
 } from 'sequelize';
 import { sequelize } from '../sequelize';
 import { Patient } from './Patient.model';
@@ -32,14 +32,13 @@ export class PatientImageCluster
   declare readonly createdAt: IPatientImageCluster['createdAt'];
   declare readonly updatedAt: IPatientImageCluster['updatedAt'];
 
+  declare getImages: HasManyGetAssociationsMixin<PatientImageCluster>;
+  declare getPatient: HasManyGetAssociationsMixin<Patient>;
+
   declare static associations: {
     images: Association<PatientImageCluster, PatientImage>;
     patient: Association<PatientImageCluster, Patient>;
   };
-
-  // Associations:
-  declare images?: NonAttribute<IPatientImageCluster['images']>;
-  declare patient?: NonAttribute<IPatientImageCluster['patient']>;
 }
 
 PatientImageCluster.init(

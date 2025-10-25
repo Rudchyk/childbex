@@ -111,7 +111,7 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
             name: group || String(id),
             cluster: id,
             patientId,
-            studyDate,
+            studyDate: studyDate ? studyDate.toISOString() : null,
             notes: '',
           });
           await PatientImage.bulkCreate(
