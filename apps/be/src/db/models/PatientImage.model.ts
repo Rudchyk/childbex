@@ -223,16 +223,16 @@ PatientImage.init(
     tableName: 'patients_images',
     timestamps: true,
     hooks: {
-      // async afterDestroy({ source }) {
-      //   const root = uploadRoot.replace('uploads', '');
-      //   const url = path.join(root, source);
-      //   try {
-      //     await access(url);
-      //     await unlink(url);
-      //   } catch (error) {
-      //     logger.debug((error as Error).message);
-      //   }
-      // },
+      async afterDestroy({ source }) {
+        const root = uploadRoot.replace('uploads', '');
+        const url = path.join(root, source);
+        try {
+          await access(url);
+          await unlink(url);
+        } catch {
+          return;
+        }
+      },
       afterUpdate: async (instance) => {
         // Автоматично оновлюємо статус після зміни голосів
         if (

@@ -9,8 +9,9 @@ export const apiRoutes = {
   trashedPatients: '/patients/trash',
   patient: '/patient',
   trashedPatient: '/patient/trash/:id',
-  patientById: '/patients/:id',
-  patientUpload: '/patients/:id/upload',
+  patientById: '/patient/:id',
+  patientUpload: '/patient/:id/upload',
+  patientAsset: '/patient/asset/:id',
 };
 
 export const guiRoutes = {

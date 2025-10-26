@@ -143,6 +143,33 @@ router
       return Response.json(null, { status: 204 });
     },
   })
+  // Delete patient asset
+  .route({
+    description: 'Delete patient asset',
+    method: 'DELETE',
+    path: apiRoutes.patientAsset,
+    tags: [Tags.PATIENT],
+    ...getKeycloakSecurity(),
+    schemas: {
+      request: {
+        params: IDPropertySchema,
+      },
+      responses: {
+        204: { description: 'success' },
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request) {
+      const { id } = request.params;
+      const result = await PatientImageCluster.findByPk(id);
+      if (!result) {
+        throw getNotFoundError('cluster');
+      }
+      await result.destroy();
+      return Response.json(null, { status: 204 });
+    },
+  })
   // Delete a patient
   .route({
     description: 'Delete a patient',
