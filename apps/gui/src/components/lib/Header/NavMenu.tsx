@@ -8,13 +8,20 @@ import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
 import { guiRoutes } from '@libs/constants';
+import { useAuth } from '../../../auth/useAuth';
 
 export const NavMenu = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { authenticated } = useAuth();
   const menuItems = [
     {
       to: guiRoutes.dwv,
       text: 'DWV',
+    },
+    {
+      to: guiRoutes.patients,
+      text: 'Patients',
+      isHidden: !authenticated,
     },
     {
       to: guiRoutes.playground,
@@ -33,11 +40,19 @@ export const NavMenu = () => {
         alignItems="center"
         sx={{ display: { xs: 'none', md: 'flex' } }}
       >
-        {menuItems.map(({ text, to }) => (
-          <Button key={text + to} color="inherit" component={RouteLink} to={to}>
-            {text}
-          </Button>
-        ))}
+        {menuItems.map(
+          ({ text, to, isHidden }) =>
+            !isHidden && (
+              <Button
+                key={text + to}
+                color="inherit"
+                component={RouteLink}
+                to={to}
+              >
+                {text}
+              </Button>
+            )
+        )}
       </Stack>
       <Box
         sx={{

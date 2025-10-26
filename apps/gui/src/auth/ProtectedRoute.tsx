@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from './useAuth';
+import { LinearProgress } from '@mui/material';
 
 export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -18,8 +19,9 @@ export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [ready, authenticated, login, location]);
 
-  if (!ready) return <div style={{ padding: 24 }}>Loading…</div>;
-  if (!authenticated)
+  if (!ready) return <LinearProgress />;
+  if (!authenticated) {
     return <div style={{ padding: 24 }}>Redirecting to login…</div>;
-  return <>{children}</>;
+  }
+  return children;
 };

@@ -1,13 +1,26 @@
-import { Outlet, createBrowserRouter } from 'react-router-dom';
+import {
+  LoaderFunctionArgs,
+  Outlet,
+  createBrowserRouter,
+  redirect,
+} from 'react-router-dom';
 import ErrorPage from '../pages/ErrorPage/ErrorPage';
 import { LoaderData } from '../types';
 import { guiRoutes } from '@libs/constants';
+import { ProtectedRoute } from '../auth/ProtectedRoute';
 
 const defaultOptions = {
   handle: {
     crumb: (data: LoaderData) => data,
   },
 };
+
+export async function requireAuth({ request }: LoaderFunctionArgs) {
+  if (!window.keycloak?.authenticated) {
+    throw redirect('/');
+  }
+  return null;
+}
 
 export default createBrowserRouter([
   {
@@ -54,6 +67,22 @@ export default createBrowserRouter([
         path: guiRoutes.dwv,
         lazy: () => import('../pages/DWVPage/DWVPage'),
         ...defaultOptions,
+      },
+      {
+        element: (
+          <ProtectedRoute>
+            <Outlet />
+          </ProtectedRoute>
+        ),
+        // loader: requireAuth,
+        children: [
+          {
+            loader: () => ({ title: 'Patients' }),
+            path: guiRoutes.patients,
+            lazy: () => import('../pages/PatientsPage/PatientsPage'),
+            ...defaultOptions,
+          },
+        ],
       },
     ],
   },

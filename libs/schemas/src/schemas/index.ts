@@ -13,3 +13,4 @@ export * from './lib/UploadPatientArchiveRequestBody.schema.js';
 export * from './lib/UpdatePatientRequestBody.schema.js';
 export * from './lib/GetPatientResponse.schema.js';
 export * from './lib/TrashedPatientsActionParam.schema.js';
+export * from './lib/GetPatientsResponse.schemas.js';

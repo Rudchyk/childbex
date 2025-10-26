@@ -6,11 +6,12 @@ import {
   fetchBaseQuery,
 } from '@reduxjs/toolkit/query/react';
 import { apiRoute, apiRoutes } from '@libs/constants';
-import { NameOptionalProperty } from '@libs/schemas';
+import { GetPatientsResponse, Patients } from '@libs/schemas';
 
 export enum TagTypesEnum {
   DATA = 'data',
   DEV = 'development',
+  PATIENTS = 'patients',
 }
 
 const getAPIHeaders = () => {
@@ -70,14 +71,11 @@ export const api = createApi({
   baseQuery: baseQueryWithReauth,
   tagTypes: Object.values(TagTypesEnum),
   endpoints: (builder) => ({
-    getHello: builder.mutation<string, NameOptionalProperty>({
-      query: (params) => ({
-        url: apiRoutes.hello,
-        params,
-      }),
-      // providesTags: [TagTypesEnum.DEV],
+    getPatients: builder.query<GetPatientsResponse, void>({
+      query: () => apiRoutes.patients,
+      providesTags: [TagTypesEnum.PATIENTS],
     }),
   }),
 });
 
-export const { useGetHelloMutation } = api;
+export const { useGetPatientsQuery } = api;

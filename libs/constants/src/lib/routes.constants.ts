@@ -27,4 +27,5 @@ export const guiRoutes = {
   cookies: '/cookies',
   dashboard: '/dashboard',
   dwv: '/dwv',
+  patients: '/patients',
 };

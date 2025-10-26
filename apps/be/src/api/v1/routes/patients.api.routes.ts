@@ -21,6 +21,8 @@ import {
   GetPatientResponse,
   TrashedPatientsActionParamSchema,
   Value,
+  GetPatientsResponseSchema,
+  GetPatientsResponse,
 } from '@libs/schemas';
 import { getKeycloakSecurity } from '../lib/security.service';
 import { Tags } from '../lib/tags.service';
@@ -55,7 +57,7 @@ router
         query: Type.Partial(PatientCreationAttributesSchema),
       },
       responses: {
-        200: PatientsSchema,
+        200: GetPatientsResponseSchema,
         ...unauthorizedResponse,
         ...defaultResponses,
       },
@@ -63,8 +65,19 @@ router
     async handler(request) {
       const { query } = request;
       const isFilter = !!Object.keys(query).length;
-      const result = await Patient.findAll(isFilter ? { where: query } : {});
-      return Response.json(result.map((i) => i.toJSON()));
+      const props = isFilter ? { where: query } : {};
+      const result = await Patient.findAll({
+        ...props,
+        include: [
+          {
+            model: PatientImageCluster,
+            as: 'clusters',
+          },
+        ],
+      });
+      return Response.json(
+        result.map((i) => i.toJSON()) as GetPatientsResponse
+      );
     },
   })
   // Add a patient
