@@ -109,6 +109,7 @@
     "@reduxjs/toolkit": "^2.9.0",
     "compression": "^1.8.1",
     "cyrillic-doctor": "^1.0.3",
+    "date-fns": "^4.1.0",
     "dicom-parser": "^1.8.21",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",

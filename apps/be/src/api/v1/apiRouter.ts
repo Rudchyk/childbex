@@ -1,9 +1,10 @@
 import { apiRoute, apiDocRoute } from '@libs/constants';
-import { schemas } from './schemas/schemas';
+import { ErrorSchema, schemas, Value } from './schemas/schemas';
 import { createRouter, registerFormats } from 'fets';
 import { SecuritiesKeysEnum } from './lib/SecuritiesKeysEnum';
 import { BasicAuthenticationPlugin } from './plugins/BasicAuthenticationPlugin';
 import { securityIssuer } from '../../services/security.service';
+import { logger } from '../../services/logger.service';
 
 registerFormats();
 
@@ -47,4 +48,16 @@ export const router = createRouter({
     // oauth2RedirectUrl: '/oauth2-redirect/oauth2-redirect.html',
   },
   plugins: [BasicAuthenticationPlugin],
+  onError(error, request, context) {
+    // const castedError = Value.Cast(ErrorSchema, error);
+    logger.error(error);
+    return Response.json(
+      {
+        message: 'Internal Server Error',
+      },
+      {
+        status: 500,
+      }
+    );
+  },
 });

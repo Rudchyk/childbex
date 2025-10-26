@@ -30,6 +30,16 @@ export const getNotFoundError = (name?: string) =>
     }
   );
 
+export const getInternalServerRequestError = (msg?: string) =>
+  new HTTPError(
+    500,
+    'Internal Server Error',
+    {},
+    {
+      message: msg ?? 'Internal Server Error',
+    }
+  );
+
 export const getInvalidRequestError = (msg?: string) =>
   new HTTPError(
     400,

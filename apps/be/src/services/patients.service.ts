@@ -9,6 +9,7 @@ import {
   unlink,
 } from 'node:fs/promises';
 import { tmpdir } from 'os';
+import fs from 'fs';
 import { packArchive, unpackArchive, unzip } from '../utils';
 import {
   brokenImageClusterName,
@@ -18,6 +19,7 @@ import {
 import { PatientImageCluster } from '../db/models/PatientImageCluster.model';
 import { PatientImage } from '../db/models/PatientImage.model';
 import { Patient, PatientImageStatus } from '@libs/schemas';
+import { format } from 'date-fns';
 
 export const IMAGE_RX = /\.(png|jpe?g|webp|gif)$/i;
 
@@ -30,6 +32,8 @@ export const archivesRoot = path.resolve(ARCHIVES_ROOT);
 export const usePatientAssets = async (patient: Patient, archive: File) => {
   logger.debug(
     {
+      uploadRoot,
+      archivesRoot,
       archiveName: archive.name,
       type: archive.type,
       size: archive.size,
@@ -43,22 +47,16 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
   } catch {
     await mkdir(archivesRoot, { recursive: true });
   }
-  const tmp = path.join(
-    tmpdir(),
-    process.env.npm_package_name || '',
-    'uploads',
-    archive.name
-  );
+  const tmp = path.join(tmpdir(), 'childbex', 'uploads', archive.name);
   const tmpPath = path.dirname(tmp);
   try {
     await access(tmpPath);
   } catch (error) {
     await mkdir(tmpPath, { recursive: true });
   }
-  // const archiveFile = path.join(ARCHIVES_ROOT, slug + ext);
   await writeFile(tmp, Buffer.from(await archive.arrayBuffer()));
-  const { slug, id: patientId } = patient;
-  const destDir = path.join(uploadRoot, slug);
+  const { id: patientId } = patient;
+  const destDir = path.join(uploadRoot, patientId);
   await mkdir(destDir, { recursive: true });
   switch (ext) {
     case '.zip':
@@ -69,7 +67,13 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
       break;
   }
   await unlink(tmp);
-  await packArchive(destDir, path.join(archivesRoot, slug + '.tgz'));
+  await packArchive(
+    destDir,
+    path.join(
+      archivesRoot,
+      format(new Date(), 'yyyyMMddHHmmss') + '-' + patientId + '.tgz'
+    )
+  );
   const imagesList = await readdir(destDir);
   const inputFiles = imagesList.map((f) => path.join(destDir, f));
   const result = clusterByOrientation(inputFiles);
@@ -87,8 +91,9 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
         await PatientImage.bulkCreate(
           value.map(({ reason, file }: ClusterResult['broken'][0]) => {
             const parsedFile = path.parse(file);
+
             return {
-              source: `/uploads/${slug}/${parsedFile.name}`,
+              source: `/uploads/${patientId}/${parsedFile.name}`,
               notes: reason,
               clusterId: imageCluster.id,
               isBrocken: true,
@@ -118,7 +123,7 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
             files.map(({ file }) => {
               const parsedFile = path.parse(file);
               return {
-                source: `/uploads/${slug}/${parsedFile.name}`,
+                source: `/uploads/${patientId}/${parsedFile.name}`,
                 clusterId: imageCluster.id,
                 details: {
                   geometry,

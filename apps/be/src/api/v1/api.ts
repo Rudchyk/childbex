@@ -5,9 +5,9 @@ import { router } from './apiRouter';
 import type { KeycloakType } from '../../services/security.service';
 import { SecuritiesKeysEnum } from './lib/SecuritiesKeysEnum';
 
-import './routes/config';
+import './routes/config.api.routes';
 import './routes/hello';
-import './routes/patients';
+import './routes/patients.api.routes';
 
 export const setupAPIRoutes = (app: Express, keycloak: KeycloakType) => {
   Object.entries(router.openAPIDocument.paths || {}).forEach(

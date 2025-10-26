@@ -6,11 +6,11 @@ export const apiRoutes = {
   securityConfig: '/security/config',
   securityVerify: '/security/verify',
   patients: '/patients',
-  patient: '/patients/:id',
-  patientBySlug: '/patients/:slug',
-  patientUpload: '/patients/:id/upload',
   trashedPatients: '/patients/trash',
-  trashedPatient: '/patients/trash/:id',
+  patient: '/patient',
+  trashedPatient: '/patient/trash/:id',
+  patientById: '/patients/:id',
+  patientUpload: '/patients/:id/upload',
 };
 
 export const guiRoutes = {

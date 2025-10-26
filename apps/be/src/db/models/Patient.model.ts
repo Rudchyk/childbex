@@ -41,6 +41,38 @@ export class Patient
   declare static associations: {
     clusters: Association<Patient, PatientImageCluster>;
   };
+
+  public async ensureUniqueSlug() {
+    const possibleSlug = this.slug || this.name;
+    const base = toSlugIfCyr(possibleSlug);
+    const rows = await Patient.findAll({
+      paranoid: false,
+      where: {
+        slug: { [Op.like]: `${base}%` },
+      },
+      attributes: ['slug'],
+    });
+
+    if (rows.length) {
+      // Збираємо всі числа із суфіксів, якщо вони є
+      const nums = rows.map((r) => {
+        const m = r.slug.match(new RegExp(`^${base}-(\\d+)$`));
+        return m ? parseInt(m[1], 10) : 0;
+      });
+      if (nums.length) {
+        const next = Math.max(...nums) + 1;
+        const newSlug =
+          next === 1 && !rows.some((r) => r.slug === base)
+            ? base
+            : `${base}-${next}`;
+        this.slug = newSlug;
+      }
+    } else {
+      if (!this.slug) {
+        this.slug = base;
+      }
+    }
+  }
 }
 
 Patient.init(
@@ -57,8 +89,8 @@ Patient.init(
     },
     slug: {
       type: DataTypes.STRING,
-      unique: true,
       allowNull: false,
+      validate: { is: /^[a-z0-9]+(?:-[a-z0-9]+)*$/ },
     },
     creatorId: {
       type: DataTypes.STRING,
@@ -81,35 +113,18 @@ Patient.init(
     tableName: 'patients',
     paranoid: true,
     timestamps: true,
+    indexes: [
+      {
+        name: 'uniq_patient_slug_active',
+        unique: true,
+        fields: ['slug'],
+        where: { deletedAt: null },
+      },
+    ],
     hooks: {
-      beforeValidate: async (patient) => {
-        const possibleSlug = patient.slug || patient.name;
-        const base = toSlugIfCyr(possibleSlug);
-        const rows = await Patient.findAll({
-          where: {
-            slug: { [Op.like]: `${base}%` },
-          },
-          attributes: ['slug'],
-        });
-
-        if (rows.length) {
-          // Збираємо всі числа із суфіксів, якщо вони є
-          const nums = rows.map((r) => {
-            const m = r.slug.match(new RegExp(`^${base}-(\\d+)$`));
-            return m ? parseInt(m[1], 10) : 0;
-          });
-          if (nums.length) {
-            const next = Math.max(...nums) + 1;
-            const newSlug =
-              next === 1 && !rows.some((r) => r.slug === base)
-                ? base
-                : `${base}-${next}`;
-            patient.slug = newSlug;
-          }
-        } else {
-          if (!patient.slug) {
-            patient.slug = base;
-          }
+      beforeValidate: async (inst) => {
+        if (inst.isNewRecord || inst.changed('slug')) {
+          await inst.ensureUniqueSlug();
         }
       },
     },

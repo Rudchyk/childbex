@@ -3,4 +3,5 @@ export enum Tags {
   DEVELOPMENT = 'Development',
   DATA = 'Data',
   PATIENTS = 'Patients',
+  PATIENT = 'Patient',
 }

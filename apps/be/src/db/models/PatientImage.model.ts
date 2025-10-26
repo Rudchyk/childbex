@@ -18,6 +18,9 @@ import { PatientImageCluster } from './PatientImageCluster.model';
 import { PatientImageReviewVote } from './PatientImageReviewVote.model';
 import { timestampFields } from '../helpers/timestamps';
 import { access, unlink } from 'node:fs/promises';
+import { logger } from '../../services/logger.service';
+import path from 'path';
+import { uploadRoot } from '../../services/patients.service';
 
 export type PatientImageCreationAttributes = Pick<
   IPatientImage,
@@ -220,14 +223,16 @@ PatientImage.init(
     tableName: 'patients_images',
     timestamps: true,
     hooks: {
-      afterDestroy({ source }) {
-        console.log('🚀 ~ afterDestroy ~ source:', source);
-        access(source).then(() => unlink(source));
-
-        // if (fs.existsSync(source)) {
-        //   fs.unlinkSync(source);
-        // }
-      },
+      // async afterDestroy({ source }) {
+      //   const root = uploadRoot.replace('uploads', '');
+      //   const url = path.join(root, source);
+      //   try {
+      //     await access(url);
+      //     await unlink(url);
+      //   } catch (error) {
+      //     logger.debug((error as Error).message);
+      //   }
+      // },
       afterUpdate: async (instance) => {
         // Автоматично оновлюємо статус після зміни голосів
         if (
