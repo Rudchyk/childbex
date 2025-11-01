@@ -8,6 +8,11 @@ import {
   GridRowId,
   Toolbar,
   ToolbarButton,
+  GridToolbarFilterButton,
+  GridToolbarDensitySelector,
+  GridToolbarExport,
+  ExportCsv,
+  ExportPrint,
 } from '@mui/x-data-grid';
 import { FC, startTransition, useActionState, useEffect } from 'react';
 // import { AddPatient } from './AddPatient/AddPatient';
@@ -22,9 +27,13 @@ import { WithLoader } from '../../hoc';
 import { DeletePatient } from './DeletePatient';
 import { useUpdatePatientMutation } from '../../store/apis';
 import { getErrorMessage } from '../../utils';
+import { AddPatient } from './AddPatient/AddPatient';
 
 type Patient = GetPatientsResponse[0];
-
+/***
+ * https://mui.com/x/react-data-grid/components/toolbar/#custom-elements
+ * https://mui.com/x/react-data-grid/components/export/
+ */
 export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
   const { notifyInfo, notifyError, notifySuccess, notifyWarning } =
     useNotifications();
@@ -177,29 +186,29 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
           processRowUpdate={handleRowUpdate}
           disableRowSelectionOnClick
           rows={data}
-          slots={
-            {
-              // toolbar: () => (
-              //   <Toolbar>
-              //     {session.data?.user?.role &&
-              //       [UserRoles.ADMIN, UserRoles.SUPER].includes(
-              //         session.data.user.role
-              //       ) && (
-              //         <Tooltip title={t('Trashed patients')}>
-              //           <ToolbarButton
-              //             onClick={() =>
-              //               router.push(paths.adminTrashedPatients)
-              //             }
-              //           >
-              //             <DeleteSweepIcon color="error" fontSize="small" />
-              //           </ToolbarButton>
-              //         </Tooltip>
-              //       )}
-              //     <AddPatient />
-              //   </Toolbar>
-              // ),
-            }
-          }
+          slots={{
+            toolbar: () => (
+              <Toolbar>
+                {/* <ExportCsv /> */}
+                {/* <ExportPrint /> */}
+                {/* {session.data?.user?.role &&
+                    [UserRoles.ADMIN, UserRoles.SUPER].includes(
+                      session.data.user.role
+                    ) && (
+                      <Tooltip title={t('Trashed patients')}>
+                        <ToolbarButton
+                          onClick={() =>
+                            router.push(paths.adminTrashedPatients)
+                          }
+                        >
+                          <DeleteSweepIcon color="error" fontSize="small" />
+                        </ToolbarButton>
+                      </Tooltip>
+                    )} */}
+                <AddPatient />
+              </Toolbar>
+            ),
+          }}
           showToolbar
           columns={columns}
         />
