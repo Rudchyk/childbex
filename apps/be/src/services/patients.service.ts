@@ -20,6 +20,14 @@ import { PatientImageCluster } from '../db/models/PatientImageCluster.model';
 import { PatientImage } from '../db/models/PatientImage.model';
 import { Patient, PatientImageStatus } from '@libs/schemas';
 import { format } from 'date-fns';
+import { brotliCompressSync, constants, brotliCompress } from 'node:zlib';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+//@ts-expect-error
+import { zstdCompressSync, zstdCompress } from 'node:zlib';
+import {
+  brotliCompressFolder,
+  zstdCompressFolder,
+} from '../utils/lib/compress-folder';
 
 export const IMAGE_RX = /\.(png|jpe?g|webp|gif)$/i;
 
@@ -67,13 +75,19 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
       break;
   }
   await unlink(tmp);
-  await packArchive(
-    destDir,
-    path.join(
-      archivesRoot,
-      format(new Date(), 'yyyyMMddHHmmss') + '-' + patientId + '.tgz'
-    )
+  const archiveName = [format(new Date(), 'yyyyMMddHHmmss'), patientId].join(
+    '-'
   );
+  await packArchive(destDir, path.join(archivesRoot, archiveName + '.tgz'));
+  await brotliCompressFolder(
+    destDir,
+    path.join(archivesRoot, archiveName + '.br')
+  );
+  await zstdCompressFolder(
+    destDir,
+    path.join(archivesRoot, archiveName + '.zst')
+  );
+
   const imagesList = await readdir(destDir);
   const inputFiles = imagesList.map((f) => path.join(destDir, f));
   const result = clusterByOrientation(inputFiles);
@@ -88,12 +102,33 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
           patientId,
           notes: '',
         });
+
+        const folder = path.join(destDir, imageCluster.id);
+        try {
+          await access(folder);
+        } catch (error) {
+          await mkdir(folder, { recursive: true });
+        }
         await PatientImage.bulkCreate(
           value.map(({ reason, file }: ClusterResult['broken'][0]) => {
             const parsedFile = path.parse(file);
-
+            const originPath = path.join(destDir, parsedFile.name);
+            fs.copyFile(
+              originPath,
+              path.join(folder, parsedFile.name),
+              (err) => {
+                if (err) {
+                  logger.error(err, 'copyFile');
+                }
+                fs.unlink(originPath, (err) => {
+                  if (err) {
+                    logger.error(err, 'unlink');
+                  }
+                });
+              }
+            );
             return {
-              source: `/uploads/${patientId}/${parsedFile.name}`,
+              source: `/uploads/${patientId}/${imageCluster.id}/${parsedFile.name}`,
               notes: reason,
               clusterId: imageCluster.id,
               isBrocken: true,
@@ -119,11 +154,32 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
             studyDate: studyDate ? studyDate.toISOString() : null,
             notes: '',
           });
+          const folder = path.join(destDir, imageCluster.id);
+          try {
+            await access(folder);
+          } catch (error) {
+            await mkdir(folder, { recursive: true });
+          }
           await PatientImage.bulkCreate(
             files.map(({ file }) => {
               const parsedFile = path.parse(file);
+              const originPath = path.join(destDir, parsedFile.name);
+              fs.copyFile(
+                originPath,
+                path.join(folder, parsedFile.name),
+                (err) => {
+                  if (err) {
+                    logger.error(err, 'copyFile');
+                  }
+                  fs.unlink(originPath, (err) => {
+                    if (err) {
+                      logger.error(err, 'unlink');
+                    }
+                  });
+                }
+              );
               return {
-                source: `/uploads/${patientId}/${parsedFile.name}`,
+                source: `/uploads/${patientId}/${imageCluster.id}/${parsedFile.name}`,
                 clusterId: imageCluster.id,
                 details: {
                   geometry,

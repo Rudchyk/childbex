@@ -10,6 +10,9 @@ import { Patient } from './Patient.model';
 import { PatientImage } from './PatientImage.model';
 import { PatientImageCluster as IPatientImageCluster } from '@libs/schemas';
 import { timestampFields } from '../helpers/timestamps';
+import { access, rm } from 'node:fs/promises';
+import path from 'node:path';
+import { uploadRoot } from '../../services/patients.service';
 
 export type PatientImageClusterCreationAttributes = Omit<
   IPatientImageCluster,
@@ -90,6 +93,22 @@ PatientImageCluster.init(
         fields: ['cluster', 'patientId', 'studyDate'],
       },
     ],
+    hooks: {
+      async afterDestroy(cluster) {
+        const destDir = path.join(uploadRoot, cluster.patientId, cluster.id);
+        try {
+          await access(destDir);
+          await rm(destDir, {
+            recursive: true,
+            force: true,
+            maxRetries: 3, // optional (helps on Windows)
+            retryDelay: 100, // optional (ms)
+          });
+        } catch {
+          return;
+        }
+      },
+    },
   }
 );
 

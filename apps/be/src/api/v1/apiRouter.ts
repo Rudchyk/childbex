@@ -48,16 +48,16 @@ export const router = createRouter({
     // oauth2RedirectUrl: '/oauth2-redirect/oauth2-redirect.html',
   },
   plugins: [BasicAuthenticationPlugin],
-  onError(error, request, context) {
-    // const castedError = Value.Cast(ErrorSchema, error);
-    logger.error(error);
-    return Response.json(
-      {
-        message: 'Internal Server Error',
-      },
-      {
-        status: 500,
-      }
-    );
-  },
+  // onError(error, request, context) {
+  //   // const castedError = Value.Cast(ErrorSchema, error);
+  //   logger.error(error);
+  //   return Response.json(
+  //     {
+  //       message: 'Internal Server Error',
+  //     },
+  //     {
+  //       status:  500,
+  //     }
+  //   );
+  // },
 });

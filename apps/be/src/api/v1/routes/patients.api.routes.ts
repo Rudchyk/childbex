@@ -42,6 +42,7 @@ import path from 'path';
 import { rm } from 'node:fs/promises';
 import { PatientImageCluster } from '../../../db/models/PatientImageCluster.model';
 import { PatientImage } from '../../../db/models/PatientImage.model';
+import { getSecurityContentFromResponse } from '../lib/security.service';
 import { Op } from 'sequelize';
 
 router
@@ -98,13 +99,7 @@ router
       },
     },
     async handler(request, ctx) {
-      const context = ctx as Ctx;
-      const grant = context.req.kauth?.grant as Grant;
-      const access_token = grant?.access_token;
-      const content = access_token?.content;
-      if (!content) {
-        throw getUnauthorizedError();
-      }
+      const content = getSecurityContentFromResponse(ctx as Ctx);
       const body = await request.json();
       const isValid = Value.Check(CreatePatientRequestBodySchema, body);
       if (!isValid) {
@@ -122,20 +117,19 @@ router
       return Response.json(result);
     },
   })
-  // Upload patient assets
+  // Get a patient by ID
   .route({
-    description: 'Upload patient assets',
-    method: 'POST',
-    path: apiRoutes.patientUpload,
+    description: 'Get a patient by ID',
+    method: 'GET',
+    path: apiRoutes.patientById,
     tags: [Tags.PATIENT],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
         params: IDPropertySchema,
-        formData: UploadPatientArchiveRequestBodySchema,
       },
       responses: {
-        204: { description: 'success' },
+        200: PatientSchema,
         ...unauthorizedResponse,
         ...defaultResponses,
       },
@@ -146,41 +140,54 @@ router
       if (!patient) {
         throw getNotFoundError('patient');
       }
-      const body = await request.formData();
-      const archive = body.get('archive');
-      try {
-        await usePatientAssets(patient, archive);
-      } catch (error) {
-        throw getInternalServerRequestError((error as Error).message);
-      }
-      return Response.json(null, { status: 204 });
+      return Response.json(patient.toJSON());
     },
   })
-  // Delete patient asset
+  // Get a patient by slug
   .route({
-    description: 'Delete patient asset',
-    method: 'DELETE',
-    path: apiRoutes.patientAsset,
+    description: 'Get a patient by slug',
+    method: 'GET',
+    path: apiRoutes.patientBySlug,
     tags: [Tags.PATIENT],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
-        params: IDPropertySchema,
+        params: SlugPropertySchema,
       },
       responses: {
-        204: { description: 'success' },
+        200: GetPatientResponseSchema,
         ...unauthorizedResponse,
         ...defaultResponses,
       },
     },
     async handler(request) {
-      const { id } = request.params;
-      const result = await PatientImageCluster.findByPk(id);
+      const { slug } = request.params;
+      const result = await Patient.findOne({
+        where: {
+          slug,
+        },
+        include: [
+          {
+            model: PatientImageCluster,
+            as: 'clusters',
+            include: [
+              {
+                model: PatientImage,
+                as: 'images',
+                attributes: ['id'],
+              },
+            ],
+          },
+        ],
+        order: [
+          [{ model: PatientImageCluster, as: 'clusters' }, 'createdAt', 'ASC'],
+        ],
+      });
       if (!result) {
-        throw getNotFoundError('cluster');
+        throw getNotFoundError('patient');
       }
-      await result.destroy();
-      return Response.json(null, { status: 204 });
+      const res = result.toJSON<GetPatientResponse>();
+      return Response.json(res);
     },
   })
   // Delete a patient
@@ -208,53 +215,6 @@ router
       }
       await patient.destroy();
       return Response.json(patient.toJSON());
-    },
-  })
-  // Get a patient by slug
-  .route({
-    description: 'Get a patient by slug',
-    method: 'GET',
-    path: apiRoutes.patient,
-    tags: [Tags.PATIENT],
-    ...getKeycloakSecurity(),
-    schemas: {
-      request: {
-        query: SlugPropertySchema,
-      },
-      responses: {
-        200: GetPatientResponseSchema,
-        ...unauthorizedResponse,
-        ...defaultResponses,
-      },
-    },
-    async handler(request) {
-      const { slug } = request.query;
-      const result = await Patient.findOne({
-        where: {
-          slug,
-        },
-        include: [
-          {
-            model: PatientImageCluster,
-            as: 'clusters',
-            include: [
-              {
-                model: PatientImage,
-                as: 'images',
-                attributes: ['id'],
-              },
-            ],
-          },
-        ],
-        order: [
-          [{ model: PatientImageCluster, as: 'clusters' }, 'createdAt', 'ASC'],
-        ],
-      });
-      if (!result) {
-        throw getNotFoundError('patient');
-      }
-      const res = result.toJSON<GetPatientResponse>();
-      return Response.json(res);
     },
   })
   // Update a patient
@@ -353,18 +313,10 @@ router
       if (!patient) {
         throw getNotFoundError('patient');
       }
-      let destDir;
 
       switch (type) {
         case TrashedPatientsActionTypes.DELETE:
-          destDir = path.join(uploadRoot, patient.id);
           await patient.destroy({ force: true });
-          await rm(destDir, {
-            recursive: true,
-            force: true,
-            maxRetries: 3, // optional (helps on Windows)
-            retryDelay: 100, // optional (ms)
-          });
           break;
         case TrashedPatientsActionTypes.RESTORE:
           await patient.restore();
@@ -374,5 +326,66 @@ router
       }
 
       return Response.json(patient.toJSON());
+    },
+  })
+  // Upload patient assets
+  .route({
+    description: 'Upload patient assets',
+    method: 'POST',
+    path: apiRoutes.patientUpload,
+    tags: [Tags.PATIENT],
+    ...getKeycloakSecurity(),
+    schemas: {
+      request: {
+        params: IDPropertySchema,
+        formData: UploadPatientArchiveRequestBodySchema,
+      },
+      responses: {
+        204: { description: 'success' },
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request) {
+      const { id } = request.params;
+      const patient = await Patient.findByPk(id);
+      if (!patient) {
+        throw getNotFoundError('patient');
+      }
+      const body = await request.formData();
+      const archive = body.get('archive');
+      try {
+        await usePatientAssets(patient, archive);
+      } catch (error) {
+        throw getInternalServerRequestError((error as Error).message);
+      }
+      return Response.json(null, { status: 204 });
+    },
+  })
+  // Delete patient asset
+  .route({
+    description: 'Delete patient asset',
+    method: 'DELETE',
+    path: apiRoutes.patientAsset,
+    tags: [Tags.PATIENT],
+    ...getKeycloakSecurity(),
+    schemas: {
+      request: {
+        params: IDPropertySchema,
+      },
+      responses: {
+        204: { description: 'success' },
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request) {
+      const { id } = request.params;
+      const result = await PatientImageCluster.findByPk(id);
+      if (!result) {
+        throw getNotFoundError('cluster');
+      }
+      await result.destroy();
+      return Response.json(null, { status: 204 });
     },
   });
