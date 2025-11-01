@@ -8,3 +8,5 @@ export * from './lib/DialogForm/DialogForm';
 export * from './lib/DialogAreYouSure/DialogAreYouSure';
 export * from './lib/Breadcrumbs/Breadcrumbs';
 export * from './lib/DicomViewer/DicomViewer';
+export * from './lib/FormUITextField/FormUITextField';
+export * from './lib/FormUIFileInput/FormUIFileInput';

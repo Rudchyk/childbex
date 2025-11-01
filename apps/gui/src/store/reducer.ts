@@ -1,8 +1,8 @@
 import { combineReducers } from 'redux';
-import { api } from './apis';
+import { apiStore } from './apis';
 import { baseSlice } from './slices';
 
 export default combineReducers({
-  [api.reducerPath]: api.reducer,
+  [apiStore.reducerPath]: apiStore.reducer,
   [baseSlice.reducerPath]: baseSlice.reducer,
 });

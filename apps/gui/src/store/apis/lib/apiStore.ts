@@ -6,7 +6,15 @@ import {
   fetchBaseQuery,
 } from '@reduxjs/toolkit/query/react';
 import { apiRoute, apiRoutes } from '@libs/constants';
-import { GetPatientsResponse, Patients } from '@libs/schemas';
+import {
+  CreatePatientRequestBody,
+  GetPatientsResponse,
+  Patient,
+  Patients,
+  IDProperty,
+  UpdatePatientRequestBody,
+  UploadPatientArchiveRequestBody,
+} from '@libs/schemas';
 
 export enum TagTypesEnum {
   DATA = 'data',
@@ -66,8 +74,8 @@ const baseQueryWithReauth: BaseQueryFn<
   return result;
 };
 
-export const api = createApi({
-  reducerPath: 'api',
+export const apiStore = createApi({
+  reducerPath: 'apiStore',
   baseQuery: baseQueryWithReauth,
   tagTypes: Object.values(TagTypesEnum),
   endpoints: (builder) => ({
@@ -75,7 +83,49 @@ export const api = createApi({
       query: () => apiRoutes.patients,
       providesTags: [TagTypesEnum.PATIENTS],
     }),
+    addPatient: builder.mutation<Patient, CreatePatientRequestBody>({
+      query: () => ({
+        url: apiRoutes.patient,
+        method: 'PUT',
+      }),
+      invalidatesTags: [TagTypesEnum.PATIENTS],
+    }),
+    deletePatient: builder.mutation<Patient, IDProperty>({
+      query: ({ id }) => ({
+        url: apiRoutes.patientById.replace(':id', id),
+        method: 'DELETE',
+      }),
+      invalidatesTags: [TagTypesEnum.PATIENTS],
+    }),
+    updatePatient: builder.mutation<
+      Patient,
+      IDProperty & UpdatePatientRequestBody
+    >({
+      query: ({ id, ...body }) => ({
+        url: apiRoutes.patientById.replace(':id', id),
+        body,
+        method: 'PATCH',
+      }),
+      invalidatesTags: [TagTypesEnum.PATIENTS],
+    }),
+    uploadPatientAssets: builder.mutation<
+      Patient,
+      IDProperty & UploadPatientArchiveRequestBody
+    >({
+      query: ({ id, ...body }) => ({
+        url: apiRoutes.patientUpload.replace(':id', id),
+        body,
+        method: 'POST',
+      }),
+      invalidatesTags: [TagTypesEnum.PATIENTS],
+    }),
   }),
 });
 
-export const { useGetPatientsQuery } = api;
+export const {
+  useGetPatientsQuery,
+  useAddPatientMutation,
+  useDeletePatientMutation,
+  useUpdatePatientMutation,
+  useUploadPatientAssetsMutation,
+} = apiStore;

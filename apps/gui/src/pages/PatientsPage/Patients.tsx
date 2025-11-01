@@ -16,39 +16,44 @@ import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import { GetPatientsResponse } from '@libs/schemas';
+import { GetPatientsResponse, UpdatePatientRequestBody } from '@libs/schemas';
 import { useNotifications } from '../../modules/notifications';
 import { WithLoader } from '../../hoc';
+import { DeletePatient } from './DeletePatient';
+import { useUpdatePatientMutation } from '../../store/apis';
+import { getErrorMessage } from '../../utils';
 
 type Patient = GetPatientsResponse[0];
 
 export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
   const { notifyInfo, notifyError, notifySuccess, notifyWarning } =
     useNotifications();
-  // const handleRowUpdate = async (
-  //   updatedRow: Patient,
-  //   originalRow: Patient,
-  //   params: {
-  //     rowId: GridRowId;
-  //   }
-  // ): Promise<Patient> => {
-  //   const update: UpdatePatientData['data'] = {};
-  //   const fieldsToUpdate: (keyof typeof update)[] = ['name', 'slug', 'notes'];
+  const [updatePatient, updatePatientState] = useUpdatePatientMutation();
+  const handleRowUpdate = async (
+    updatedRow: Patient,
+    originalRow: Patient,
+    params: {
+      rowId: GridRowId;
+    }
+  ): Promise<Patient> => {
+    const update: UpdatePatientRequestBody = {};
+    const fieldsToUpdate: (keyof typeof update)[] = ['name', 'slug', 'notes'];
 
-  //   fieldsToUpdate.forEach((key) => {
-  //     if (updatedRow[key] !== originalRow[key] && updatedRow[key] !== null) {
-  //       update[key] = updatedRow[key];
-  //     }
-  //   });
+    fieldsToUpdate.forEach((key) => {
+      if (updatedRow[key] !== originalRow[key] && updatedRow[key] !== null) {
+        update[key] = updatedRow[key];
+      }
+    });
 
-  //   if (Object.keys(update).length) {
-  //     startTransition(() => {
-  //       formAction({ id: params.rowId as string, data: update });
-  //     });
-  //   }
+    if (Object.keys(update).length) {
+      updatePatient({
+        id: params.rowId as string,
+        ...update,
+      });
+    }
 
-  //   return updatedRow;
-  // };
+    return updatedRow;
+  };
   const copyToClipboard = (text?: string | number) => {
     if (text) {
       navigator.clipboard.writeText(String(text));
@@ -109,7 +114,6 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
         </Stack>
       ),
     },
-
     {
       field: 'creatorName',
       headerName: 'Creator',
@@ -124,6 +128,12 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       ),
     },
     {
+      field: 'notes',
+      headerName: 'Notes',
+      flex: 1,
+      editable: true,
+    },
+    {
       field: 'clusters',
       headerName: 'Clusters',
       flex: 1,
@@ -136,52 +146,35 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       valueFormatter: (value: Patient['createdAt']) =>
         value ? format(value, 'dd/MM/yyyy, HH:mm:ss') : '',
     },
-    // {
-    //   field: 'actions',
-    //   type: 'actions',
-    //   headerName: 'Actions',
-    //   width: 100,
-    //   getActions: ({ id }) => {
-    //     return [<DeletePatient key={id} id={id as string} />];
-    //   },
-    // },
+    {
+      field: 'actions',
+      type: 'actions',
+      headerName: 'Actions',
+      width: 100,
+      getActions: ({ id }) => {
+        return [<DeletePatient key={id} id={id as string} />];
+      },
+    },
   ];
+  useEffect(() => {
+    if (updatePatientState.isError) {
+      notifyError(getErrorMessage(updatePatientState.error));
+    }
+  }, [updatePatientState.isError]);
 
-  // useEffect(() => {
-  //   switch (state.status) {
-  //     case UpdatePatientActionStates.PATIENT_DO_NOT_EXIST:
-  //       notifyWarning(t('Patient do not exist'));
-  //       break;
-  //     case UpdatePatientActionStates.FAILED:
-  //       notifyError(t('Failed to updated patient'));
-  //       console.error(state.message);
-  //       break;
-  //     case UpdatePatientActionStates.NOTHING_TO_UPDATE:
-  //       notifyWarning(t('Nothing to update in patient'));
-  //       break;
-  //     case UpdatePatientActionStates.UNABLE_TO_UPDATE:
-  //       notifyWarning(t('Unable to update patient'));
-  //       break;
-  //     case UpdatePatientActionStates.INVALID_DATA:
-  //       console.log(state.message);
-  //       notifyError(t('Failed validating your submission'));
-  //       break;
-  //     case UpdatePatientActionStates.SUCCESS:
-  //       notifySuccess(t('Patient updated successfully'));
-  //       break;
-  //     default:
-  //       break;
-  //   }
-  //   if (![UpdatePatientActionStates.IDLE].includes(state.status)) {
-  //     router.refresh();
-  //   }
-  // }, [state]);
+  useEffect(() => {
+    if (updatePatientState.isSuccess) {
+      notifySuccess(
+        `User ${updatePatientState.data.name} was updated successfully!`
+      );
+    }
+  }, [updatePatientState.isSuccess]);
 
   return (
     <Stack spacing={1}>
       <Stack component={Paper}>
         <DataGrid
-          // processRowUpdate={handleRowUpdate}
+          processRowUpdate={handleRowUpdate}
           disableRowSelectionOnClick
           rows={data}
           slots={
