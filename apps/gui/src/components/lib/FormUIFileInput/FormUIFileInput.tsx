@@ -64,7 +64,7 @@ export const FormUIFileInput = <T extends FieldValues>({
         <FormControl
           {...slotsProps?.formControlProps}
           error={!!error}
-          sx={{ width: '100%' }}
+          sx={{ width: '100%', ...slotsProps?.formControlProps?.sx }}
           disabled={disabled}
         >
           {!!label && <FormLabel>{label}</FormLabel>}

@@ -29,4 +29,5 @@ export const guiRoutes = {
   dashboard: '/dashboard',
   dwv: '/dwv',
   patients: '/patients',
+  patient: '/patients/:slug',
 };

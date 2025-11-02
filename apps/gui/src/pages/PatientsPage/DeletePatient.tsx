@@ -6,7 +6,6 @@ import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useNotifications } from '../../modules/notifications';
 import { useToggle } from '../../hooks';
 import { useDeletePatientMutation } from '../../store/apis';
-import { getErrorMessage } from '../../utils';
 
 interface DeletePatientProps {
   id: string;
@@ -23,7 +22,7 @@ export const DeletePatient: FC<DeletePatientProps> = ({ id }) => {
   };
   useEffect(() => {
     if (isError) {
-      notifyError(getErrorMessage(error));
+      notifyError(error);
     }
     toggleOpen();
   }, [isError]);

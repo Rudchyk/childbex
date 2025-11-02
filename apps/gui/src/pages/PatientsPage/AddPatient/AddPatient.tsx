@@ -1,52 +1,94 @@
-import { Tooltip } from '@mui/material';
-import { ToolbarButton } from '@mui/x-data-grid';
+import { Fab, Tooltip } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import { useToggle } from '../../../hooks';
-// import { useToggle } from 'usehooks-ts';
-// import { DialogForm } from '@/lib/components';
-// import { useNotifications } from '@/lib/modules/NotificationsModule';
-// import { startTransition, useActionState, useEffect, useState } from 'react';
-// import { AddPatientActionStates } from './AddPatientActionStates.enum';
-// import { addPatient, AddPatientActionState } from './addPatient.actions';
-// import { SubmitHandler } from 'react-hook-form';
-// import { AddPatientFormData } from './addPatientForm.schema';
-// import { AddPatientForm } from './AddPatientForm';
-// import { useRouter } from 'next/navigation';
+import {
+  useAddPatientMutation,
+  useUploadPatientAssetsMutation,
+} from '../../../store/apis';
+import { useNotifications } from '../../../modules/notifications';
+import { SubmitHandler, SubmitErrorHandler } from 'react-hook-form';
+import { AddPatientForm } from './AddPatientForm';
+import { DialogForm } from '../../../components';
+import { useEffect, useState } from 'react';
+import { AddPatientFormData } from './addPatientForm.schema';
 
 export const AddPatient = () => {
   const title = 'Add patient';
-  // const [loading, setLoading] = useState(false);
-  // const { notifyError, notifySuccess, notifyWarning } = useNotifications();
+  const [
+    addPatient,
+    { data, isError, isLoading: isAddPatientLoading, error, isSuccess },
+  ] = useAddPatientMutation();
+  const [patientName, setPatientName] = useState('');
+  const [archive, setArchive] = useState<File | undefined>();
+  const [uploadPatientAssets, uploadPatientAssetsState] =
+    useUploadPatientAssetsMutation();
+  const { notifyError, notifySuccess } = useNotifications();
   const [open, toggleOpen] = useToggle(false);
-  // const [state, formAction] = useActionState<
-  //   AddPatientActionState,
-  //   AddPatientFormData
-  // >(addPatient, {
-  //   status: AddPatientActionStates.IDLE,
-  // });
-  // const onSubmit: SubmitHandler<AddPatientFormData> = async (formData) => {
-  //   setLoading(true);
-  //   startTransition(() => {
-  //     return formAction(formData);
-  //   });
-  // };
+  const onSubmit: SubmitHandler<AddPatientFormData> = async ({
+    archive,
+    ...other
+  }) => {
+    setPatientName(other.name);
+    setArchive(archive);
+    addPatient(other);
+  };
+  const onError: SubmitErrorHandler<AddPatientFormData> = async (err) => {
+    console.error(err);
+  };
+  const isLoading = isAddPatientLoading || uploadPatientAssetsState.isLoading;
+
+  useEffect(() => {
+    if (isError) {
+      notifyError(error);
+    }
+    toggleOpen();
+  }, [isError]);
+
+  useEffect(() => {
+    if (isSuccess && data) {
+      notifySuccess(`Patient ${data.name} was added successfully!`);
+      // TODO:::
+      if (archive) {
+        uploadPatientAssets({ id: data.id, archive });
+      }
+    }
+    toggleOpen();
+  }, [isSuccess]);
+
+  useEffect(() => {
+    if (uploadPatientAssetsState.isError) {
+      notifyError(uploadPatientAssetsState.error);
+    }
+  }, [uploadPatientAssetsState.isError]);
+
+  useEffect(() => {
+    if (uploadPatientAssetsState.isSuccess) {
+      notifySuccess(`Archive for ${patientName} was added successfully!`);
+    }
+  }, [uploadPatientAssetsState.isSuccess]);
 
   return (
     <>
       <Tooltip title={title}>
-        <ToolbarButton onClick={toggleOpen}>
-          <AddIcon fontSize="small" />
-        </ToolbarButton>
+        <Fab onClick={toggleOpen} color="secondary">
+          <AddIcon fontSize="medium" />
+        </Fab>
       </Tooltip>
-      {/* <DialogForm
-        isLoading={loading}
+      <DialogForm
+        isLoading={isLoading}
         title={title}
         open={open}
-        isButtonCancel={!loading}
-        isButtonClose={!loading}
-        onDialogClose={loading ? () => {} : toggleOpen}
-        form={<AddPatientForm onSubmit={onSubmit} loading={loading} />}
-      /> */}
+        isButtonCancel={!isLoading}
+        isButtonClose={!isLoading}
+        onDialogClose={toggleOpen}
+        form={
+          <AddPatientForm
+            onSubmit={onSubmit}
+            onError={onError}
+            loading={isLoading}
+          />
+        }
+      />
     </>
   );
 };

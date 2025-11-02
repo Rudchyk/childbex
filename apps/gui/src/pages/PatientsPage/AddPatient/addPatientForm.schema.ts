@@ -1,37 +1,43 @@
-import * as Yup from 'yup';
-import { InferType } from 'yup';
+import { z } from 'zod';
 
 const MAX_SIZE = 500 * 1024 * 1024; // 500 MB
 // const ALLOWED_EXT = ['zip', 'tar', 'gz', 'tgz', '7z'];
-const ALLOWED_EXT = ['tar', 'gz', 'tgz'];
+const ALLOWED_EXT = ['tar', 'gz', 'tgz'] as const;
 const ALLOWED_MIME = [
   // 'application/zip',
   'application/x-tar',
   'application/gzip',
   // 'application/x-zip-compressed',
   // 'application/x-compressed',
-];
+] as const;
 
 export const accept = [...ALLOWED_EXT, ...ALLOWED_MIME].join(',');
 
-export const addPatientFormDataSchema = Yup.object().shape({
-  name: Yup.string().required(),
-  slug: Yup.string().optional().notRequired(),
-  notes: Yup.string().optional().notRequired(),
-  archive: Yup.mixed<File>()
+export const AddPatientFormDataSchema = z.object({
+  name: z.string().min(1, 'Required'),
+  slug: z.string().optional(),
+  notes: z.string().optional(),
+  archive: z
+    .instanceof(File)
     .optional()
-    .notRequired()
-    .test('fileType', `Supported only ${ALLOWED_EXT.join(' / ')}`, (f) =>
-      f ? ALLOWED_MIME.includes(f.type) || f.type === '' : true
+    // fileType
+    .refine(
+      (f) => (f ? ALLOWED_MIME.includes(f.type as any) || f.type === '' : true),
+      { message: `Supported only ${ALLOWED_EXT.join(' / ')}` }
     )
-    .test('fileExt', 'Неприпустиме розширення', (f) =>
-      f ? ALLOWED_EXT.includes(f.name.split('.').pop()!.toLowerCase()) : true
+    // fileExt
+    .refine(
+      (f) => {
+        if (!f) return true;
+        const ext = f.name.toLowerCase().split('.').pop() ?? '';
+        return (ALLOWED_EXT as readonly string[]).includes(ext);
+      },
+      { message: 'Invalid extension' }
     )
-    .test(
-      'fileSize',
-      `Файл завеликий (≤${Math.floor(MAX_SIZE / 1024 / 1024)} МБ)`,
-      (f) => (f ? f.size <= MAX_SIZE : true)
-    ),
+    // fileSize
+    .refine((f) => (f ? f.size <= MAX_SIZE : true), {
+      message: `File to big (≤${Math.floor(MAX_SIZE / 1024 / 1024)} МБ)`,
+    }),
 });
 
-export type AddPatientFormData = InferType<typeof addPatientFormDataSchema>;
+export type AddPatientFormData = z.infer<typeof AddPatientFormDataSchema>;

@@ -84,9 +84,10 @@ export const apiStore = createApi({
       providesTags: [TagTypesEnum.PATIENTS],
     }),
     addPatient: builder.mutation<Patient, CreatePatientRequestBody>({
-      query: () => ({
+      query: (body) => ({
         url: apiRoutes.patient,
         method: 'PUT',
+        body,
       }),
       invalidatesTags: [TagTypesEnum.PATIENTS],
     }),

@@ -34,6 +34,8 @@ export const getErrorMessage = (err: unknown): string => {
     }
   } else if (isErrorWithMessage(err)) {
     return err.message;
+  } else if (typeof err === 'string') {
+    return err;
   }
   return '';
 };
