@@ -1,14 +1,10 @@
-'use client';
-
 import {
-  Badge,
   Divider,
-  InputAdornment,
   Paper,
   Stack,
-  styled,
   Tooltip,
   Typography,
+  lighten,
 } from '@mui/material';
 import {
   DataGrid,
@@ -16,70 +12,29 @@ import {
   GridColDef,
   GridRowId,
   Toolbar,
-  ToolbarButton,
-  ExportCsv,
-  ExportPrint,
-  ColumnsPanelTrigger,
-  FilterPanelTrigger,
-  QuickFilter,
-  QuickFilterTrigger,
-  QuickFilterControl,
-  QuickFilterClear,
 } from '@mui/x-data-grid';
-import { FC, startTransition, useActionState, useEffect } from 'react';
+import { useEffect } from 'react';
 // import { AddPatient } from './AddPatient/AddPatient';
 import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
-import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { GetPatientsResponse, UpdatePatientRequestBody } from '@libs/schemas';
 import { useNotifications } from '../../modules/notifications';
+import {
+  DataGridColumnsPanelTrigger,
+  DataGridFilterPanelTrigger,
+  DataGridExportCsv,
+  DataGridExportPrint,
+  DataGridQuickFilter,
+} from '../../components';
 import { WithLoader } from '../../hoc';
 import { DeletePatient } from './DeletePatient';
 import { useUpdatePatientMutation } from '../../store/apis';
-import { getErrorMessage } from '../../utils';
-import { AddPatient } from './AddPatient/AddPatient';
-import FileDownloadIcon from '@mui/icons-material/FileDownload';
-import PrintIcon from '@mui/icons-material/Print';
 import { Link as RouteLink } from 'react-router-dom';
-import { guiRoutes } from '@libs/constants';
-import ViewColumnIcon from '@mui/icons-material/ViewColumn';
-import FilterListIcon from '@mui/icons-material/FilterList';
-import CancelIcon from '@mui/icons-material/Cancel';
-import SearchIcon from '@mui/icons-material/Search';
-import TextField from '@mui/material/TextField';
-
-const StyledQuickFilter = styled(QuickFilter)({
-  display: 'grid',
-  alignItems: 'center',
-});
-
-const StyledToolbarButton = styled(ToolbarButton)<{ ownerState: OwnerState }>(
-  ({ theme, ownerState }) => ({
-    gridArea: '1 / 1',
-    width: 'min-content',
-    height: 'min-content',
-    zIndex: 1,
-    opacity: ownerState.expanded ? 0 : 1,
-    pointerEvents: ownerState.expanded ? 'none' : 'auto',
-    transition: theme.transitions.create(['opacity']),
-  })
-);
-
-type OwnerState = {
-  expanded: boolean;
-};
-
-const StyledTextField = styled(TextField)<{
-  ownerState: OwnerState;
-}>(({ theme, ownerState }) => ({
-  gridArea: '1 / 1',
-  overflowX: 'clip',
-  width: ownerState.expanded ? 260 : 'var(--trigger-width)',
-  opacity: ownerState.expanded ? 1 : 0,
-  transition: theme.transitions.create(['width', 'opacity']),
-}));
+import { guiRoutes, TrashedPatientsActionTypes } from '@libs/constants';
+import { useAuth } from '../../auth/useAuth';
+import { TrashedPatientsAction } from './TrashedPatientsAction';
 
 type Patient = GetPatientsResponse[0];
 /***
@@ -87,8 +42,8 @@ type Patient = GetPatientsResponse[0];
  * https://mui.com/x/react-data-grid/components/export/
  */
 export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
-  const { notifyInfo, notifyError, notifySuccess, notifyWarning } =
-    useNotifications();
+  const { isAdmin } = useAuth();
+  const { notifyInfo, notifyError, notifySuccess } = useNotifications();
   const [updatePatient, updatePatientState] = useUpdatePatientMutation();
   const handleRowUpdate = async (
     updatedRow: Patient,
@@ -212,8 +167,19 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       type: 'actions',
       headerName: 'Actions',
       width: 100,
-      getActions: ({ id }) => {
-        return [<DeletePatient key={id} id={id as string} />];
+      getActions: ({ id, row }) => {
+        const actions = [];
+        if (!row.deletedAt) {
+          actions.push(<DeletePatient key={id} id={id as string} />);
+        }
+        if (isAdmin && row.deletedAt) {
+          Object.values(TrashedPatientsActionTypes).forEach((type) => {
+            actions.push(
+              <TrashedPatientsAction type={type} key={type} id={id as string} />
+            );
+          });
+        }
+        return actions;
       },
     },
   ];
@@ -238,110 +204,35 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
           processRowUpdate={handleRowUpdate}
           disableRowSelectionOnClick
           rows={data}
+          sx={{
+            '.MuiDataGrid-row': {
+              '&.trashed': {
+                background: (theme) => lighten(theme.palette.error.light, 0.8),
+              },
+            },
+          }}
+          isCellEditable={(props) => {
+            const { row, colDef } = props;
+            if (colDef.editable && row.deletedAt) {
+              return false;
+            }
+            return colDef.editable ?? false;
+          }}
+          getRowClassName={({ row }) => (row.deletedAt ? 'trashed' : '')}
           slots={{
             toolbar: () => (
               <Toolbar>
-                <Tooltip title="Columns">
-                  <ColumnsPanelTrigger render={<ToolbarButton />}>
-                    <ViewColumnIcon fontSize="small" />
-                  </ColumnsPanelTrigger>
-                </Tooltip>
-                <Tooltip title="Filters">
-                  <FilterPanelTrigger
-                    render={(props: any, state) => (
-                      <ToolbarButton {...props} color="default">
-                        <Badge
-                          badgeContent={state.filterCount}
-                          color="primary"
-                          variant="dot"
-                        >
-                          <FilterListIcon fontSize="small" />
-                        </Badge>
-                      </ToolbarButton>
-                    )}
-                  />
-                </Tooltip>
+                <DataGridColumnsPanelTrigger />
+                <DataGridFilterPanelTrigger />
                 <Divider
                   orientation="vertical"
                   variant="middle"
                   flexItem
                   sx={{ mx: 0.5 }}
                 />
-                <Tooltip title="Download as CSV">
-                  <ExportCsv render={<ToolbarButton />}>
-                    <FileDownloadIcon fontSize="small" />
-                  </ExportCsv>
-                </Tooltip>
-                <Tooltip title="Print">
-                  <ExportPrint render={<ToolbarButton />}>
-                    <PrintIcon fontSize="small" />
-                  </ExportPrint>
-                </Tooltip>
-                <StyledQuickFilter>
-                  <QuickFilterTrigger
-                    render={(triggerProps: any, state) => (
-                      <Tooltip title="Search" enterDelay={0}>
-                        <StyledToolbarButton
-                          {...triggerProps}
-                          ownerState={{ expanded: state.expanded }}
-                          color="default"
-                          aria-disabled={state.expanded}
-                        >
-                          <SearchIcon fontSize="small" />
-                        </StyledToolbarButton>
-                      </Tooltip>
-                    )}
-                  />
-                  <QuickFilterControl
-                    render={({ ref, ...controlProps }, state) => (
-                      <StyledTextField
-                        {...controlProps}
-                        ownerState={{ expanded: state.expanded }}
-                        inputRef={ref}
-                        aria-label="Search"
-                        placeholder="Search..."
-                        size="small"
-                        slotProps={{
-                          input: {
-                            startAdornment: (
-                              <InputAdornment position="start">
-                                <SearchIcon fontSize="small" />
-                              </InputAdornment>
-                            ),
-                            endAdornment: state.value ? (
-                              <InputAdornment position="end">
-                                <QuickFilterClear
-                                  edge="end"
-                                  size="small"
-                                  aria-label="Clear search"
-                                  material={{ sx: { marginRight: -0.75 } }}
-                                >
-                                  <CancelIcon fontSize="small" />
-                                </QuickFilterClear>
-                              </InputAdornment>
-                            ) : null,
-                            ...controlProps.slotProps?.input,
-                          },
-                          ...controlProps.slotProps,
-                        }}
-                      />
-                    )}
-                  />
-                </StyledQuickFilter>
-                {/* {session.data?.user?.role &&
-                    [UserRoles.ADMIN, UserRoles.SUPER].includes(
-                      session.data.user.role
-                    ) && (
-                      <Tooltip title={t('Trashed patients')}>
-                        <ToolbarButton
-                          onClick={() =>
-                            router.push(paths.adminTrashedPatients)
-                          }
-                        >
-                          <DeleteSweepIcon color="error" fontSize="small" />
-                        </ToolbarButton>
-                      </Tooltip>
-                    )} */}
+                <DataGridExportCsv />
+                <DataGridExportPrint />
+                <DataGridQuickFilter />
               </Toolbar>
             ),
           }}

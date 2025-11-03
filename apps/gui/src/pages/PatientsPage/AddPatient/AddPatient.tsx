@@ -47,9 +47,10 @@ export const AddPatient = () => {
   useEffect(() => {
     if (isSuccess && data) {
       notifySuccess(`Patient ${data.name} was added successfully!`);
-      // TODO:::
       if (archive) {
-        uploadPatientAssets({ id: data.id, archive });
+        const formData = new FormData();
+        formData.append('archive', archive);
+        uploadPatientAssets({ id: data.id, body: formData });
       }
     }
     toggleOpen();

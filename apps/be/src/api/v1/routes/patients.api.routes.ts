@@ -265,7 +265,7 @@ router
         query: Type.Partial(PatientCreationAttributesSchema),
       },
       responses: {
-        200: PatientsSchema,
+        200: GetPatientsResponseSchema,
         ...unauthorizedResponse,
         ...defaultResponses,
       },
@@ -285,7 +285,9 @@ router
           },
         ],
       });
-      return Response.json(result.map((i) => i.toJSON()));
+      return Response.json(
+        result.map((i) => i.toJSON()) as GetPatientsResponse
+      );
     },
   })
   // Delete or restore a patient

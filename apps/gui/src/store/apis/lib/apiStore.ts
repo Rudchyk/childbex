@@ -14,6 +14,7 @@ import {
   IDProperty,
   UpdatePatientRequestBody,
   UploadPatientArchiveRequestBody,
+  TrashedPatientsActionParam,
 } from '@libs/schemas';
 
 export enum TagTypesEnum {
@@ -83,6 +84,10 @@ export const apiStore = createApi({
       query: () => apiRoutes.patients,
       providesTags: [TagTypesEnum.PATIENTS],
     }),
+    getTrashedPatients: builder.query<GetPatientsResponse, void>({
+      query: () => apiRoutes.trashedPatients,
+      providesTags: [TagTypesEnum.PATIENTS],
+    }),
     addPatient: builder.mutation<Patient, CreatePatientRequestBody>({
       query: (body) => ({
         url: apiRoutes.patient,
@@ -111,11 +116,22 @@ export const apiStore = createApi({
     }),
     uploadPatientAssets: builder.mutation<
       Patient,
-      IDProperty & UploadPatientArchiveRequestBody
+      IDProperty & { body: FormData }
     >({
-      query: ({ id, ...body }) => ({
+      query: ({ id, body }) => ({
         url: apiRoutes.patientUpload.replace(':id', id),
         body,
+        method: 'POST',
+      }),
+      invalidatesTags: [TagTypesEnum.PATIENTS],
+    }),
+    deleteOrRestoreTrashedPatient: builder.mutation<
+      Patient,
+      IDProperty & TrashedPatientsActionParam
+    >({
+      query: ({ id, ...params }) => ({
+        url: apiRoutes.trashedPatient.replace(':id', id),
+        params,
         method: 'POST',
       }),
       invalidatesTags: [TagTypesEnum.PATIENTS],
@@ -129,4 +145,6 @@ export const {
   useDeletePatientMutation,
   useUpdatePatientMutation,
   useUploadPatientAssetsMutation,
+  useGetTrashedPatientsQuery,
+  useDeleteOrRestoreTrashedPatientMutation,
 } = apiStore;
