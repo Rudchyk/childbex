@@ -16,7 +16,7 @@ import {
   clusterByOrientation,
   ClusterResult,
 } from './dicom.service';
-import { PatientImageCluster } from '../db/models/PatientImageCluster.model';
+import { PatientImagesCluster } from '../db/models/PatientImagesCluster.model';
 import { PatientImage } from '../db/models/PatientImage.model';
 import { Patient, PatientImageStatus } from '@libs/schemas';
 import { format } from 'date-fns';
@@ -96,7 +96,7 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
     const isBrocken = key === brokenImageClusterName;
     if (value && Array.isArray(value) && value) {
       if (isBrocken) {
-        const imageCluster = await PatientImageCluster.create({
+        const imageCluster = await PatientImagesCluster.create({
           name: key,
           cluster: -1,
           patientId,
@@ -147,7 +147,7 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
           normal,
           studyDate,
         } of value as ClusterResult['clusters']) {
-          const imageCluster = await PatientImageCluster.create({
+          const imageCluster = await PatientImagesCluster.create({
             name: group || String(id),
             cluster: id,
             patientId,

@@ -82,6 +82,12 @@ export default createBrowserRouter([
             lazy: () => import('../pages/PatientsPage/PatientsPage'),
             ...defaultOptions,
           },
+          {
+            // loader: ({ params }) => ({ title: startCase(params[SERVICE_ID_KEY]) }),
+            path: guiRoutes.patient,
+            lazy: () => import('../pages/PatientPage/PatientPage'),
+            ...defaultOptions,
+          },
         ],
       },
     ],

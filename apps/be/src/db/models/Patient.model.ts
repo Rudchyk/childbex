@@ -12,7 +12,7 @@ import {
 } from '@libs/schemas';
 import { timestampFields, deletedAtPropertyField } from '../helpers/timestamps';
 import { toSlugIfCyr } from '@libs/helpers';
-import { PatientImageCluster } from './PatientImageCluster.model';
+import { PatientImagesCluster } from './PatientImagesCluster.model';
 
 type PatientCreationAttributes = Omit<
   PatientBaseCreationAttributes,
@@ -36,10 +36,10 @@ export class Patient
   declare readonly updatedAt: IPatient['updatedAt'];
   declare readonly deletedAt: IPatient['deletedAt'];
 
-  declare getClusters: HasManyGetAssociationsMixin<PatientImageCluster>;
+  declare getClusters: HasManyGetAssociationsMixin<PatientImagesCluster>;
 
   declare static associations: {
-    clusters: Association<Patient, PatientImageCluster>;
+    clusters: Association<Patient, PatientImagesCluster>;
   };
 
   public async ensureUniqueSlug() {

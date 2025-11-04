@@ -23,6 +23,7 @@ import {
   Value,
   GetPatientsResponseSchema,
   GetPatientsResponse,
+  UpdatePatientAssetRequestBodySchema,
 } from '@libs/schemas';
 import { getKeycloakSecurity } from '../lib/security.service';
 import { Tags } from '../lib/tags.service';
@@ -40,7 +41,7 @@ import {
 } from '../../../services/patients.service';
 import path from 'path';
 import { rm } from 'node:fs/promises';
-import { PatientImageCluster } from '../../../db/models/PatientImageCluster.model';
+import { PatientImagesCluster } from '../../../db/models/PatientImagesCluster.model';
 import { PatientImage } from '../../../db/models/PatientImage.model';
 import { getSecurityContentFromResponse } from '../lib/security.service';
 import { Op } from 'sequelize';
@@ -71,7 +72,7 @@ router
         ...props,
         include: [
           {
-            model: PatientImageCluster,
+            model: PatientImagesCluster,
             as: 'clusters',
           },
         ],
@@ -147,12 +148,12 @@ router
   .route({
     description: 'Get a patient by slug',
     method: 'GET',
-    path: apiRoutes.patientBySlug,
+    path: apiRoutes.patient,
     tags: [Tags.PATIENT],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
-        params: SlugPropertySchema,
+        query: SlugPropertySchema,
       },
       responses: {
         200: GetPatientResponseSchema,
@@ -161,14 +162,14 @@ router
       },
     },
     async handler(request) {
-      const { slug } = request.params;
+      const { slug } = request.query;
       const result = await Patient.findOne({
         where: {
           slug,
         },
         include: [
           {
-            model: PatientImageCluster,
+            model: PatientImagesCluster,
             as: 'clusters',
             include: [
               {
@@ -180,7 +181,7 @@ router
           },
         ],
         order: [
-          [{ model: PatientImageCluster, as: 'clusters' }, 'createdAt', 'ASC'],
+          [{ model: PatientImagesCluster, as: 'clusters' }, 'createdAt', 'ASC'],
         ],
       });
       if (!result) {
@@ -280,7 +281,7 @@ router
         },
         include: [
           {
-            model: PatientImageCluster,
+            model: PatientImagesCluster,
             as: 'clusters',
           },
         ],
@@ -364,6 +365,38 @@ router
       return Response.json(null, { status: 204 });
     },
   })
+  // Update patient asset
+  .route({
+    description: 'Update patient asset',
+    method: 'PATCH',
+    path: apiRoutes.patientAsset,
+    tags: [Tags.PATIENT],
+    ...getKeycloakSecurity(),
+    schemas: {
+      request: {
+        params: IDPropertySchema,
+        json: UpdatePatientAssetRequestBodySchema,
+      },
+      responses: {
+        204: { description: 'success' },
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request) {
+      const { id } = request.params;
+      const result = await PatientImagesCluster.findByPk(id);
+      if (!result) {
+        throw getNotFoundError('patient images cluster');
+      }
+      const { inReview } = await request.json();
+      if (inReview === result.inReview) {
+        throw getInvalidRequestError('Nothing to update');
+      }
+      await result.update({ inReview });
+      return Response.json(null, { status: 204 });
+    },
+  })
   // Delete patient asset
   .route({
     description: 'Delete patient asset',
@@ -383,7 +416,7 @@ router
     },
     async handler(request) {
       const { id } = request.params;
-      const result = await PatientImageCluster.findByPk(id);
+      const result = await PatientImagesCluster.findByPk(id);
       if (!result) {
         throw getNotFoundError('cluster');
       }

@@ -3,7 +3,7 @@ import { TimestampsSchema } from './Timestamps.schemas.js';
 import { IDSchema } from './ID.schema.js';
 import { Nullable } from '../../utils/typebox-helpers.js';
 
-export const PatientImageClusterSchema = Type.Object({
+export const PatientImagesClusterSchema = Type.Object({
   id: IDSchema,
   cluster: Type.Number(),
   name: Type.String(),
@@ -14,4 +14,4 @@ export const PatientImageClusterSchema = Type.Object({
   ...TimestampsSchema.properties,
 });
 
-export type PatientImageCluster = Static<typeof PatientImageClusterSchema>;
+export type PatientImagesCluster = Static<typeof PatientImagesClusterSchema>;

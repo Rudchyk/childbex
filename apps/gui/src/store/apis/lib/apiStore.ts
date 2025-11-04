@@ -15,12 +15,16 @@ import {
   UpdatePatientRequestBody,
   UploadPatientArchiveRequestBody,
   TrashedPatientsActionParam,
+  SlugProperty,
+  GetPatientResponse,
+  UpdatePatientAssetRequestBody,
 } from '@libs/schemas';
 
 export enum TagTypesEnum {
   DATA = 'data',
   DEV = 'development',
   PATIENTS = 'patients',
+  PATIENT = 'patient',
 }
 
 const getAPIHeaders = () => {
@@ -136,6 +140,24 @@ export const apiStore = createApi({
       }),
       invalidatesTags: [TagTypesEnum.PATIENTS],
     }),
+    getPatient: builder.query<GetPatientResponse, SlugProperty>({
+      query: (params) => ({
+        url: apiRoutes.patient,
+        params,
+      }),
+      providesTags: [TagTypesEnum.PATIENT],
+    }),
+    updatePatientAsset: builder.mutation<
+      void,
+      IDProperty & UpdatePatientAssetRequestBody
+    >({
+      query: ({ id, ...body }) => ({
+        url: apiRoutes.patientAsset.replace(':id', id),
+        body,
+        method: 'PATCH',
+      }),
+      invalidatesTags: [TagTypesEnum.PATIENT],
+    }),
   }),
 });
 
@@ -147,4 +169,6 @@ export const {
   useUploadPatientAssetsMutation,
   useGetTrashedPatientsQuery,
   useDeleteOrRestoreTrashedPatientMutation,
+  useGetPatientQuery,
+  useUpdatePatientAssetMutation,
 } = apiStore;

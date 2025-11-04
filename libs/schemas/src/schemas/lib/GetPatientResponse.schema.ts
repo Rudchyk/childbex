@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { PatientSchema } from './Patient.schemas.js';
-import { PatientImageClusterSchema } from './PatientImageCluster.schemas.js';
+import { PatientImagesClusterSchema } from './PatientImagesCluster.schemas.js';
 import { PatientImageSchema } from './PatientImage.schema.js';
 
 export const GetPatientResponseSchema = Type.Composite([
@@ -8,7 +8,7 @@ export const GetPatientResponseSchema = Type.Composite([
   Type.Object({
     clusters: Type.Array(
       Type.Composite([
-        PatientImageClusterSchema,
+        PatientImagesClusterSchema,
         Type.Object({
           images: Type.Array(PatientImageSchema),
         }),

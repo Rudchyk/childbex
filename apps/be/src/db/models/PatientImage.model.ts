@@ -14,7 +14,7 @@ import {
   PatientImage as IPatientImage,
 } from '@libs/schemas';
 import { Patient } from './Patient.model';
-import { PatientImageCluster } from './PatientImageCluster.model';
+import { PatientImagesCluster } from './PatientImagesCluster.model';
 import { PatientImageReviewVote } from './PatientImageReviewVote.model';
 import { timestampFields } from '../helpers/timestamps';
 import { access, unlink } from 'node:fs/promises';
@@ -59,7 +59,7 @@ export class PatientImage
   // Статичні асоціації
   declare static associations: {
     patient: Association<PatientImage, Patient>;
-    cluster: Association<PatientImage, PatientImageCluster>;
+    cluster: Association<PatientImage, PatientImagesCluster>;
     votes: Association<PatientImage, PatientImageReviewVote>;
   };
 
@@ -156,7 +156,7 @@ PatientImage.init(
       type: DataTypes.UUID,
       allowNull: false,
       references: {
-        model: PatientImageCluster,
+        model: PatientImagesCluster,
         key: 'id',
       },
       onDelete: 'CASCADE',
@@ -252,14 +252,14 @@ PatientImage.init(
   }
 );
 
-PatientImageCluster.hasMany(PatientImage, {
+PatientImagesCluster.hasMany(PatientImage, {
   foreignKey: 'clusterId',
   as: 'images',
   onDelete: 'CASCADE',
   hooks: true,
 });
 
-PatientImage.belongsTo(PatientImageCluster, {
+PatientImage.belongsTo(PatientImagesCluster, {
   foreignKey: 'clusterId',
   as: 'cluster',
 });

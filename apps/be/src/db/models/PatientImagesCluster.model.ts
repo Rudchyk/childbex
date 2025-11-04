@@ -8,43 +8,43 @@ import {
 import { sequelize } from '../sequelize';
 import { Patient } from './Patient.model';
 import { PatientImage } from './PatientImage.model';
-import { PatientImageCluster as IPatientImageCluster } from '@libs/schemas';
+import { PatientImagesCluster as IPatientImagesCluster } from '@libs/schemas';
 import { timestampFields } from '../helpers/timestamps';
 import { access, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { uploadRoot } from '../../services/patients.service';
 
-export type PatientImageClusterCreationAttributes = Omit<
-  IPatientImageCluster,
+export type PatientImagesClusterCreationAttributes = Omit<
+  IPatientImagesCluster,
   'id' | 'inReview' | 'createdAt' | 'updatedAt'
 >;
 
-export class PatientImageCluster
-  extends Model<IPatientImageCluster, PatientImageClusterCreationAttributes>
-  implements IPatientImageCluster
+export class PatientImagesCluster
+  extends Model<IPatientImagesCluster, PatientImagesClusterCreationAttributes>
+  implements IPatientImagesCluster
 {
-  declare id: IPatientImageCluster['id'];
-  declare cluster: IPatientImageCluster['cluster'];
-  declare name: IPatientImageCluster['name'];
+  declare id: IPatientImagesCluster['id'];
+  declare cluster: IPatientImagesCluster['cluster'];
+  declare name: IPatientImagesCluster['name'];
   declare patientId: ForeignKey<Patient['id']>;
-  declare notes: IPatientImageCluster['notes'];
-  declare studyDate: IPatientImageCluster['studyDate'];
-  declare inReview: IPatientImageCluster['inReview'];
+  declare notes: IPatientImagesCluster['notes'];
+  declare studyDate: IPatientImagesCluster['studyDate'];
+  declare inReview: IPatientImagesCluster['inReview'];
 
   // Sequelize‑generated:
-  declare readonly createdAt: IPatientImageCluster['createdAt'];
-  declare readonly updatedAt: IPatientImageCluster['updatedAt'];
+  declare readonly createdAt: IPatientImagesCluster['createdAt'];
+  declare readonly updatedAt: IPatientImagesCluster['updatedAt'];
 
-  declare getImages: HasManyGetAssociationsMixin<PatientImageCluster>;
+  declare getImages: HasManyGetAssociationsMixin<PatientImagesCluster>;
   declare getPatient: HasManyGetAssociationsMixin<Patient>;
 
   declare static associations: {
-    images: Association<PatientImageCluster, PatientImage>;
-    patient: Association<PatientImageCluster, Patient>;
+    images: Association<PatientImagesCluster, PatientImage>;
+    patient: Association<PatientImagesCluster, Patient>;
   };
 }
 
-PatientImageCluster.init(
+PatientImagesCluster.init(
   {
     id: {
       type: DataTypes.UUID,
@@ -86,7 +86,7 @@ PatientImageCluster.init(
   },
   {
     sequelize,
-    tableName: 'patient_image_clusters',
+    tableName: 'patient_images_clusters',
     indexes: [
       {
         unique: true,
@@ -112,14 +112,14 @@ PatientImageCluster.init(
   }
 );
 
-Patient.hasMany(PatientImageCluster, {
+Patient.hasMany(PatientImagesCluster, {
   foreignKey: 'patientId',
   as: 'clusters',
   onDelete: 'CASCADE',
   hooks: true,
 });
 
-PatientImageCluster.belongsTo(Patient, {
+PatientImagesCluster.belongsTo(Patient, {
   foreignKey: 'patientId',
   as: 'patient',
 });
