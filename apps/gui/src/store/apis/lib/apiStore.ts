@@ -18,6 +18,8 @@ import {
   SlugProperty,
   GetPatientResponse,
   UpdatePatientAssetRequestBody,
+  GetPatientClusterResponse,
+  GetPatientClusterParams,
 } from '@libs/schemas';
 
 export enum TagTypesEnum {
@@ -158,6 +160,16 @@ export const apiStore = createApi({
       }),
       invalidatesTags: [TagTypesEnum.PATIENT],
     }),
+    getPatientImagesCluster: builder.query<
+      GetPatientClusterResponse,
+      GetPatientClusterParams
+    >({
+      query: (params) => ({
+        url: apiRoutes.patientCluster,
+        params,
+      }),
+      providesTags: [TagTypesEnum.PATIENT],
+    }),
   }),
 });
 
@@ -171,4 +183,5 @@ export const {
   useDeleteOrRestoreTrashedPatientMutation,
   useGetPatientQuery,
   useUpdatePatientAssetMutation,
+  useGetPatientImagesClusterQuery,
 } = apiStore;

@@ -88,6 +88,14 @@ export default createBrowserRouter([
             lazy: () => import('../pages/PatientPage/PatientPage'),
             ...defaultOptions,
           },
+          {
+            path: guiRoutes.patientImagesCluster,
+            lazy: () =>
+              import(
+                '../pages/PatientImagesClusterPage/PatientImagesClusterPage'
+              ),
+            ...defaultOptions,
+          },
         ],
       },
     ],

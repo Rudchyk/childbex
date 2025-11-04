@@ -12,6 +12,7 @@ export const apiRoutes = {
   patientById: '/patient/:id',
   patientUpload: '/patient/:id/upload',
   patientAsset: '/patient/asset/:id',
+  patientCluster: '/patient/cluster',
 };
 
 export const guiRoutes = {

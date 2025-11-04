@@ -24,6 +24,9 @@ import {
   GetPatientsResponseSchema,
   GetPatientsResponse,
   UpdatePatientAssetRequestBodySchema,
+  GetPatientClusterParamsSchema,
+  GetPatientClusterResponseSchema,
+  GetPatientClusterResponse,
 } from '@libs/schemas';
 import { getKeycloakSecurity } from '../lib/security.service';
 import { Tags } from '../lib/tags.service';
@@ -45,6 +48,7 @@ import { PatientImagesCluster } from '../../../db/models/PatientImagesCluster.mo
 import { PatientImage } from '../../../db/models/PatientImage.model';
 import { getSecurityContentFromResponse } from '../lib/security.service';
 import { Op } from 'sequelize';
+import { PatientImageReviewVote } from '../../../db/models/PatientImageReviewVote.model';
 
 router
   // Get patients
@@ -422,5 +426,52 @@ router
       }
       await result.destroy();
       return Response.json(null, { status: 204 });
+    },
+  })
+  // Get patient images cluster
+  .route({
+    description: 'Get patient images cluster',
+    method: 'GET',
+    path: apiRoutes.patientCluster,
+    tags: [Tags.PATIENT],
+    ...getKeycloakSecurity(),
+    schemas: {
+      request: {
+        query: GetPatientClusterParamsSchema,
+      },
+      responses: {
+        200: GetPatientClusterResponseSchema,
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request) {
+      const { slug, cluster } = request.query;
+      const result = await Patient.findOne({ where: { slug } });
+      if (!result) {
+        throw getNotFoundError('patient');
+      }
+      const imagesCluster = await PatientImagesCluster.findOne({
+        where: {
+          patientId: result.id,
+          cluster,
+        },
+        include: [
+          {
+            model: PatientImage,
+            as: 'images',
+            include: [
+              {
+                model: PatientImageReviewVote,
+                as: 'votes',
+              },
+            ],
+          },
+        ],
+      });
+      if (!imagesCluster) {
+        throw getNotFoundError('images cluster');
+      }
+      return Response.json(imagesCluster.toJSON<GetPatientClusterResponse>());
     },
   });

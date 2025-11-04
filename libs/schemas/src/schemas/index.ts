@@ -15,3 +15,5 @@ export * from './lib/GetPatientResponse.schema.js';
 export * from './lib/TrashedPatientsActionParam.schema.js';
 export * from './lib/GetPatientsResponse.schemas.js';
 export * from './lib/UpdatePatientAssetRequestBody.schema.js';
+export * from './lib/GetPatientClusterParams.schema.js';
+export * from './lib/GetPatientClusterResponse.schema.js';
