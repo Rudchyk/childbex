@@ -3,7 +3,7 @@ import AcUnitIcon from '@mui/icons-material/AcUnit';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import { Box, Divider, Paper, Typography } from '@mui/material';
 import { PatientImagesTags } from './PatientImagesTags';
-// import { PatientImageReview } from './PatientImageReview';
+import { PatientImageReview } from './PatientImageReview';
 import { GetPatientClusterResponse } from '@libs/schemas';
 import { DicomViewer } from '../../components';
 
@@ -13,12 +13,10 @@ interface PatientImagesProps {
 
 export const PatientImages: FC<PatientImagesProps> = ({ data }) => {
   const itemsMapping = useMemo(
-    () =>
-      Object.fromEntries(
-        (data?.images || []).map((item) => [item.source, item])
-      ),
+    () => Object.fromEntries(data.images.map((item) => [item.source, item])),
     [data]
   );
+  const sources = data.images.map(({ source }) => source);
   const [currentSource, setCurrentSource] = useState<string | undefined>();
   const onCurrentItemChange = (newCurrentSource: string) => {
     setCurrentSource(newCurrentSource);
@@ -54,15 +52,15 @@ export const PatientImages: FC<PatientImagesProps> = ({ data }) => {
             imagesCluster={data}
           />
           <Divider />
-          {/* {imagesCluster.inReview &&
+          {data.inReview &&
             !!currentSource &&
             !!itemsMapping[currentSource] && (
               <PatientImageReview item={itemsMapping[currentSource]} />
-            )} */}
+            )}
         </Box>
       </Box>
       <DicomViewer
-        list={(data?.images || []).map(({ source }) => source)}
+        list={sources}
         onCurrentItemChange={onCurrentItemChange}
         sidebarItemIcon={(source: string) =>
           itemsMapping[source].isAbnormal ? (

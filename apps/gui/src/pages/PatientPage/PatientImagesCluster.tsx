@@ -14,9 +14,9 @@ import { format } from 'date-fns';
 import pluralize from 'pluralize';
 import BrokenImageIcon from '@mui/icons-material/BrokenImage';
 import { GetPatientResponse } from '@libs/schemas';
-import { Link as RouteLink } from 'react-router-dom';
+import { generatePath, Link as RouteLink } from 'react-router-dom';
 import { guiRoutes } from '@libs/constants';
-import { useUpdatePatientAssetMutation } from '../../store/apis';
+import { useUpdatePatientImagesClusterMutation } from '../../store/apis';
 import { useNotifications } from '../../modules/notifications';
 
 interface PatientImagesClusterProps {
@@ -31,7 +31,7 @@ export const PatientImagesCluster: FC<PatientImagesClusterProps> = ({
   const { notifyError, notifySuccess } = useNotifications();
   const isBrocken = item.cluster === -1;
   const [updatePatientAsset, { isError, error, isSuccess }] =
-    useUpdatePatientAssetMutation();
+    useUpdatePatientImagesClusterMutation();
   const handleToggle = (id: string, newValue: boolean) => () => {
     updatePatientAsset({
       id,
@@ -54,9 +54,13 @@ export const PatientImagesCluster: FC<PatientImagesClusterProps> = ({
     <ListItem disablePadding>
       <ListItemButton
         component={RouteLink}
-        to={guiRoutes.patientImagesCluster
-          .replace(':slug', slug)
-          .replace(':cluster', String(item.cluster))}
+        // to={guiRoutes.patientImagesCluster
+        //   .replace(':slug', slug)
+        //   .replace(':cluster', String(item.cluster))}
+        to={generatePath(guiRoutes.patientImagesCluster, {
+          slug,
+          cluster: String(item.cluster),
+        })}
       >
         <ListItemAvatar>
           <Avatar>{isBrocken ? <BrokenImageIcon /> : <ImageIcon />}</Avatar>

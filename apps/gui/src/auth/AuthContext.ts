@@ -5,6 +5,7 @@ export interface AuthContextType {
   authenticated: boolean;
   token?: string;
   username?: string;
+  userId?: string;
   roles: string[];
   login: (opts?: Keycloak.KeycloakLoginOptions) => void;
   logout: () => void;

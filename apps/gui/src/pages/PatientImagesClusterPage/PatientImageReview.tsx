@@ -1,7 +1,5 @@
 import {
-  Box,
   ChipProps,
-  CircularProgress,
   Divider,
   Stack,
   Table,
@@ -13,17 +11,17 @@ import {
 import { format } from 'date-fns';
 import { FC } from 'react';
 import { PatientImageVotes } from './PatientImageVotes';
-import { useSession } from 'next-auth/react';
-import { PatientImageVote } from './PatientImageVote/PatientImageVote';
-import { UserRoles } from '@/lib/constants/UserRoles';
+import { PatientImageVote } from './PatientImageVote';
+import { useAuth } from '../../auth/useAuth';
+import { GetPatientClusterResponse, PatientImageStatus } from '@libs/schemas';
+import { defaultDateFormat } from '@libs/constants';
 
 interface PatientImageReviewProps {
-  item?: PatientImage;
+  item?: GetPatientClusterResponse['images'][0];
 }
 
 export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
-  const session = useSession();
-  const isDoctor = session?.data?.user?.role === UserRoles.DOCTOR || true;
+  const { hasRole, roles, isDoctor, isAdmin, userId } = useAuth();
   const getStatusColor = (): ChipProps['color'] => {
     switch (item?.status) {
       case PatientImageStatus.NORMAL:
@@ -75,7 +73,7 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
   const resolutionInfo = [
     {
       label: 'Resolver',
-      value: item?.resolver?.email,
+      value: item?.adminResolutionName,
     },
     {
       label: 'Comment',
@@ -88,22 +86,12 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
         : '',
     },
   ];
-  const userVote = item?.votes?.find(
-    ({ reviewerId }) => reviewerId === session?.data?.user.id
-  );
-
-  if (session.status === 'loading') {
-    return (
-      <Box sx={{ p: 3 }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
+  const userVote = item?.votes?.find(({ reviewerId }) => reviewerId === userId);
 
   return (
     <>
       <Stack spacing={1} py={1}>
-        {isDoctor && !!item?.id && (
+        {(isDoctor || isAdmin) && !!item?.id && (
           <>
             <PatientImageVote patientImageId={item.id} userVote={userVote} />
             <Divider />

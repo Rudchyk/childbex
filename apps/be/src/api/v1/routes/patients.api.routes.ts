@@ -9,7 +9,6 @@ import {
 } from '../schemas/schemas';
 import {
   PatientCreationAttributesSchema,
-  PatientsSchema,
   CreatePatientRequestBodySchema,
   UploadPatientArchiveRequestBodySchema,
   PatientSchema,
@@ -27,23 +26,19 @@ import {
   GetPatientClusterParamsSchema,
   GetPatientClusterResponseSchema,
   GetPatientClusterResponse,
+  PatientImageReviewVoteRequestBodySchema,
+  PatientImageReviewVoteRequestBody,
+  PatientImageReviewVoteParamsSchema,
 } from '@libs/schemas';
 import { getKeycloakSecurity } from '../lib/security.service';
 import { Tags } from '../lib/tags.service';
-import { Grant } from 'keycloak-connect';
 import { Ctx } from '../lib/types';
 import {
   getInvalidRequestError,
   getNotFoundError,
-  getUnauthorizedError,
   getInternalServerRequestError,
 } from '../lib/helpers';
-import {
-  uploadRoot,
-  usePatientAssets,
-} from '../../../services/patients.service';
-import path from 'path';
-import { rm } from 'node:fs/promises';
+import { usePatientAssets } from '../../../services/patients.service';
 import { PatientImagesCluster } from '../../../db/models/PatientImagesCluster.model';
 import { PatientImage } from '../../../db/models/PatientImage.model';
 import { getSecurityContentFromResponse } from '../lib/security.service';
@@ -89,9 +84,9 @@ router
   // Add a patient
   .route({
     description: 'Add a patient',
-    method: 'PUT',
-    path: apiRoutes.patient,
-    tags: [Tags.PATIENT],
+    method: 'POST',
+    path: apiRoutes.patients,
+    tags: [Tags.PATIENTS],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
@@ -126,8 +121,8 @@ router
   .route({
     description: 'Get a patient by ID',
     method: 'GET',
-    path: apiRoutes.patientById,
-    tags: [Tags.PATIENT],
+    path: apiRoutes.patient,
+    tags: [Tags.PATIENTS],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
@@ -152,12 +147,12 @@ router
   .route({
     description: 'Get a patient by slug',
     method: 'GET',
-    path: apiRoutes.patient,
-    tags: [Tags.PATIENT],
+    path: apiRoutes.patientSlug,
+    tags: [Tags.PATIENTS],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
-        query: SlugPropertySchema,
+        params: SlugPropertySchema,
       },
       responses: {
         200: GetPatientResponseSchema,
@@ -166,7 +161,7 @@ router
       },
     },
     async handler(request) {
-      const { slug } = request.query;
+      const { slug } = request.params;
       const result = await Patient.findOne({
         where: {
           slug,
@@ -199,8 +194,8 @@ router
   .route({
     description: 'Delete a patient',
     method: 'DELETE',
-    path: apiRoutes.patientById,
-    tags: [Tags.PATIENT],
+    path: apiRoutes.patient,
+    tags: [Tags.PATIENTS],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
@@ -226,8 +221,8 @@ router
   .route({
     description: 'Update a patient',
     method: 'PATCH',
-    path: apiRoutes.patientById,
-    tags: [Tags.PATIENT],
+    path: apiRoutes.patient,
+    tags: [Tags.PATIENTS],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
@@ -300,7 +295,7 @@ router
     description: 'Delete or restore a patient',
     method: 'POST',
     path: apiRoutes.trashedPatient,
-    tags: [Tags.PATIENT],
+    tags: [Tags.PATIENTS],
     ...getKeycloakSecurity(['realm:admin']),
     schemas: {
       request: {
@@ -339,8 +334,8 @@ router
   .route({
     description: 'Upload patient assets',
     method: 'POST',
-    path: apiRoutes.patientUpload,
-    tags: [Tags.PATIENT],
+    path: apiRoutes.patientAssetsUpload,
+    tags: [Tags.PATIENTS],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
@@ -369,12 +364,12 @@ router
       return Response.json(null, { status: 204 });
     },
   })
-  // Update patient asset
+  // Update patient cluster
   .route({
-    description: 'Update patient asset',
+    description: 'Update patient cluster',
     method: 'PATCH',
-    path: apiRoutes.patientAsset,
-    tags: [Tags.PATIENT],
+    path: apiRoutes.patientImagesCluster,
+    tags: [Tags.PATIENTS],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
@@ -401,12 +396,12 @@ router
       return Response.json(null, { status: 204 });
     },
   })
-  // Delete patient asset
+  // Delete patient cluster
   .route({
-    description: 'Delete patient asset',
+    description: 'Delete patient cluster',
     method: 'DELETE',
-    path: apiRoutes.patientAsset,
-    tags: [Tags.PATIENT],
+    path: apiRoutes.patientImagesCluster,
+    tags: [Tags.PATIENTS],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
@@ -432,12 +427,12 @@ router
   .route({
     description: 'Get patient images cluster',
     method: 'GET',
-    path: apiRoutes.patientCluster,
-    tags: [Tags.PATIENT],
+    path: apiRoutes.patientSlugImagesClustersCluster,
+    tags: [Tags.PATIENTS],
     ...getKeycloakSecurity(),
     schemas: {
       request: {
-        query: GetPatientClusterParamsSchema,
+        params: GetPatientClusterParamsSchema,
       },
       responses: {
         200: GetPatientClusterResponseSchema,
@@ -446,7 +441,7 @@ router
       },
     },
     async handler(request) {
-      const { slug, cluster } = request.query;
+      const { slug, cluster } = request.params;
       const result = await Patient.findOne({ where: { slug } });
       if (!result) {
         throw getNotFoundError('patient');
@@ -473,5 +468,101 @@ router
         throw getNotFoundError('images cluster');
       }
       return Response.json(imagesCluster.toJSON<GetPatientClusterResponse>());
+    },
+  })
+  // Add patient image review vote
+  .route({
+    description: 'Add patient image review vote',
+    method: 'POST',
+    path: apiRoutes.patientImagesReviewsVotes,
+    tags: [Tags.PATIENTS],
+    ...getKeycloakSecurity(),
+    schemas: {
+      request: {
+        params: IDPropertySchema,
+        json: PatientImageReviewVoteRequestBodySchema,
+      },
+      responses: {
+        204: { description: 'success' },
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request, ctx) {
+      const { id } = request.params;
+      const result = await PatientImage.findByPk(id);
+      const content = getSecurityContentFromResponse(ctx as Ctx);
+      if (!result) {
+        throw getNotFoundError('patient image');
+      }
+      let body = {} as PatientImageReviewVoteRequestBody;
+      const contentLength = request.headers.get('content-length');
+      if (contentLength && +contentLength > 2) {
+        body = await request.json();
+      }
+      if (!Object.keys(body).length) {
+        throw getInvalidRequestError();
+      }
+      await PatientImageReviewVote.create({
+        reviewerId: content.sub,
+        reviewerName:
+          content.name || content.preferred_username || content.email || '',
+        patientImageId: id,
+        ...body,
+      });
+      return Response.json(null, { status: 204 });
+    },
+  })
+  // Update patient image review vote
+  .route({
+    description: 'Update patient image review vote',
+    method: 'PATCH',
+    path: apiRoutes.patientImageReviewVote,
+    tags: [Tags.PATIENTS],
+    ...getKeycloakSecurity(),
+    schemas: {
+      request: {
+        params: PatientImageReviewVoteParamsSchema,
+        json: PatientImageReviewVoteRequestBodySchema,
+      },
+      responses: {
+        204: { description: 'success' },
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request, ctx) {
+      const { id, voteId } = request.params;
+      const result = await PatientImage.findByPk(id);
+      if (!result) {
+        throw getNotFoundError('patient image');
+      }
+      const patientImageReviewVote = await PatientImageReviewVote.findByPk(
+        voteId
+      );
+      if (!patientImageReviewVote) {
+        throw getNotFoundError('patient image review vote');
+      }
+      let body = {} as PatientImageReviewVoteRequestBody;
+      const contentLength = request.headers.get('content-length');
+      if (contentLength && +contentLength > 2) {
+        body = await request.json();
+      }
+      if (!Object.keys(body).length) {
+        throw getInvalidRequestError();
+      }
+      const update: Partial<Pick<PatientImageReviewVote, 'comment' | 'vote'>> =
+        {};
+      if (body.comment !== patientImageReviewVote.comment) {
+        update.comment = body.comment;
+      }
+      if (body.vote !== patientImageReviewVote.vote) {
+        update.vote = body.vote;
+      }
+      if (!Object.keys(update).length) {
+        throw getInvalidRequestError();
+      }
+      await patientImageReviewVote.update(update);
+      return Response.json(null, { status: 204 });
     },
   });

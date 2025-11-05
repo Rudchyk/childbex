@@ -53,6 +53,10 @@ export default defineConfig(({ mode }) => {
       host: 'localhost',
       proxy: {
         '/api': `http://localhost:${process.env.PORT}`,
+        '/metrics': `http://localhost:${process.env.PORT}`,
+        '/uploads': `http://localhost:${process.env.PORT}`,
+        '/test': `http://localhost:${process.env.PORT}`,
+        '/assets': `http://localhost:${process.env.PORT}`,
       },
     },
     preview: {

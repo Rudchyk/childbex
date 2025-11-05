@@ -1,5 +1,5 @@
 import { DefaultLayout } from '../../layouts';
-import { useGetPatientQuery } from '../../store/apis';
+import { useGetPatientBySlugQuery } from '../../store/apis';
 import { PageTmpl } from '../../templates';
 import { PatientImagesClusters } from './PatientImagesClusters';
 import { useParams } from 'react-router-dom';
@@ -8,7 +8,7 @@ import { Typography } from '@mui/material';
 
 export const Component = () => {
   const { slug = '' } = useParams<SlugProperty>();
-  const { data, isLoading, isError, error } = useGetPatientQuery(
+  const { data, isLoading, isError, error } = useGetPatientBySlugQuery(
     { slug },
     { skip: !slug }
   );

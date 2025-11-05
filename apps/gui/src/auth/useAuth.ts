@@ -13,6 +13,7 @@ export const useAuth = () => {
 
   return {
     ...ctx,
+    roles: ROLES,
     isAdmin: ctx.hasRole(ROLES.ADMIN),
     isDoctor: ctx.hasRole(ROLES.DOCTOR),
     isUser: ctx.hasRole(ROLES.USER),

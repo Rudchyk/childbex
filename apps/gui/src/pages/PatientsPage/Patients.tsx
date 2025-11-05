@@ -31,7 +31,7 @@ import {
 import { WithLoader } from '../../hoc';
 import { DeletePatient } from './DeletePatient';
 import { useUpdatePatientMutation } from '../../store/apis';
-import { Link as RouteLink } from 'react-router-dom';
+import { generatePath, Link as RouteLink } from 'react-router-dom';
 import { guiRoutes, TrashedPatientsActionTypes } from '@libs/constants';
 import { useAuth } from '../../auth/useAuth';
 import { TrashedPatientsAction } from './TrashedPatientsAction';
@@ -123,7 +123,10 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
             size="small"
             component={RouteLink}
             target="_blank"
-            to={guiRoutes.patient.replace(':slug', value || '')}
+            // to={guiRoutes.patient.replace(':slug', value || '')}
+            to={generatePath(guiRoutes.patient, {
+              slug: value,
+            })}
           >
             <OpenInNewIcon />
           </IconButton>

@@ -10,17 +10,18 @@ import {
   CreatePatientRequestBody,
   GetPatientsResponse,
   Patient,
-  Patients,
   IDProperty,
   UpdatePatientRequestBody,
-  UploadPatientArchiveRequestBody,
   TrashedPatientsActionParam,
   SlugProperty,
   GetPatientResponse,
   UpdatePatientAssetRequestBody,
   GetPatientClusterResponse,
   GetPatientClusterParams,
+  PatientImageReviewVoteRequestBody,
+  PatientImageReviewVoteParams,
 } from '@libs/schemas';
+import { generatePath } from 'react-router-dom';
 
 export enum TagTypesEnum {
   DATA = 'data',
@@ -96,15 +97,15 @@ export const apiStore = createApi({
     }),
     addPatient: builder.mutation<Patient, CreatePatientRequestBody>({
       query: (body) => ({
-        url: apiRoutes.patient,
-        method: 'PUT',
+        url: apiRoutes.patients,
+        method: 'POST',
         body,
       }),
       invalidatesTags: [TagTypesEnum.PATIENTS],
     }),
     deletePatient: builder.mutation<Patient, IDProperty>({
       query: ({ id }) => ({
-        url: apiRoutes.patientById.replace(':id', id),
+        url: generatePath(apiRoutes.patient, { id }),
         method: 'DELETE',
       }),
       invalidatesTags: [TagTypesEnum.PATIENTS],
@@ -114,7 +115,7 @@ export const apiStore = createApi({
       IDProperty & UpdatePatientRequestBody
     >({
       query: ({ id, ...body }) => ({
-        url: apiRoutes.patientById.replace(':id', id),
+        url: generatePath(apiRoutes.patient, { id }),
         body,
         method: 'PATCH',
       }),
@@ -125,7 +126,7 @@ export const apiStore = createApi({
       IDProperty & { body: FormData }
     >({
       query: ({ id, body }) => ({
-        url: apiRoutes.patientUpload.replace(':id', id),
+        url: generatePath(apiRoutes.patientAssetsUpload, { id }),
         body,
         method: 'POST',
       }),
@@ -136,25 +137,24 @@ export const apiStore = createApi({
       IDProperty & TrashedPatientsActionParam
     >({
       query: ({ id, ...params }) => ({
-        url: apiRoutes.trashedPatient.replace(':id', id),
+        url: generatePath(apiRoutes.trashedPatient, { id }),
         params,
         method: 'POST',
       }),
       invalidatesTags: [TagTypesEnum.PATIENTS],
     }),
-    getPatient: builder.query<GetPatientResponse, SlugProperty>({
-      query: (params) => ({
-        url: apiRoutes.patient,
-        params,
+    getPatientBySlug: builder.query<GetPatientResponse, SlugProperty>({
+      query: ({ slug }) => ({
+        url: generatePath(apiRoutes.patientSlug, { slug }),
       }),
       providesTags: [TagTypesEnum.PATIENT],
     }),
-    updatePatientAsset: builder.mutation<
+    updatePatientImagesCluster: builder.mutation<
       void,
       IDProperty & UpdatePatientAssetRequestBody
     >({
       query: ({ id, ...body }) => ({
-        url: apiRoutes.patientAsset.replace(':id', id),
+        url: generatePath(apiRoutes.patientImagesCluster, { id }),
         body,
         method: 'PATCH',
       }),
@@ -164,11 +164,40 @@ export const apiStore = createApi({
       GetPatientClusterResponse,
       GetPatientClusterParams
     >({
-      query: (params) => ({
-        url: apiRoutes.patientCluster,
-        params,
+      query: ({ slug, cluster }) => ({
+        url: generatePath(apiRoutes.patientSlugImagesClustersCluster, {
+          slug,
+          cluster,
+        }),
       }),
       providesTags: [TagTypesEnum.PATIENT],
+    }),
+    addPatientImageReviewVote: builder.mutation<
+      void,
+      IDProperty & PatientImageReviewVoteRequestBody
+    >({
+      query: ({ id, ...body }) => ({
+        url: generatePath(apiRoutes.patientImagesReviewsVotes, {
+          id,
+        }),
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [TagTypesEnum.PATIENT],
+    }),
+    updatePatientImageReviewVote: builder.mutation<
+      void,
+      PatientImageReviewVoteParams & PatientImageReviewVoteRequestBody
+    >({
+      query: ({ id, voteId, ...body }) => ({
+        url: generatePath(apiRoutes.patientImageReviewVote, {
+          id,
+          voteId,
+        }),
+        method: 'PATCH',
+        body,
+      }),
+      invalidatesTags: [TagTypesEnum.PATIENT],
     }),
   }),
 });
@@ -181,7 +210,9 @@ export const {
   useUploadPatientAssetsMutation,
   useGetTrashedPatientsQuery,
   useDeleteOrRestoreTrashedPatientMutation,
-  useGetPatientQuery,
-  useUpdatePatientAssetMutation,
+  useGetPatientBySlugQuery,
+  useUpdatePatientImagesClusterMutation,
   useGetPatientImagesClusterQuery,
+  useAddPatientImageReviewVoteMutation,
+  useUpdatePatientImageReviewVoteMutation,
 } = apiStore;

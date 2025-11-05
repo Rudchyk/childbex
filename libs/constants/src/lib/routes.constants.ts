@@ -2,17 +2,28 @@ export const apiRoute = '/api/v1';
 
 export const apiDocRoute = '/docs';
 
-export const apiRoutes = {
+const security = {
   securityConfig: '/security/config',
   securityVerify: '/security/verify',
+};
+
+const patients = {
   patients: '/patients',
   trashedPatients: '/patients/trash',
-  patient: '/patient',
-  trashedPatient: '/patient/trash/:id',
-  patientById: '/patient/:id',
-  patientUpload: '/patient/:id/upload',
-  patientAsset: '/patient/asset/:id',
-  patientCluster: '/patient/cluster',
+  trashedPatient: '/patients/:id/trash',
+  patient: '/patients/:id',
+  patientSlug: '/patients/slug/:slug',
+  patientAssetsUpload: '/patients/:id/upload',
+  patientImagesCluster: '/patients/clusters/:id',
+  patientSlugImagesClustersCluster:
+    '/patients/slug/:slug/clusters/cluster/:cluster',
+  patientImagesReviewsVotes: '/patients/images/:id/review-votes',
+  patientImageReviewVote: '/patients/images/:id/review-votes/:voteId',
+};
+
+export const apiRoutes = {
+  ...security,
+  ...patients,
 };
 
 export const guiRoutes = {

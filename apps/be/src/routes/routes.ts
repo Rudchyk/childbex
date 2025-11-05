@@ -10,18 +10,20 @@ import {
 } from '../services/prometheus.service';
 import { logger } from '../services/logger.service';
 import { apiRoute } from '@libs/constants';
+import { uploadRoot } from '../services/patients.service';
 
 export const serverRoutes = {
   metrics: metricsRoute,
   test: '/test',
   assets: '/assets',
   boom: '/boom',
+  uploads: '/uploads',
 };
 
 export const setupRoutes = (app: Express) => {
   const router = Router();
   const clientDir = path.join(__dirname, process.env.GUI_DIR || '../gui');
-  logger.debug({ clientDir });
+  logger.debug({ clientDir, uploadRoot });
   router.use(
     express.static(clientDir, {
       index: false,
@@ -31,6 +33,7 @@ export const setupRoutes = (app: Express) => {
     serverRoutes.assets,
     express.static(path.join(__dirname, 'assets'))
   );
+  router.use(serverRoutes.uploads, express.static(uploadRoot));
   router.use(
     apiRoute,
     express.static(path.join(__dirname, 'html', 'oauth2-redirect'))

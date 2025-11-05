@@ -8,6 +8,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [ready, setReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [username, setUsername] = useState<string | undefined>(undefined);
+  const [userId, setUserId] = useState<string | undefined>(undefined);
   const [roles, setRoles] = useState<string[]>([]);
   const [token, setToken] = useState<string | undefined>(undefined);
 
@@ -24,6 +25,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       setAuthenticated(!!keycloak.authenticated);
       setToken(keycloak.token);
       setUsername(keycloak.tokenParsed?.name as string | undefined);
+      setUserId(keycloak.tokenParsed?.sub as string | undefined);
 
       // Collect realm + client roles
       const realmRoles = (keycloak.tokenParsed?.realm_access?.roles ??
@@ -63,13 +65,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       authenticated,
       token,
       username,
+      userId,
       roles,
       login: (opts) => window.keycloak?.login({ ...opts }),
       logout: () =>
         window.keycloak?.logout({ redirectUri: window.location.origin }),
       hasRole: (role) => roles.includes(role),
     }),
-    [ready, authenticated, token, username, roles]
+    [ready, authenticated, token, username, roles, userId]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
