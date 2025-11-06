@@ -4,7 +4,8 @@ import { PageTmpl } from '../../templates';
 import { PatientImagesClusters } from './PatientImagesClusters';
 import { useParams } from 'react-router-dom';
 import { SlugProperty } from '@libs/schemas';
-import { Typography } from '@mui/material';
+import { PageTitle } from '../../components';
+import { AddPatientImagesCluster } from './AddPatientImagesCluster/AddPatientImagesCluster';
 
 export const Component = () => {
   const { slug = '' } = useParams<SlugProperty>();
@@ -15,7 +16,13 @@ export const Component = () => {
   return (
     <DefaultLayout>
       <PageTmpl
-        customTitle={<Typography variant="h1">{data?.name}</Typography>}
+        customTitle={
+          <PageTitle
+            titleActions={data?.id && <AddPatientImagesCluster id={data.id} />}
+          >
+            {data?.name}
+          </PageTitle>
+        }
       >
         <PatientImagesClusters
           slug={slug}

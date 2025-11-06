@@ -1,24 +1,25 @@
-import { FC, startTransition, useActionState, useEffect } from 'react';
-import { Tooltip, useTheme } from '@mui/material';
+import { FC, useEffect } from 'react';
+import { IconButton, Tooltip, useTheme } from '@mui/material';
 import { DialogAreYouSure } from '../../components';
 import { GridActionsCellItem } from '@mui/x-data-grid';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useNotifications } from '../../modules/notifications';
 import { useToggle } from '../../hooks';
-import { useDeletePatientMutation } from '../../store/apis';
+import { useDeletePatientImagesClusterMutation } from '../../store/apis';
 
-interface DeletePatientProps {
+interface DeletePatientImagesClusterProps {
   id: string;
 }
 
-export const DeletePatient: FC<DeletePatientProps> = ({ id }) => {
+export const DeletePatientImagesCluster: FC<
+  DeletePatientImagesClusterProps
+> = ({ id }) => {
   const { notifyError, notifySuccess } = useNotifications();
   const [open, toggleOpen] = useToggle(false);
-  const theme = useTheme();
-  const [deletePatient, { data, isLoading, isSuccess, isError, error }] =
-    useDeletePatientMutation();
+  const [deletePatientImagesCluster, { isSuccess, isError, error }] =
+    useDeletePatientImagesClusterMutation();
   const handleOnDeleteProfile = () => {
-    deletePatient({ id });
+    deletePatientImagesCluster({ id });
   };
   useEffect(() => {
     if (isError) {
@@ -29,20 +30,17 @@ export const DeletePatient: FC<DeletePatientProps> = ({ id }) => {
 
   useEffect(() => {
     if (isSuccess) {
-      notifySuccess(`Patient ${data.name} was deleted successfully!`);
+      notifySuccess(`Patient images cluster was deleted successfully!`);
     }
     toggleOpen();
   }, [isSuccess]);
 
   return (
     <>
-      <Tooltip title="Delete patient">
-        <GridActionsCellItem
-          onClick={toggleOpen}
-          icon={<DeleteForeverIcon />}
-          label="Delete"
-          style={{ color: theme.palette.error.main }}
-        />
+      <Tooltip title="Delete patient images cluster">
+        <IconButton onClick={() => toggleOpen()} color="error">
+          <DeleteForeverIcon />
+        </IconButton>
       </Tooltip>
       <DialogAreYouSure
         open={open}

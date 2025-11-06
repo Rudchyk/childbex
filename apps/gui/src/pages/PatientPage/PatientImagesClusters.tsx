@@ -1,4 +1,4 @@
-import { List } from '@mui/material';
+import { List, Stack } from '@mui/material';
 import { GetPatientResponse } from '@libs/schemas';
 import { WithLoader } from '../../hoc';
 import { PatientImagesCluster } from './PatientImagesCluster';
@@ -13,12 +13,12 @@ export const PatientImagesClusters = WithLoader<
 >(({ data, slug }) => {
   const { clusters = [] } = data;
   return (
-    <nav>
+    <Stack>
       <List>
         {clusters.map((item) => (
           <PatientImagesCluster key={item.id} slug={slug} item={item} />
         ))}
       </List>
-    </nav>
+    </Stack>
   );
 });

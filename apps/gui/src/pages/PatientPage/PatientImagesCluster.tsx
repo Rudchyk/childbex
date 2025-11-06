@@ -18,6 +18,7 @@ import { generatePath, Link as RouteLink } from 'react-router-dom';
 import { guiRoutes } from '@libs/constants';
 import { useUpdatePatientImagesClusterMutation } from '../../store/apis';
 import { useNotifications } from '../../modules/notifications';
+import { DeletePatientImagesCluster } from './DeletePatientImagesCluster';
 
 interface PatientImagesClusterProps {
   item: GetPatientResponse['clusters'][0];
@@ -54,9 +55,6 @@ export const PatientImagesCluster: FC<PatientImagesClusterProps> = ({
     <ListItem disablePadding>
       <ListItemButton
         component={RouteLink}
-        // to={guiRoutes.patientImagesCluster
-        //   .replace(':slug', slug)
-        //   .replace(':cluster', String(item.cluster))}
         to={generatePath(guiRoutes.patientImagesCluster, {
           slug,
           cluster: String(item.cluster),
@@ -98,6 +96,7 @@ export const PatientImagesCluster: FC<PatientImagesClusterProps> = ({
         }
         label="In review"
       />
+      <DeletePatientImagesCluster id={item.id} />
     </ListItem>
   );
 };

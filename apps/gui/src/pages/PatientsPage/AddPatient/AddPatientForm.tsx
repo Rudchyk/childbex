@@ -3,7 +3,7 @@ import { FC, useEffect } from 'react';
 import { FormUITextField, FormUIFileInput } from '../../../components';
 import { Box } from '@mui/material';
 import {
-  AddPatientFormDataSchema,
+  addPatientFormDataSchema,
   AddPatientFormData,
   accept,
 } from './addPatientForm.schema';
@@ -22,7 +22,7 @@ export const AddPatientForm: FC<AddPatientFormProps> = ({
   loading,
 }) => {
   const methods = useForm({
-    resolver: zodResolver(AddPatientFormDataSchema),
+    resolver: zodResolver(addPatientFormDataSchema),
     defaultValues: {
       name: '',
       slug: '',

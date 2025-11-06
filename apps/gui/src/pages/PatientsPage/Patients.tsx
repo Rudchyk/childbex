@@ -76,7 +76,6 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       notifyInfo(`${text} was copied`);
     }
   };
-
   const columns: GridColDef<Patient>[] = [
     {
       field: 'id',

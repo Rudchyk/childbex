@@ -130,7 +130,7 @@ export const apiStore = createApi({
         body,
         method: 'POST',
       }),
-      invalidatesTags: [TagTypesEnum.PATIENTS],
+      invalidatesTags: [TagTypesEnum.PATIENTS, TagTypesEnum.PATIENT],
     }),
     deleteOrRestoreTrashedPatient: builder.mutation<
       Patient,
@@ -171,6 +171,15 @@ export const apiStore = createApi({
         }),
       }),
       providesTags: [TagTypesEnum.PATIENT],
+    }),
+    deletePatientImagesCluster: builder.mutation<void, IDProperty>({
+      query: ({ id }) => ({
+        url: generatePath(apiRoutes.patientImagesCluster, {
+          id,
+        }),
+        method: 'DELETE',
+      }),
+      invalidatesTags: [TagTypesEnum.PATIENT],
     }),
     addPatientImageReviewVote: builder.mutation<
       void,
@@ -215,4 +224,5 @@ export const {
   useGetPatientImagesClusterQuery,
   useAddPatientImageReviewVoteMutation,
   useUpdatePatientImageReviewVoteMutation,
+  useDeletePatientImagesClusterMutation,
 } = apiStore;
