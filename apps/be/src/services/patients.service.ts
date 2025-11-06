@@ -78,15 +78,15 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
   const archiveName = [format(new Date(), 'yyyyMMddHHmmss'), patientId].join(
     '-'
   );
-  await packArchive(destDir, path.join(archivesRoot, archiveName + '.tgz'));
+  // await packArchive(destDir, path.join(archivesRoot, archiveName + '.tgz'));
   await brotliCompressFolder(
     destDir,
     path.join(archivesRoot, archiveName + '.br')
   );
-  await zstdCompressFolder(
-    destDir,
-    path.join(archivesRoot, archiveName + '.zst')
-  );
+  // await zstdCompressFolder(
+  //   destDir,
+  //   path.join(archivesRoot, archiveName + '.zst')
+  // );
 
   const imagesList = await readdir(destDir);
   const inputFiles = imagesList.map((f) => path.join(destDir, f));

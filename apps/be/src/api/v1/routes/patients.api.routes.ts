@@ -531,7 +531,7 @@ router
         ...defaultResponses,
       },
     },
-    async handler(request, ctx) {
+    async handler(request) {
       const { id, voteId } = request.params;
       const result = await PatientImage.findByPk(id);
       if (!result) {
