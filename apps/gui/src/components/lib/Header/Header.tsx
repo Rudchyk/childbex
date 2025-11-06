@@ -21,8 +21,8 @@ export const Header = () => {
           </Link>
         </Stack>
         <Stack direction="row" spacing={2} alignItems="center">
-          <ThemeSwitcher />
           <NavMenu />
+          <ThemeSwitcher />
           <HeaderAuth />
         </Stack>
       </Toolbar>
