@@ -9,7 +9,7 @@ export interface BaseState {
   msg: string;
 }
 
-export const initialState: BaseState = {
+const initialState: BaseState = {
   nodeEnv: process.env.NODE_ENV,
   title: '',
   description: '',

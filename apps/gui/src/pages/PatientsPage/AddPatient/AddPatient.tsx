@@ -1,10 +1,7 @@
-import { Fab, Tooltip } from '@mui/material';
+import { CircularProgress, Fab, Tooltip } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
-import { useToggle } from '../../../hooks';
-import {
-  useAddPatientMutation,
-  useUploadPatientAssetsMutation,
-} from '../../../store/apis';
+import { usePatients, useToggle } from '../../../hooks';
+import { usePatients as usePatients1 } from '../../../store/slices';
 import { useNotifications } from '../../../modules/notifications';
 import { SubmitHandler, SubmitErrorHandler } from 'react-hook-form';
 import { AddPatientForm } from './AddPatientForm';
@@ -14,16 +11,24 @@ import { AddPatientFormData } from './addPatientForm.schema';
 
 export const AddPatient = () => {
   const title = 'Add patient';
-  const [
-    addPatient,
-    { data, isError, isLoading: isAddPatientLoading, error, isSuccess },
-  ] = useAddPatientMutation();
   const [patientName, setPatientName] = useState('');
+  const {
+    addPatient,
+    isLoading,
+    isAddPatientError,
+    addPatientError,
+    isAddPatientSuccess,
+    addedPatient,
+    uploadPatientAssets,
+    isUploadPatientAssetsError,
+    isUploadPatientAssetsSuccess,
+    uploadPatientAssetsError,
+    isUploadPatientAssetsLoading,
+  } = usePatients();
   const [archive, setArchive] = useState<File | undefined>();
-  const [uploadPatientAssets, uploadPatientAssetsState] =
-    useUploadPatientAssetsMutation();
   const { notifyError, notifySuccess } = useNotifications();
   const [open, toggleOpen] = useToggle(false);
+  const { setIsLoading } = usePatients1();
   const onSubmit: SubmitHandler<AddPatientFormData> = async ({
     archive,
     ...other
@@ -31,48 +36,54 @@ export const AddPatient = () => {
     setPatientName(other.name);
     setArchive(archive);
     addPatient(other);
+    toggleOpen();
   };
   const onError: SubmitErrorHandler<AddPatientFormData> = async (err) => {
     console.error(err);
   };
-  const isLoading = isAddPatientLoading || uploadPatientAssetsState.isLoading;
 
   useEffect(() => {
-    if (isError) {
-      notifyError(error);
+    setIsLoading(isUploadPatientAssetsLoading);
+  }, [isUploadPatientAssetsLoading]);
+
+  useEffect(() => {
+    if (isAddPatientError) {
+      notifyError(addPatientError);
     }
-    toggleOpen();
-  }, [isError]);
+  }, [isAddPatientError]);
 
   useEffect(() => {
-    if (isSuccess && data) {
-      notifySuccess(`Patient ${data.name} was added successfully!`);
+    if (isAddPatientSuccess && addedPatient) {
+      notifySuccess(`Patient ${addedPatient.name} was added successfully!`);
       if (archive) {
         const formData = new FormData();
         formData.append('archive', archive);
-        uploadPatientAssets({ id: data.id, body: formData });
+        uploadPatientAssets({ id: addedPatient.id, body: formData });
       }
     }
-    toggleOpen();
-  }, [isSuccess]);
+  }, [isAddPatientSuccess]);
 
   useEffect(() => {
-    if (uploadPatientAssetsState.isError) {
-      notifyError(uploadPatientAssetsState.error);
+    if (isUploadPatientAssetsError) {
+      notifyError(uploadPatientAssetsError);
     }
-  }, [uploadPatientAssetsState.isError]);
+  }, [isUploadPatientAssetsError]);
 
   useEffect(() => {
-    if (uploadPatientAssetsState.isSuccess) {
+    if (isUploadPatientAssetsSuccess) {
       notifySuccess(`Archive for ${patientName} was added successfully!`);
     }
-  }, [uploadPatientAssetsState.isSuccess]);
+  }, [isUploadPatientAssetsSuccess]);
 
   return (
     <>
       <Tooltip title={title}>
-        <Fab onClick={toggleOpen} color="secondary">
-          <AddIcon fontSize="medium" />
+        <Fab disabled={isLoading} onClick={toggleOpen} color="secondary">
+          {isLoading ? (
+            <CircularProgress color="inherit" size={24} />
+          ) : (
+            <AddIcon fontSize="medium" />
+          )}
         </Fab>
       </Tooltip>
       <DialogForm

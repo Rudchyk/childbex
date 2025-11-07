@@ -1,5 +1,8 @@
 import {
+  Chip,
+  CircularProgress,
   Divider,
+  LinearProgress,
   Paper,
   Stack,
   Tooltip,
@@ -35,6 +38,7 @@ import { generatePath, Link as RouteLink } from 'react-router-dom';
 import { guiRoutes, TrashedPatientsActionTypes } from '@libs/constants';
 import { useAuth } from '../../auth/useAuth';
 import { TrashedPatientsAction } from './TrashedPatientsAction';
+import { PatientClustersChip } from './PatientClustersChip';
 
 type Patient = GetPatientsResponse[0];
 /***
@@ -44,6 +48,7 @@ type Patient = GetPatientsResponse[0];
 export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
   const { isAdmin } = useAuth();
   const { notifyInfo, notifyError, notifySuccess } = useNotifications();
+
   const [updatePatient, updatePatientState] = useUpdatePatientMutation();
   const handleRowUpdate = async (
     updatedRow: Patient,
@@ -122,7 +127,6 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
             size="small"
             component={RouteLink}
             target="_blank"
-            // to={guiRoutes.patient.replace(':slug', value || '')}
             to={generatePath(guiRoutes.patient, {
               slug: value,
             })}
@@ -155,7 +159,9 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       field: 'clusters',
       headerName: 'Clusters',
       flex: 1,
-      valueFormatter: (value: Patient['clusters']) => value?.length || 0,
+      renderCell: ({ value }: GridCellParams<Patient, Patient['clusters']>) => (
+        <PatientClustersChip value={value?.length} />
+      ),
     },
     {
       field: 'createdAt',
