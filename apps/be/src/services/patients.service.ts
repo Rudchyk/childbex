@@ -1,16 +1,9 @@
 import path from 'path';
 import { logger } from './logger.service';
-import {
-  access,
-  readdir,
-  readFile,
-  mkdir,
-  writeFile,
-  unlink,
-} from 'node:fs/promises';
+import { readdir, mkdir, writeFile, unlink, constants } from 'node:fs/promises';
 import { tmpdir } from 'os';
 import fs from 'fs';
-import { packArchive, unpackArchive, unzip } from '../utils';
+import { unpackArchive, unzip } from '../utils';
 import {
   brokenImageClusterName,
   clusterByOrientation,
@@ -20,14 +13,7 @@ import { PatientImagesCluster } from '../db/models/PatientImagesCluster.model';
 import { PatientImage } from '../db/models/PatientImage.model';
 import { Patient, PatientImageStatus } from '@libs/schemas';
 import { format } from 'date-fns';
-import { brotliCompressSync, constants, brotliCompress } from 'node:zlib';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-//@ts-expect-error
-import { zstdCompressSync, zstdCompress } from 'node:zlib';
-import {
-  brotliCompressFolder,
-  zstdCompressFolder,
-} from '../utils/lib/compress-folder';
+import { brotliCompressFolder } from '../utils/lib/compress-folder';
 
 export const IMAGE_RX = /\.(png|jpe?g|webp|gif)$/i;
 
@@ -36,6 +22,42 @@ const { ARCHIVES_ROOT = './archives', UPLOAD_ROOT = './uploads' } = process.env;
 export const uploadRoot = path.resolve(UPLOAD_ROOT);
 
 export const archivesRoot = path.resolve(ARCHIVES_ROOT);
+
+const moveFile = (destDir: string, folder: string, name: string) => {
+  const originPath = path.join(destDir, name);
+  const destPath = path.join(folder, name);
+  fs.rename(originPath, destPath, (err) => {
+    if (err) {
+      logger.error(err, 'rename');
+      if (err.code === 'EXDEV') {
+        // Cross-device: copy then delete
+        fs.copyFile(originPath, destPath, constants.COPYFILE_EXCL, (err) => {
+          if (err) {
+            logger.error(err, 'copyFile');
+          }
+          fs.unlink(originPath, (err) => {
+            if (err) {
+              logger.error(err, 'unlink');
+            }
+          });
+        });
+      } else if (err.code === 'EEXIST') {
+        fs.unlink(destPath, (err) => {
+          if (err) {
+            logger.error(err, 'unlink');
+          }
+          fs.rename(originPath, destPath, (err) => {
+            if (err) {
+              logger.error(err, 'rename');
+            }
+          });
+        });
+      } else {
+        logger.error(err, 'unlink');
+      }
+    }
+  });
+};
 
 export const usePatientAssets = async (patient: Patient, archive: File) => {
   logger.debug(
@@ -49,21 +71,13 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
     },
     'patient archive'
   );
+  const { id: patientId } = patient;
   const ext = path.extname(archive.name).toLowerCase();
-  try {
-    await access(archivesRoot);
-  } catch {
-    await mkdir(archivesRoot, { recursive: true });
-  }
+  await mkdir(archivesRoot, { recursive: true });
   const tmp = path.join(tmpdir(), 'childbex', 'uploads', archive.name);
   const tmpPath = path.dirname(tmp);
-  try {
-    await access(tmpPath);
-  } catch (error) {
-    await mkdir(tmpPath, { recursive: true });
-  }
+  await mkdir(tmpPath, { recursive: true });
   await writeFile(tmp, Buffer.from(await archive.arrayBuffer()));
-  const { id: patientId } = patient;
   const destDir = path.join(uploadRoot, patientId);
   await mkdir(destDir, { recursive: true });
   switch (ext) {
@@ -78,14 +92,9 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
   const archiveName = [format(new Date(), 'yyyyMMddHHmmss'), patientId].join(
     '-'
   );
-  await packArchive(destDir, path.join(archivesRoot, archiveName + '.tgz'));
   await brotliCompressFolder(
     destDir,
     path.join(archivesRoot, archiveName + '.br')
-  );
-  await zstdCompressFolder(
-    destDir,
-    path.join(archivesRoot, archiveName + '.zst')
   );
 
   const imagesList = await readdir(destDir);
@@ -104,29 +113,11 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
         });
 
         const folder = path.join(destDir, imageCluster.id);
-        try {
-          await access(folder);
-        } catch (error) {
-          await mkdir(folder, { recursive: true });
-        }
+        await mkdir(folder, { recursive: true });
         await PatientImage.bulkCreate(
           value.map(({ reason, file }: ClusterResult['broken'][0]) => {
             const parsedFile = path.parse(file);
-            const originPath = path.join(destDir, parsedFile.name);
-            fs.copyFile(
-              originPath,
-              path.join(folder, parsedFile.name),
-              (err) => {
-                if (err) {
-                  logger.error(err, 'copyFile');
-                }
-                fs.unlink(originPath, (err) => {
-                  if (err) {
-                    logger.error(err, 'unlink');
-                  }
-                });
-              }
-            );
+            moveFile(destDir, folder, parsedFile.name);
             return {
               source: `/uploads/${patientId}/${imageCluster.id}/${parsedFile.name}`,
               notes: reason,
@@ -135,7 +126,8 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
               group: -1,
               status: PatientImageStatus.BROKEN,
             };
-          })
+          }),
+          { ignoreDuplicates: true }
         );
       } else {
         for (const {
@@ -155,29 +147,11 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
             notes: '',
           });
           const folder = path.join(destDir, imageCluster.id);
-          try {
-            await access(folder);
-          } catch (error) {
-            await mkdir(folder, { recursive: true });
-          }
+          await mkdir(folder, { recursive: true });
           await PatientImage.bulkCreate(
             files.map(({ file }) => {
               const parsedFile = path.parse(file);
-              const originPath = path.join(destDir, parsedFile.name);
-              fs.copyFile(
-                originPath,
-                path.join(folder, parsedFile.name),
-                (err) => {
-                  if (err) {
-                    logger.error(err, 'copyFile');
-                  }
-                  fs.unlink(originPath, (err) => {
-                    if (err) {
-                      logger.error(err, 'unlink');
-                    }
-                  });
-                }
-              );
+              moveFile(destDir, folder, parsedFile.name);
               return {
                 source: `/uploads/${patientId}/${imageCluster.id}/${parsedFile.name}`,
                 clusterId: imageCluster.id,
@@ -187,7 +161,10 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
                   normal,
                 },
               };
-            })
+            }),
+            {
+              ignoreDuplicates: true,
+            }
           );
         }
       }

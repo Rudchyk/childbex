@@ -2,6 +2,8 @@ export const apiRoute = '/api/v1';
 
 export const apiDocRoute = '/docs';
 
+export const apiDocFullRoute = apiRoute + apiDocRoute;
+
 const security = {
   securityConfig: '/security/config',
   securityVerify: '/security/verify',

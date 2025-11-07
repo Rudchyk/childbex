@@ -8,7 +8,7 @@ import {
 } from '@mui/material';
 import { FC } from 'react';
 import { useBase } from '../../../store/slices';
-import { guiRoutes } from '@libs/constants';
+import { apiDocFullRoute, guiRoutes } from '@libs/constants';
 
 export const Footer: FC = () => {
   const year = new Date().getFullYear();
@@ -22,6 +22,7 @@ export const Footer: FC = () => {
     { label: 'Contacts', href: guiRoutes.contacts },
     { label: 'About us', href: guiRoutes.about },
     { label: 'Cookie Policy', href: guiRoutes.cookies },
+    { label: 'API', href: apiDocFullRoute },
   ];
   return (
     <Box

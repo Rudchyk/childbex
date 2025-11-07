@@ -13,7 +13,7 @@ import { serverRoutes, setupRoutes } from './routes/routes';
 import { setupAPIRoutes } from './api/v1/api';
 import { logger } from './services/logger.service';
 import { setupSecurity } from './services/security.service';
-import { apiDocRoute, apiRoute } from '@libs/constants';
+import { apiDocFullRoute, apiDocRoute, apiRoute } from '@libs/constants';
 import { dbSetup } from './db/sequelize';
 
 const setupServer = async () => {
@@ -41,7 +41,7 @@ const setupServer = async () => {
       'listening',
       onListening(server, {
         ...serverRoutes,
-        api: apiRoute + apiDocRoute,
+        api: apiDocFullRoute,
         // apiSpec: apiRoute + '/openapi.json',
       })
     );

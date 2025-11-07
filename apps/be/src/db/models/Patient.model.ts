@@ -13,6 +13,9 @@ import {
 import { timestampFields, deletedAtPropertyField } from '../helpers/timestamps';
 import { toSlugIfCyr } from '@libs/helpers';
 import { PatientImagesCluster } from './PatientImagesCluster.model';
+import { removePath } from '../../utils';
+import path from 'path';
+import { uploadRoot } from '../../services/patients.service';
 
 type PatientCreationAttributes = Omit<
   PatientBaseCreationAttributes,
@@ -125,6 +128,11 @@ Patient.init(
       beforeValidate: async (inst) => {
         if (inst.isNewRecord || inst.changed('slug')) {
           await inst.ensureUniqueSlug();
+        }
+      },
+      async afterDestroy(instance, options) {
+        if (options.force) {
+          await removePath(path.join(uploadRoot, instance.id));
         }
       },
     },
