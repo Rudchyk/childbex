@@ -147,6 +147,7 @@ PatientImage.init(
     source: {
       type: DataTypes.STRING,
       allowNull: false,
+      unique: true,
     },
     notes: {
       type: DataTypes.TEXT,

@@ -27,6 +27,7 @@ export const AddPatientImagesCluster: FC<AddPatientImagesClusterProps> = ({
     const formData = new FormData();
     formData.append('archive', archive);
     uploadPatientAssets({ id, body: formData });
+    toggleOpen();
   };
   const onError: SubmitErrorHandler<AddPatientImagesClusterFormData> = async (
     err
@@ -38,14 +39,12 @@ export const AddPatientImagesCluster: FC<AddPatientImagesClusterProps> = ({
     if (isError) {
       notifyError(error);
     }
-    toggleOpen();
   }, [isError]);
 
   useEffect(() => {
     if (isSuccess) {
       notifySuccess(`Asset was uploaded successfully!`);
     }
-    toggleOpen();
   }, [isSuccess]);
 
   return (

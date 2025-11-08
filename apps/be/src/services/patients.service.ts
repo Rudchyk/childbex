@@ -80,44 +80,41 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
   await writeFile(tmp, Buffer.from(await archive.arrayBuffer()));
   const destDir = path.join(uploadRoot, patientId);
   await mkdir(destDir, { recursive: true });
+  const archiveSourceDir = path.join(tmpPath, 'source');
+  await mkdir(archiveSourceDir, { recursive: true });
   switch (ext) {
     case '.zip':
-      await unzip(tmp, destDir);
+      await unzip(tmp, archiveSourceDir);
       break;
     default:
-      await unpackArchive(tmp, destDir); // .tgz / .tar
+      await unpackArchive(tmp, archiveSourceDir); // .tgz / .tar
       break;
   }
-  await unlink(tmp);
-  const archiveName = [format(new Date(), 'yyyyMMddHHmmss'), patientId].join(
-    '-'
-  );
-  await brotliCompressFolder(
-    destDir,
-    path.join(archivesRoot, archiveName + '.br')
-  );
 
-  const imagesList = await readdir(destDir);
-  const inputFiles = imagesList.map((f) => path.join(destDir, f));
+  const imagesList = await readdir(archiveSourceDir);
+  const inputFiles = imagesList.map((f) => path.join(archiveSourceDir, f));
   const result = clusterByOrientation(inputFiles);
 
   for (const [key, value] of Object.entries(result)) {
     const isBrocken = key === brokenImageClusterName;
     if (value && Array.isArray(value) && value) {
       if (isBrocken) {
-        const imageCluster = await PatientImagesCluster.create({
+        const valuesDefaults = {
           name: key,
           cluster: -1,
           patientId,
           notes: '',
+        };
+        const [imageCluster] = await PatientImagesCluster.findOrCreate({
+          where: valuesDefaults,
+          defaults: valuesDefaults,
         });
-
         const folder = path.join(destDir, imageCluster.id);
         await mkdir(folder, { recursive: true });
         await PatientImage.bulkCreate(
           value.map(({ reason, file }: ClusterResult['broken'][0]) => {
             const parsedFile = path.parse(file);
-            moveFile(destDir, folder, parsedFile.name);
+            moveFile(archiveSourceDir, folder, parsedFile.name);
             return {
               source: `/uploads/${patientId}/${imageCluster.id}/${parsedFile.name}`,
               notes: reason,
@@ -139,19 +136,23 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
           normal,
           studyDate,
         } of value as ClusterResult['clusters']) {
-          const imageCluster = await PatientImagesCluster.create({
+          const valuesDefaults = {
             name: group || String(id),
             cluster: id,
             patientId,
             studyDate: studyDate ? studyDate.toISOString() : null,
             notes: '',
+          };
+          const [imageCluster] = await PatientImagesCluster.findOrCreate({
+            where: valuesDefaults,
+            defaults: valuesDefaults,
           });
           const folder = path.join(destDir, imageCluster.id);
           await mkdir(folder, { recursive: true });
           await PatientImage.bulkCreate(
             files.map(({ file }) => {
               const parsedFile = path.parse(file);
-              moveFile(destDir, folder, parsedFile.name);
+              moveFile(archiveSourceDir, folder, parsedFile.name);
               return {
                 source: `/uploads/${patientId}/${imageCluster.id}/${parsedFile.name}`,
                 clusterId: imageCluster.id,
@@ -170,4 +171,14 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
       }
     }
   }
+
+  const archiveName = [
+    patientId,
+    format(new Date(), 'yyyy-MM-dd-HH-mm-ss'),
+  ].join('_');
+  await brotliCompressFolder(
+    archiveSourceDir,
+    path.join(archivesRoot, archiveName + '.br')
+  );
+  await unlink(tmp);
 };

@@ -1,34 +1,48 @@
 import { CircularProgress, Fab, Tooltip } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
-import { usePatients, useToggle } from '../../../hooks';
-import { usePatients as usePatients1 } from '../../../store/slices';
+import { useToggle } from '../../../hooks';
+import { usePatients } from '../../../store/slices';
 import { useNotifications } from '../../../modules/notifications';
 import { SubmitHandler, SubmitErrorHandler } from 'react-hook-form';
 import { AddPatientForm } from './AddPatientForm';
 import { DialogForm } from '../../../components';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AddPatientFormData } from './addPatientForm.schema';
+import {
+  useAddPatientMutation,
+  useUploadPatientAssetsMutation,
+} from '../../../store/apis';
 
 export const AddPatient = () => {
   const title = 'Add patient';
   const [patientName, setPatientName] = useState('');
-  const {
+  const [
     addPatient,
-    isLoading,
-    isAddPatientError,
-    addPatientError,
-    isAddPatientSuccess,
-    addedPatient,
+    {
+      data: addedPatient,
+      isError: isAddPatientError,
+      isLoading: isAddPatientLoading,
+      error: addPatientError,
+      isSuccess: isAddPatientSuccess,
+    },
+  ] = useAddPatientMutation();
+  const [
     uploadPatientAssets,
-    isUploadPatientAssetsError,
-    isUploadPatientAssetsSuccess,
-    uploadPatientAssetsError,
-    isUploadPatientAssetsLoading,
-  } = usePatients();
+    {
+      isLoading: isUploadPatientAssetsLoading,
+      error: uploadPatientAssetsError,
+      isSuccess: isUploadPatientAssetsSuccess,
+      isError: isUploadPatientAssetsError,
+    },
+  ] = useUploadPatientAssetsMutation();
+  const isLoading = useMemo(
+    () => isAddPatientLoading || isUploadPatientAssetsLoading,
+    [isAddPatientLoading, isUploadPatientAssetsLoading]
+  );
   const [archive, setArchive] = useState<File | undefined>();
   const { notifyError, notifySuccess } = useNotifications();
   const [open, toggleOpen] = useToggle(false);
-  const { setIsLoading } = usePatients1();
+  const { setIsLoading } = usePatients();
   const onSubmit: SubmitHandler<AddPatientFormData> = async ({
     archive,
     ...other
