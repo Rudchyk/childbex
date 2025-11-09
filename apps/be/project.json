@@ -14,7 +14,7 @@
         "outputPath": "dist/apps/be",
         "target": "node20",
         "format": ["cjs"],
-        "bundle": true,
+        "bundle": false,
         "clean": true,
         "main": "apps/be/src/main.ts",
         "tsConfig": "apps/be/tsconfig.app.json",
@@ -35,6 +35,21 @@
             "input": "apps/be/src",
             "glob": "ecosystem.config.js",
             "output": "/"
+          },
+          {
+            "input": "apps/be/src/db/config",
+            "glob": "config.js",
+            "output": "db/config"
+          },
+          {
+            "input": "apps/be/src/db/migrations",
+            "glob": "**/*",
+            "output": "db/migrations"
+          },
+          {
+            "input": "apps/be/src/db/seeders",
+            "glob": "**/*",
+            "output": "db/seeders"
           }
         ],
         "deleteOutputPath": true,

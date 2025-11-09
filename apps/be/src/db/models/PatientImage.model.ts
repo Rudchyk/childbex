@@ -13,7 +13,7 @@ import {
   PatientImageStatus,
   PatientImage as IPatientImage,
 } from '@libs/schemas';
-import { Patient } from './Patient.model';
+import { Patient } from './Patient.model/Patient.model';
 import { PatientImagesCluster } from './PatientImagesCluster.model';
 import { PatientImageReviewVote } from './PatientImageReviewVote.model';
 import { timestampFields } from '../helpers/timestamps';

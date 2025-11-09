@@ -1,7 +1,7 @@
 import { Response } from 'fets';
 import { router } from '../apiRouter';
 import { apiRoutes, TrashedPatientsActionTypes } from '@libs/constants';
-import { Patient } from '../../../db/models/Patient.model';
+import { Patient } from '../../../db/models/Patient.model/Patient.model';
 import {
   Type,
   defaultResponses,

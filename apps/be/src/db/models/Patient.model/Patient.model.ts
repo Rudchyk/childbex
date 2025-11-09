@@ -1,27 +1,23 @@
-import {
-  DataTypes,
-  Model,
-  Op,
-  Association,
-  HasManyGetAssociationsMixin,
-} from 'sequelize';
-import { sequelize } from '../sequelize';
+import { Model, Op, Association, HasManyGetAssociationsMixin } from 'sequelize';
+import { sequelize } from '../../sequelize';
+import { toSlugIfCyr } from '@libs/helpers';
+import { PatientImagesCluster } from '../PatientImagesCluster.model';
+import { removePath } from '../../../utils';
+import path from 'path';
+import { uploadRoot } from '../../../services/patients.service';
+import { getPatientTable } from './Patient.table';
 import {
   PatientCreationAttributes as PatientBaseCreationAttributes,
   Patient as IPatient,
 } from '@libs/schemas';
-import { timestampFields, deletedAtPropertyField } from '../helpers/timestamps';
-import { toSlugIfCyr } from '@libs/helpers';
-import { PatientImagesCluster } from './PatientImagesCluster.model';
-import { removePath } from '../../utils';
-import path from 'path';
-import { uploadRoot } from '../../services/patients.service';
 
-type PatientCreationAttributes = Omit<
+export type PatientCreationAttributes = Omit<
   PatientBaseCreationAttributes,
   'notes' | 'slug'
 > &
   Partial<Pick<PatientBaseCreationAttributes, 'notes' | 'slug'>>;
+
+const { columns, indexes, options } = getPatientTable();
 
 export class Patient
   extends Model<IPatient, PatientCreationAttributes>
@@ -78,63 +74,20 @@ export class Patient
   }
 }
 
-Patient.init(
-  {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
-      primaryKey: true,
-      allowNull: false,
+Patient.init(columns, {
+  sequelize,
+  ...options,
+  indexes,
+  hooks: {
+    beforeValidate: async (inst) => {
+      if (inst.isNewRecord || inst.changed('slug')) {
+        await inst.ensureUniqueSlug();
+      }
     },
-    name: {
-      type: DataTypes.STRING,
-      allowNull: false,
+    async afterDestroy(instance, options) {
+      if (options.force) {
+        await removePath(path.join(uploadRoot, instance.id));
+      }
     },
-    slug: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      validate: { is: /^[a-z0-9]+(?:-[a-z0-9]+)*$/ },
-    },
-    creatorId: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    creatorName: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    notes: {
-      type: DataTypes.TEXT,
-      allowNull: false,
-      defaultValue: '',
-    },
-    ...timestampFields,
-    ...deletedAtPropertyField,
   },
-  {
-    sequelize,
-    tableName: 'patients',
-    paranoid: true,
-    timestamps: true,
-    indexes: [
-      {
-        name: 'uniq_patient_slug_active',
-        unique: true,
-        fields: ['slug'],
-        where: { deletedAt: null },
-      },
-    ],
-    hooks: {
-      beforeValidate: async (inst) => {
-        if (inst.isNewRecord || inst.changed('slug')) {
-          await inst.ensureUniqueSlug();
-        }
-      },
-      async afterDestroy(instance, options) {
-        if (options.force) {
-          await removePath(path.join(uploadRoot, instance.id));
-        }
-      },
-    },
-  }
-);
+});

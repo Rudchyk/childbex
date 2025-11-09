@@ -6,7 +6,7 @@ import {
   Model,
 } from 'sequelize';
 import { sequelize } from '../sequelize';
-import { Patient } from './Patient.model';
+import { Patient } from './Patient.model/Patient.model';
 import { PatientImage } from './PatientImage.model';
 import { PatientImagesCluster as IPatientImagesCluster } from '@libs/schemas';
 import { timestampFields } from '../helpers/timestamps';

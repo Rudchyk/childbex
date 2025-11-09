@@ -87,6 +87,7 @@
     "prettier": "^2.6.2",
     "react-hook-form": "^7.66.0",
     "sass": "^1.55.0",
+    "sequelize-cli": "^6.6.3",
     "ts-jest": "^29.4.0",
     "ts-node": "10.9.1",
     "tslib": "^2.3.0",
