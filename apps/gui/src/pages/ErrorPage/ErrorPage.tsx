@@ -17,7 +17,9 @@ const Component = () => {
         sx={{ flexGrow: 1 }}
         justifyContent="center"
         text={error.status}
-      />
+      >
+        <pre>{JSON.stringify(error, null, 2)}</pre>
+      </ErrorTmpl>
     </DefaultLayout>
   );
 };

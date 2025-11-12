@@ -1,7 +1,14 @@
 import { FC, useMemo, useState } from 'react';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
-import { Box, Divider, Paper, Typography } from '@mui/material';
+import {
+  Box,
+  Divider,
+  Paper,
+  Typography,
+  useMediaQuery,
+  useTheme,
+} from '@mui/material';
 import { PatientImagesTags } from './PatientImagesTags';
 import { PatientImageReview } from './PatientImageReview';
 import { GetPatientClusterResponse } from '@libs/schemas';
@@ -16,6 +23,8 @@ export const PatientImages: FC<PatientImagesProps> = ({ data }) => {
     () => Object.fromEntries(data.images.map((item) => [item.source, item])),
     [data]
   );
+  const theme = useTheme();
+  const matches = useMediaQuery(theme.breakpoints.down('sm'));
   const sources = data.images.map(({ source }) => source);
   const [currentSource, setCurrentSource] = useState<string | undefined>();
   const onCurrentItemChange = (newCurrentSource: string) => {
@@ -23,42 +32,44 @@ export const PatientImages: FC<PatientImagesProps> = ({ data }) => {
   };
   return (
     <>
-      <Box
-        component={Paper}
-        elevation={3}
-        sx={{
-          position: 'fixed',
-          top: '10%',
-          bottom: '10%',
-          left: 5,
-          width: 300,
-          zIndex: 50,
-        }}
-      >
-        <Box height="100%" overflow="auto">
-          <Typography variant="subtitle1" px={1} pt={1}>
-            Tags:
-          </Typography>
-          <PatientImagesTags
-            slotsProps={{
-              StackProps: {
-                direction: 'column',
-                alignItems: 'start',
-                spacing: 1,
-                px: 1,
-                pb: 1,
-              },
-            }}
-            imagesCluster={data}
-          />
-          <Divider />
-          {data.inReview &&
-            !!currentSource &&
-            !!itemsMapping[currentSource] && (
-              <PatientImageReview item={itemsMapping[currentSource]} />
-            )}
+      {!matches && (
+        <Box
+          component={Paper}
+          elevation={3}
+          sx={{
+            position: 'fixed',
+            top: '10%',
+            bottom: '10%',
+            left: 5,
+            width: 300,
+            zIndex: 50,
+          }}
+        >
+          <Box height="100%" overflow="auto">
+            <Typography variant="subtitle1" px={1} pt={1}>
+              Tags:
+            </Typography>
+            <PatientImagesTags
+              slotsProps={{
+                StackProps: {
+                  direction: 'column',
+                  alignItems: 'start',
+                  spacing: 1,
+                  px: 1,
+                  pb: 1,
+                },
+              }}
+              imagesCluster={data}
+            />
+            <Divider />
+            {data.inReview &&
+              !!currentSource &&
+              !!itemsMapping[currentSource] && (
+                <PatientImageReview item={itemsMapping[currentSource]} />
+              )}
+          </Box>
         </Box>
-      </Box>
+      )}
       <DicomViewer
         list={sources}
         onCurrentItemChange={onCurrentItemChange}

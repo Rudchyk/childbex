@@ -8,6 +8,10 @@ import {
   ListItemButton,
   ListItemText,
   Switch,
+  useMediaQuery,
+  useTheme,
+  Stack,
+  Divider,
 } from '@mui/material';
 import ImageIcon from '@mui/icons-material/Image';
 import { format } from 'date-fns';
@@ -30,6 +34,8 @@ export const PatientImagesCluster: FC<PatientImagesClusterProps> = ({
   slug,
 }) => {
   const { notifyError, notifySuccess } = useNotifications();
+  const theme = useTheme();
+  const matches = useMediaQuery(theme.breakpoints.down('sm'));
   const isBrocken = item.cluster === -1;
   const [updatePatientAsset, { isError, error, isSuccess }] =
     useUpdatePatientImagesClusterMutation();
@@ -52,7 +58,7 @@ export const PatientImagesCluster: FC<PatientImagesClusterProps> = ({
   }, [isSuccess]);
 
   return (
-    <ListItem disablePadding>
+    <ListItem disablePadding sx={{ display: matches ? 'block' : 'flex' }}>
       <ListItemButton
         component={RouteLink}
         to={generatePath(guiRoutes.patientImagesCluster, {
@@ -60,9 +66,11 @@ export const PatientImagesCluster: FC<PatientImagesClusterProps> = ({
           cluster: String(item.cluster),
         })}
       >
-        <ListItemAvatar>
-          <Avatar>{isBrocken ? <BrokenImageIcon /> : <ImageIcon />}</Avatar>
-        </ListItemAvatar>
+        {!matches && (
+          <ListItemAvatar>
+            <Avatar>{isBrocken ? <BrokenImageIcon /> : <ImageIcon />}</Avatar>
+          </ListItemAvatar>
+        )}
         <ListItemText
           primary={
             isBrocken
@@ -84,19 +92,30 @@ export const PatientImagesCluster: FC<PatientImagesClusterProps> = ({
           />
         )}
       </ListItemButton>
-      <FormControlLabel
-        sx={{ pl: 4 }}
-        control={
-          <Switch
-            color="primary"
-            disabled={isBrocken}
-            onChange={handleToggle(item.id, !item.inReview)}
-            checked={item.inReview}
-          />
-        }
-        label="In review"
-      />
-      <DeletePatientImagesCluster id={item.id} />
+      <Stack
+        direction="row"
+        justifyContent={matches ? 'space-between' : 'start'}
+        sx={{
+          width: { sm: matches ? '100%' : 'auto' },
+          px: matches ? 2 : 0,
+          pb: matches ? 2 : 0,
+        }}
+      >
+        <FormControlLabel
+          sx={{ pl: matches ? 0 : 4 }}
+          control={
+            <Switch
+              color="primary"
+              disabled={isBrocken}
+              onChange={handleToggle(item.id, !item.inReview)}
+              checked={item.inReview}
+            />
+          }
+          label="In review"
+        />
+        <DeletePatientImagesCluster id={item.id} />
+      </Stack>
+      {matches && <Divider />}
     </ListItem>
   );
 };

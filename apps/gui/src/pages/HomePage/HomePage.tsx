@@ -11,9 +11,10 @@ import {
   Grid,
   Stack,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import { DefaultLayout } from '../../layouts';
-import { useBase } from '../../store/slices';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
 import SpeedIcon from '@mui/icons-material/Speed';
@@ -23,7 +24,8 @@ import AnalyticsIcon from '@mui/icons-material/Analytics';
 import VerifiedIcon from '@mui/icons-material/Verified';
 
 export const Component = () => {
-  const { msg } = useBase();
+  const theme = useTheme();
+  const matches = useMediaQuery(theme.breakpoints.down('sm'));
   return (
     <DefaultLayout isContainer={false}>
       {/* Hero */}
@@ -47,7 +49,7 @@ export const Component = () => {
                 >
                   AI • MEDICAL • IMAGING
                 </Typography>
-                <Typography variant="h2" lineHeight={1.1}>
+                <Typography variant={matches ? 'h3' : 'h2'} lineHeight={1.1}>
                   Lorem ipsum platform for
                   <Box component="span" sx={{ color: 'primary.main' }}>
                     {' '}

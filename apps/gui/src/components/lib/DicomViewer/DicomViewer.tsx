@@ -6,7 +6,13 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Box, LinearProgress, Stack } from '@mui/material';
+import {
+  Box,
+  LinearProgress,
+  Stack,
+  useMediaQuery,
+  useTheme,
+} from '@mui/material';
 import { App, AppOptions, DataElement, Index, ViewConfig } from 'dwv';
 import { DicomViewerFooter } from './DicomViewerFooter';
 import { DicomViewerTools } from './DicomViewerTools';
@@ -51,6 +57,8 @@ export const DicomViewer: FC<DicomViewerProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<App>(null);
+  const theme = useTheme();
+  const matches = useMediaQuery(theme.breakpoints.down('sm'));
   const [loadedItemsMapping, setLoadedItemsMapping] = useState<
     Record<string, string>
   >({});
@@ -320,12 +328,14 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       >
         <DicomViewerDropbox isShow={isShowDropbox} onLoadFiles={onLoadFiles} />
       </Box>
-      <DicomViewerSidebar
-        app={appRef.current}
-        currentImageId={currentImageId}
-        items={items}
-        icon={sidebarItemIcon}
-      />
+      {!matches && (
+        <DicomViewerSidebar
+          app={appRef.current}
+          currentImageId={currentImageId}
+          items={items}
+          icon={sidebarItemIcon}
+        />
+      )}
       <DicomViewerFooter />
     </Stack>
   );

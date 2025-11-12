@@ -1,4 +1,7 @@
 import {
+  Card,
+  CardActions,
+  CardContent,
   Chip,
   CircularProgress,
   Divider,
@@ -8,6 +11,8 @@ import {
   Tooltip,
   Typography,
   lighten,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import {
   DataGrid,
@@ -17,7 +22,6 @@ import {
   Toolbar,
 } from '@mui/x-data-grid';
 import { useEffect } from 'react';
-// import { AddPatient } from './AddPatient/AddPatient';
 import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
@@ -39,6 +43,7 @@ import { guiRoutes, TrashedPatientsActionTypes } from '@libs/constants';
 import { useAuth } from '../../auth/useAuth';
 import { TrashedPatientsAction } from './TrashedPatientsAction';
 import { PatientClustersChip } from './PatientClustersChip';
+import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 
 type Patient = GetPatientsResponse[0];
 /***
@@ -48,7 +53,8 @@ type Patient = GetPatientsResponse[0];
 export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
   const { isAdmin } = useAuth();
   const { notifyInfo, notifyError, notifySuccess } = useNotifications();
-
+  const theme = useTheme();
+  const matches = useMediaQuery(theme.breakpoints.down('sm'));
   const [updatePatient, updatePatientState] = useUpdatePatientMutation();
   const handleRowUpdate = async (
     updatedRow: Patient,
@@ -204,6 +210,46 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       );
     }
   }, [updatePatientState.isSuccess]);
+
+  if (matches) {
+    return (
+      <Stack spacing={1}>
+        {data.map(({ slug, name, creatorName, clusters, id }) => (
+          <Card variant="outlined">
+            <CardContent>
+              <Typography
+                gutterBottom
+                sx={{ color: 'text.secondary', fontSize: 14 }}
+              >
+                {slug}
+              </Typography>
+              <Typography
+                variant="h5"
+                component={RouteLink}
+                to={generatePath(guiRoutes.patient, {
+                  slug,
+                })}
+                sx={{ textDecoration: 'none' }}
+              >
+                {name}
+              </Typography>
+              <Typography sx={{ mt: 2 }} variant="body2">
+                Creator: {creatorName}
+              </Typography>
+              <Typography variant="body2">
+                Clusters: {clusters.length}
+              </Typography>
+            </CardContent>
+            <CardActions>
+              <IconButton>
+                <DeleteForeverIcon />
+              </IconButton>
+            </CardActions>
+          </Card>
+        ))}
+      </Stack>
+    );
+  }
 
   return (
     <Stack spacing={1}>

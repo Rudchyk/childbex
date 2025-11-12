@@ -85,19 +85,25 @@ export const NavMenu = () => {
           }}
         >
           <List dense sx={{ p: 0, borderTop: '1px solid gray' }}>
-            {menuItems.map(({ to, text }) => (
-              <ListItem key={text + to} sx={{ borderBottom: '1px solid gray' }}>
-                <ListItemButton
-                  sx={{
-                    justifyContent: 'center',
-                  }}
-                  component={RouteLink}
-                  to={to}
-                >
-                  {text}
-                </ListItemButton>
-              </ListItem>
-            ))}
+            {menuItems.map(
+              ({ to, text, isHidden }) =>
+                !isHidden && (
+                  <ListItem
+                    key={text + to}
+                    sx={{ borderBottom: '1px solid gray' }}
+                  >
+                    <ListItemButton
+                      sx={{
+                        justifyContent: 'center',
+                      }}
+                      component={RouteLink}
+                      to={to}
+                    >
+                      {text}
+                    </ListItemButton>
+                  </ListItem>
+                )
+            )}
           </List>
         </Box>
       )}

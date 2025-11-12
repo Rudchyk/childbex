@@ -4,9 +4,11 @@ import { PageTmpl } from '../../templates';
 import { PatientImagesClusters } from './PatientImagesCluster';
 import { useParams } from 'react-router-dom';
 import { GetPatientClusterParams } from '@libs/schemas';
-import { Typography } from '@mui/material';
+import { Typography, useMediaQuery, useTheme } from '@mui/material';
 
 export const Component = () => {
+  const theme = useTheme();
+  const matches = useMediaQuery(theme.breakpoints.down('sm'));
   const { slug = '', cluster = '' } = useParams<GetPatientClusterParams>();
   const { data, isLoading, isError, error } = useGetPatientImagesClusterQuery(
     { slug, cluster },
@@ -16,7 +18,11 @@ export const Component = () => {
   return (
     <DefaultLayout>
       <PageTmpl
-        customTitle={<Typography variant="h1">{data?.name}</Typography>}
+        customTitle={
+          <Typography component="h1" variant={matches ? 'h2' : 'h1'}>
+            {data?.name}
+          </Typography>
+        }
       >
         <PatientImagesClusters
           data={data}
