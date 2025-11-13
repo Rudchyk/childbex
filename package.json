@@ -64,6 +64,7 @@
     "@types/slug": "^5.0.9",
     "@types/swagger-ui-express": "^4.1.8",
     "@types/tar-fs": "^2.0.4",
+    "@vitejs/plugin-legacy": "^7.2.1",
     "@vitejs/plugin-react": "^4.2.0",
     "@vitest/ui": "^3.0.0",
     "ajv": "^8.0.0",

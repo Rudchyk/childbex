@@ -3,6 +3,7 @@ import { defineConfig, PluginOption, loadEnv, normalizePath } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
+import legacy from '@vitejs/plugin-legacy';
 
 type Robots = 'allow' | 'disallow' | undefined;
 
@@ -65,6 +66,11 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       react(),
+      legacy({
+        targets: ['defaults', 'not IE 11'],
+        polyfills: ['es/object/has-own'],
+        modernPolyfills: ['es/object/has-own'],
+      }),
       robotsTxtPlugin(mode === 'production', env.VITE_ROBOTS as Robots),
       viteStaticCopy({
         targets: [
