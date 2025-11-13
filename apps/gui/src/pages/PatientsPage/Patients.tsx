@@ -197,6 +197,66 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       },
     },
   ];
+  const mobileColumns: GridColDef<Patient>[] = [
+    {
+      field: 'name',
+      headerName: 'Name',
+      flex: 1,
+      renderCell: ({
+        value,
+        row,
+      }: GridCellParams<Patient, Patient['name']>) => (
+        <Stack
+          direction="row"
+          justifyContent="flex-start"
+          spacing={1}
+          alignItems="center"
+          height="100%"
+        >
+          <Tooltip title={value}>
+            <Typography
+              component={RouteLink}
+              to={generatePath(guiRoutes.patient, {
+                slug: row.slug,
+              })}
+              variant="body2"
+              noWrap
+              sx={{ maxWidth: 200, textDecoration: 'none' }}
+            >
+              {value}
+            </Typography>
+          </Tooltip>
+        </Stack>
+      ),
+    },
+    {
+      field: 'clusters',
+      headerName: 'Clusters',
+      flex: 1,
+      align: 'center',
+      valueFormatter: (value: Patient['clusters']) => value.length,
+    },
+    {
+      field: 'actions',
+      type: 'actions',
+      headerName: 'Actions',
+      width: 100,
+      getActions: ({ id, row }) => {
+        const actions = [];
+        if (!row.deletedAt) {
+          actions.push(<DeletePatient key={id} id={id as string} />);
+        }
+        if (isAdmin && row.deletedAt) {
+          Object.values(TrashedPatientsActionTypes).forEach((type) => {
+            actions.push(
+              <TrashedPatientsAction type={type} key={type} id={id as string} />
+            );
+          });
+        }
+        return actions;
+      },
+    },
+  ];
   useEffect(() => {
     if (updatePatientState.isError) {
       notifyError(updatePatientState.error);
@@ -211,45 +271,45 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
     }
   }, [updatePatientState.isSuccess]);
 
-  if (matches) {
-    return (
-      <Stack spacing={1}>
-        {data.map(({ slug, name, creatorName, clusters, id }) => (
-          <Card variant="outlined">
-            <CardContent>
-              <Typography
-                gutterBottom
-                sx={{ color: 'text.secondary', fontSize: 14 }}
-              >
-                {slug}
-              </Typography>
-              <Typography
-                variant="h5"
-                component={RouteLink}
-                to={generatePath(guiRoutes.patient, {
-                  slug,
-                })}
-                sx={{ textDecoration: 'none' }}
-              >
-                {name}
-              </Typography>
-              <Typography sx={{ mt: 2 }} variant="body2">
-                Creator: {creatorName}
-              </Typography>
-              <Typography variant="body2">
-                Clusters: {clusters.length}
-              </Typography>
-            </CardContent>
-            <CardActions>
-              <IconButton>
-                <DeleteForeverIcon />
-              </IconButton>
-            </CardActions>
-          </Card>
-        ))}
-      </Stack>
-    );
-  }
+  // if (matches) {
+  //   return (
+  //     <Stack spacing={1}>
+  //       {data.map(({ slug, name, creatorName, clusters, id }) => (
+  //         <Card variant="outlined">
+  //           <CardContent>
+  //             <Typography
+  //               gutterBottom
+  //               sx={{ color: 'text.secondary', fontSize: 14 }}
+  //             >
+  //               {slug}
+  //             </Typography>
+  //             <Typography
+  //               variant="h5"
+  //               component={RouteLink}
+  //               to={generatePath(guiRoutes.patient, {
+  //                 slug,
+  //               })}
+  //               sx={{ textDecoration: 'none' }}
+  //             >
+  //               {name}
+  //             </Typography>
+  //             <Typography sx={{ mt: 2 }} variant="body2">
+  //               Creator: {creatorName}
+  //             </Typography>
+  //             <Typography variant="body2">
+  //               Clusters: {clusters.length}
+  //             </Typography>
+  //           </CardContent>
+  //           <CardActions>
+  //             <IconButton>
+  //               <DeleteForeverIcon />
+  //             </IconButton>
+  //           </CardActions>
+  //         </Card>
+  //       ))}
+  //     </Stack>
+  //   );
+  // }
 
   return (
     <Stack spacing={1}>
@@ -291,7 +351,7 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
             ),
           }}
           showToolbar
-          columns={columns}
+          columns={matches ? mobileColumns : columns}
         />
       </Stack>
     </Stack>

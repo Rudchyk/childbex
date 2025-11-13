@@ -33,6 +33,7 @@ export const guiRoutes = {
   about: '/about',
   playground: '/playground',
   brief: '/brief',
+  error: '/error',
   privacy: '/privacy',
   terms: '/terms',
   disclaimer: '/disclaimer',

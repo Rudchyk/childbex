@@ -1,4 +1,11 @@
-import { AppBar, Toolbar, Stack, Link } from '@mui/material';
+import {
+  AppBar,
+  Toolbar,
+  Stack,
+  Link,
+  useTheme,
+  useMediaQuery,
+} from '@mui/material';
 import { ThemeSwitcher } from '../../../theme';
 import { useBase } from '../../../store/slices';
 import { Link as RouteLink } from 'react-router-dom';
@@ -8,6 +15,8 @@ import { NavMenu } from './NavMenu';
 
 export const Header = () => {
   const { title } = useBase();
+  const theme = useTheme();
+  const matches = useMediaQuery(theme.breakpoints.down('sm'));
   return (
     <AppBar position="static">
       <Toolbar>
@@ -20,7 +29,7 @@ export const Header = () => {
             <img alt={title} src="/logo-white.svg" width={139} height={30} />
           </Link>
         </Stack>
-        <Stack direction="row" spacing={2} alignItems="center">
+        <Stack direction="row" spacing={matches ? 0.5 : 2} alignItems="center">
           <NavMenu />
           <ThemeSwitcher />
           <HeaderAuth />

@@ -19,7 +19,7 @@ export const Component = () => {
     <DefaultLayout>
       <PageTmpl
         customTitle={
-          <Typography component="h1" variant={matches ? 'h2' : 'h1'}>
+          <Typography component="h1" variant={matches ? 'h3' : 'h1'}>
             {data?.name}
           </Typography>
         }

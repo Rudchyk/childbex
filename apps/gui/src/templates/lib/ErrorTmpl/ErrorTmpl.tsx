@@ -51,7 +51,7 @@ export const ErrorTmpl: FC<ErrorTmplProps> = ({
           {text}
         </Typography>
       )}
-      {children}
+      {children && <Box pb={2}>{children}</Box>}
       {button && <Box sx={{ textAlign: 'center' }}>{button}</Box>}
     </Stack>
   );

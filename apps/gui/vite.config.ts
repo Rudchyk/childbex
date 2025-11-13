@@ -9,7 +9,6 @@ type Robots = 'allow' | 'disallow' | undefined;
 function robotsTxtPlugin(isProd: boolean, robots?: Robots): PluginOption {
   console.log('ROBOTS', robots);
   console.log('isProd', isProd);
-
   const buildSource = (allow: boolean) =>
     // production: allow all  | development: disallow all
     `User-agent: *\nDisallow:${allow ? '' : ' /'}\n`;
@@ -45,6 +44,7 @@ function robotsTxtPlugin(isProd: boolean, robots?: Robots): PluginOption {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  console.log('🚀 ~ baseUrl:', env.VITE_PUBLIC_API);
   return {
     root: __dirname,
     cacheDir: '../../node_modules/.vite/apps/gui',
@@ -60,7 +60,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     preview: {
-      port: 4202,
+      port: 4201,
       host: 'localhost',
     },
     plugins: [

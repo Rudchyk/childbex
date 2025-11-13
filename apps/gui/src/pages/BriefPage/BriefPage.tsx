@@ -1,4 +1,12 @@
-import { Stack, Typography, Button, ButtonProps, Box } from '@mui/material';
+import {
+  Stack,
+  Typography,
+  Button,
+  ButtonProps,
+  Box,
+  useTheme,
+  useMediaQuery,
+} from '@mui/material';
 import { DefaultLayout } from '../../layouts';
 import { PageTmpl } from '../../templates';
 import { useNotifications } from '../../modules/notifications';
@@ -6,6 +14,8 @@ import { useNotifications } from '../../modules/notifications';
 export const Component = () => {
   const { notifyError, notifyInfo, notifySuccess, notifyWarning } =
     useNotifications();
+  const theme = useTheme();
+  const matches = useMediaQuery(theme.breakpoints.down('sm'));
   const notifications = [
     {
       color: 'success',
@@ -46,7 +56,11 @@ export const Component = () => {
             <Typography variant="h6">Buttons</Typography>
             <Stack spacing={1}>
               {['outlined', 'contained', 'text'].map((variant) => (
-                <Stack key={variant} direction="row" spacing={1}>
+                <Stack
+                  key={variant}
+                  direction={matches ? 'column' : 'row'}
+                  spacing={1}
+                >
                   {[
                     'primary',
                     'secondary',
@@ -76,7 +90,7 @@ export const Component = () => {
           </Box>
           <Box component="section">
             <Typography variant="h6">Notifications</Typography>
-            <Stack direction="row" spacing={1}>
+            <Stack direction={matches ? 'column' : 'row'} spacing={1}>
               {notifications.map(({ text, color, action }) => (
                 <Button
                   key={color}

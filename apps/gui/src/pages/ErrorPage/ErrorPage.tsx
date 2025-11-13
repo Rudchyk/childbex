@@ -1,3 +1,4 @@
+import { Box } from '@mui/material';
 import { DefaultLayout } from '../../layouts';
 import { ErrorTmpl } from '../../templates';
 import { useRouteError } from 'react-router-dom';
@@ -5,6 +6,7 @@ import { useRouteError } from 'react-router-dom';
 interface CustomError {
   status?: number;
   message?: string;
+  stack?: string;
 }
 
 const Component = () => {
@@ -13,12 +15,21 @@ const Component = () => {
   return (
     <DefaultLayout>
       <ErrorTmpl
-        title="Nothing here"
+        title={error.message || 'Nothing here'}
         sx={{ flexGrow: 1 }}
         justifyContent="center"
         text={error.status}
       >
-        <pre>{JSON.stringify(error, null, 2)}</pre>
+        {error.stack ? (
+          <Box
+            component="pre"
+            sx={{ wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}
+          >
+            {JSON.stringify(error.stack, null, 2)}
+          </Box>
+        ) : (
+          ''
+        )}
       </ErrorTmpl>
     </DefaultLayout>
   );

@@ -69,6 +69,12 @@ export default createBrowserRouter([
         ...defaultOptions,
       },
       {
+        path: guiRoutes.error,
+        lazy: () =>
+          import('../pages/ClientExpectedErrorPage/ClientExpectedErrorPage'),
+        ...defaultOptions,
+      },
+      {
         element: (
           <ProtectedRoute>
             <Outlet />
