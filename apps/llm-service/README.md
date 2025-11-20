@@ -36,6 +36,8 @@ FastAPI service exposing health, Prometheus metrics, and a sampler endpoint.
 
 ## TESTING
 
+- curl 'http://localhost:8000/health'
+
 - `http://localhost:8000/random-items`
 
 ```json
