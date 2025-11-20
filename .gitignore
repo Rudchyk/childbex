@@ -48,3 +48,4 @@ vitest.config.*.timestamp*
 test-output
 .env.local
 .env
+__pycache__

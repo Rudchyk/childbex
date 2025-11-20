@@ -29,7 +29,9 @@
     "pjson": "node scripts/create-package-json.js",
     "reset": "nx reset",
     "clean": "rm -rf ./dist",
-    "reload": "npm run reset && npm run clean"
+    "reload": "npm run reset && npm run clean",
+    "llm:source": "source apps/llm-service/.venv/Scripts/activate",
+    "llm": "py apps/llm-service/main.py"
   },
   "private": true,
   "devDependencies": {
