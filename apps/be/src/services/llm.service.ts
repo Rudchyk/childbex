@@ -1,6 +1,6 @@
 import { AxiosInstance } from 'axios';
 import { logger } from './logger.service';
-import { getLimitedAxios } from './axios.service';
+import { axiosRetryDefaultOptions, getLimitedAxios } from './axios.service';
 import { apiRoutes } from '@libs/constants';
 import {
   LLMServiceCheckItemsRequestBody,
@@ -22,6 +22,10 @@ class LLMService {
           baseURL: LLM_SERVICE_URL,
           timeout: 1000 * 60 * 5,
         },
+        retryConfig: {
+          ...axiosRetryDefaultOptions,
+          retryCondition: (error) => (error.status === 500 ? false : true),
+        },
       });
     } else {
       logger.warn('LLM service was not initialized');
@@ -32,9 +36,7 @@ class LLMService {
     if (!this.client) {
       throw new Error('LLM Service client is not initialized');
     }
-    const { data } = await this.client.get<LLMServiceHealthResponse>(
-      apiRoutes.llmServiceHealth
-    );
+    const { data } = await this.client.get<LLMServiceHealthResponse>('/health');
     return data;
   }
 
@@ -45,7 +47,7 @@ class LLMService {
       throw new Error('LLM Service client is not initialized');
     }
     const { data } = await this.client.post<LLMServiceInferenceResponse>(
-      apiRoutes.llmServiceInference,
+      '/inference',
       props
     );
     return data;
@@ -59,8 +61,8 @@ class LLMService {
         throw new Error('LLM Service client is not initialized');
       }
       const { data } = await this.client.post<LLMServiceCheckItemsResponse>(
-        apiRoutes.llmServiceCheckItems,
-        items
+        '/check-items',
+        { items }
       );
       return data;
     } catch (error) {

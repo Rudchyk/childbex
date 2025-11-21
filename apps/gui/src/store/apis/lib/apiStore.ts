@@ -20,6 +20,11 @@ import {
   GetPatientClusterParams,
   PatientImageReviewVoteRequestBody,
   PatientImageReviewVoteParams,
+  LLMServiceHealthResponse,
+  LLMServiceCheckItemsResponse,
+  LLMServiceCheckItemsRequestBody,
+  LLMServiceInferenceResponse,
+  LLMServiceInferenceRequestBody,
 } from '@libs/schemas';
 import { generatePath } from 'react-router-dom';
 
@@ -28,6 +33,7 @@ export enum TagTypesEnum {
   DEV = 'development',
   PATIENTS = 'patients',
   PATIENT = 'patient',
+  LLM_SERVICE = 'LLM Service',
 }
 
 const getAPIHeaders = () => {
@@ -208,6 +214,35 @@ export const apiStore = createApi({
       }),
       invalidatesTags: [TagTypesEnum.PATIENT],
     }),
+    llmServiceHealth: builder.mutation<LLMServiceHealthResponse, void>({
+      query: () => ({
+        url: apiRoutes.llmServiceHealth,
+        method: 'GET',
+      }),
+      invalidatesTags: [TagTypesEnum.LLM_SERVICE],
+    }),
+    llmServiceCheckItems: builder.mutation<
+      LLMServiceCheckItemsResponse,
+      LLMServiceCheckItemsRequestBody
+    >({
+      query: (body) => ({
+        url: apiRoutes.llmServiceCheckItems,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [TagTypesEnum.LLM_SERVICE],
+    }),
+    llmServiceInference: builder.mutation<
+      LLMServiceInferenceResponse,
+      LLMServiceInferenceRequestBody
+    >({
+      query: (body) => ({
+        url: apiRoutes.llmServiceInference,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [TagTypesEnum.LLM_SERVICE],
+    }),
   }),
 });
 
@@ -225,4 +260,7 @@ export const {
   useAddPatientImageReviewVoteMutation,
   useUpdatePatientImageReviewVoteMutation,
   useDeletePatientImagesClusterMutation,
+  useLlmServiceHealthMutation,
+  useLlmServiceCheckItemsMutation,
+  useLlmServiceInferenceMutation,
 } = apiStore;

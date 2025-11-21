@@ -75,6 +75,11 @@ export default createBrowserRouter([
         ...defaultOptions,
       },
       {
+        path: guiRoutes.llm,
+        lazy: () => import('../pages/LLMPage/LLMPage'),
+        ...defaultOptions,
+      },
+      {
         element: (
           <ProtectedRoute>
             <Outlet />

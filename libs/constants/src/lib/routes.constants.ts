@@ -45,6 +45,7 @@ export const guiRoutes = {
   terms: '/terms',
   disclaimer: '/disclaimer',
   compliance: '/compliance',
+  llm: '/llm',
   contacts: '/contacts',
   cookies: '/cookies',
   dashboard: '/dashboard',

@@ -31,6 +31,10 @@ export const NavMenu = () => {
       to: guiRoutes.brief,
       text: 'Brief',
     },
+    {
+      to: guiRoutes.llm,
+      text: 'LLM',
+    },
   ];
   return (
     <>
