@@ -9,6 +9,12 @@ const security = {
   securityVerify: '/security/verify',
 };
 
+const llmService = {
+  llmServiceHealth: '/llm/health',
+  llmServiceCheckItems: '/llm/check-items',
+  llmServiceInference: '/llm/inference',
+};
+
 const patients = {
   patients: '/patients',
   trashedPatients: '/patients/trash',
@@ -26,6 +32,7 @@ const patients = {
 export const apiRoutes = {
   ...security,
   ...patients,
+  ...llmService,
 };
 
 export const guiRoutes = {

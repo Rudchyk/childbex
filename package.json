@@ -113,6 +113,8 @@
     "@mui/material": "^7.3.4",
     "@mui/x-data-grid": "^8.14.1",
     "@reduxjs/toolkit": "^2.9.0",
+    "axios-request-throttle": "^1.0.0",
+    "axios-retry": "^4.5.0",
     "compression": "^1.8.1",
     "cyrillic-doctor": "^1.0.3",
     "date-fns": "^4.1.0",

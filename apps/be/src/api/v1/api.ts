@@ -6,7 +6,7 @@ import type { KeycloakType } from '../../services/security.service';
 import { SecuritiesKeysEnum } from './lib/SecuritiesKeysEnum';
 
 import './routes/config.api.routes';
-import './routes/hello';
+import './routes/llm.api.routes';
 import './routes/patients.api.routes';
 
 export const setupAPIRoutes = (app: Express, keycloak: KeycloakType) => {

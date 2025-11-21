@@ -55,7 +55,7 @@ async def metrics() -> Response:
 async def test() -> Response:
   return "hello world!"
 
-@app.post("/random-items")
+@app.post("/check-items")
 async def random_items(payload: ItemsPayload) -> dict:
   if len(payload.items) < 5:
     raise HTTPException(status_code=400, detail="Provide at least 5 items.")
