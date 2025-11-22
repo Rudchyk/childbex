@@ -22,10 +22,7 @@ class LLMService {
           baseURL: LLM_SERVICE_URL,
           timeout: 1000 * 60 * 5,
         },
-        retryConfig: {
-          ...axiosRetryDefaultOptions,
-          retryCondition: (error) => (error.status === 500 ? false : true),
-        },
+        isRetry: false,
       });
     } else {
       logger.warn('LLM service was not initialized');
@@ -56,21 +53,14 @@ class LLMService {
   async checkItems(
     items: LLMServiceCheckItemsRequestBody
   ): Promise<LLMServiceCheckItemsResponse> {
-    try {
-      if (!this.client) {
-        throw new Error('LLM Service client is not initialized');
-      }
-      const { data } = await this.client.post<LLMServiceCheckItemsResponse>(
-        '/check-items',
-        { items }
-      );
-      return data;
-    } catch (error) {
-      logger.error(error, 'LLMService checkItems error:');
-      return {
-        items: [],
-      };
+    if (!this.client) {
+      throw new Error('LLM Service client is not initialized');
     }
+    const { data } = await this.client.post<LLMServiceCheckItemsResponse>(
+      '/check-items',
+      { items }
+    );
+    return data;
   }
 }
 

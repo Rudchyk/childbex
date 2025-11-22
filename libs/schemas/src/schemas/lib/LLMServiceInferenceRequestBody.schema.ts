@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 
 export const LLMServiceInferenceRequestBodySchema = Type.Object({
-  model: Type.String(),
+  model: Type.Optional(Type.String()),
 });
 
 export type LLMServiceInferenceRequestBody = Static<

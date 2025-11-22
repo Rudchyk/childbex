@@ -23,6 +23,7 @@ import { guiRoutes } from '@libs/constants';
 import { useUpdatePatientImagesClusterMutation } from '../../store/apis';
 import { useNotifications } from '../../modules/notifications';
 import { DeletePatientImagesCluster } from './DeletePatientImagesCluster';
+import { LLMCheckItems } from './LLMCheckItems';
 
 interface PatientImagesClusterProps {
   item: GetPatientResponse['clusters'][0];
@@ -112,6 +113,10 @@ export const PatientImagesCluster: FC<PatientImagesClusterProps> = ({
             />
           }
           label="In review"
+        />
+        <LLMCheckItems
+          disabled={isBrocken}
+          items={item.images.map((i) => i.id)}
         />
         <DeletePatientImagesCluster id={item.id} />
       </Stack>

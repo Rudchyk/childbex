@@ -8,12 +8,16 @@ import {
   LLMServiceInferenceRequestBodySchema,
   LLMServiceInferenceResponseSchema,
   LLMServiceHealthResponseSchema,
+  LLMServiceInferenceRequestBody,
 } from '../schemas/schemas';
 import { SecuritiesKeysEnum } from '../lib/SecuritiesKeysEnum';
 import { Tags } from '../lib/tags.service';
 import { apiRoutes } from '@libs/constants';
 import { llmService } from '../../../services/llm.service';
 import { getKeycloakSecurity } from '../lib/security.service';
+import { getInternalServerRequestError } from '../lib/helpers';
+import { AxiosError } from 'axios';
+import { PatientImage } from '../../../db/models/PatientImage.model';
 
 const tags = [Tags.LLM_SERVICE];
 
@@ -53,9 +57,19 @@ router.route({
     },
   },
   handler: async (request) => {
-    const items = await request.json();
-    const result = await llmService.checkItems(items);
-    return Response.json(result);
+    try {
+      const itemsIds = await request.json();
+      const items = await PatientImage.findAll({
+        where: { id: itemsIds },
+      });
+      const result = await llmService.checkItems(items.map((i) => i.source));
+      return Response.json(result);
+    } catch (error) {
+      const err = error as AxiosError<any>;
+      throw getInternalServerRequestError(
+        err.response?.data ? err.response.data.detail : err.message
+      );
+    }
   },
 });
 
@@ -75,8 +89,19 @@ router.route({
     },
   },
   handler: async (request) => {
-    const props = await request.json();
-    const result = await llmService.getInference(props);
-    return Response.json(result);
+    let body: LLMServiceInferenceRequestBody = {};
+    const contentLength = request.headers.get('content-length');
+    if (contentLength && +contentLength > 2) {
+      body = await request.json();
+    }
+    try {
+      const result = await llmService.getInference(body);
+      return Response.json(result);
+    } catch (error) {
+      const err = error as AxiosError;
+      throw getInternalServerRequestError(
+        err.response?.data ? JSON.stringify(err.response.data) : err.message
+      );
+    }
   },
 });
