@@ -1,5 +1,5 @@
 module.exports = {
-  name: 'dev-childbex',
-  cwd: '/data/dev.childbex.com',
+  name: 'app.childbex',
+  cwd: '/var/www/childbex/demo',
   script: 'be/main.js',
 };

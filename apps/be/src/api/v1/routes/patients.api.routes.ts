@@ -259,7 +259,7 @@ router
     method: 'GET',
     path: apiRoutes.trashedPatients,
     tags: [Tags.PATIENTS],
-    ...getKeycloakSecurity(['realm:admin']),
+    ...getKeycloakSecurity(['dashboard:admin']),
     schemas: {
       request: {
         query: Type.Partial(PatientCreationAttributesSchema),
@@ -296,7 +296,7 @@ router
     method: 'POST',
     path: apiRoutes.trashedPatient,
     tags: [Tags.PATIENTS],
-    ...getKeycloakSecurity(['realm:admin']),
+    ...getKeycloakSecurity(['dashboard:admin']),
     schemas: {
       request: {
         params: IDPropertySchema,
