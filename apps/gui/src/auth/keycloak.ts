@@ -6,7 +6,7 @@ export async function initKeycloak() {
   }
 
   const keycloak = new Keycloak({
-    url: 'https://auth.rudchyk.tech/',
+    url: 'https://auth.childbex.com/',
     realm: 'childbex',
     clientId: 'dashboard',
   });
