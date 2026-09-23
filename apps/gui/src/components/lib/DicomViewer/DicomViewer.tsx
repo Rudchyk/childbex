@@ -248,7 +248,6 @@ export const DicomViewer: FC<DicomViewerProps> = ({
           name = event.source.name;
         }
       }
-      app.setActiveLayerGroup(1);
       const uid = getImageUid(event.data);
       // const seriesDescription = getSeriesDescription(event.data);
       // console.log('🚀 ~ DicomViewer ~ seriesDescription:', seriesDescription);
