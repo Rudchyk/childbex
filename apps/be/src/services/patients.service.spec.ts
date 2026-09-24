@@ -1,5 +1,5 @@
 /**
- * Import rollback tests for `usePatientAssets`.
+ * Import rollback tests for `importPatientArchiveFile`.
  * The DB layer is mocked: the transaction mock mirrors Sequelize managed
  * transactions (a rejection from the callback or from commit means rollback),
  * so these tests verify that every DB write runs inside the transaction and
@@ -13,9 +13,9 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import type { Patient } from '@libs/schemas';
 import type * as PatientsService from './patients.service';
 import { buildTar, makeSyntheticDicom } from './archive/__fixtures__/synthetic';
 
@@ -67,7 +67,7 @@ let tmp: string;
 let uploadRoot: string;
 let archivesRoot: string;
 let workRoot: string;
-let usePatientAssets: (patient: Patient, archive: File) => Promise<void>;
+let importPatientArchiveFile: typeof PatientsService.importPatientArchiveFile;
 let models: {
   PatientImage: { bulkCreate: jest.Mock };
   PatientImagesCluster: { findOrCreate: jest.Mock };
@@ -85,14 +85,13 @@ beforeEach(async () => {
   mockState.failCommit = false;
   jest.resetModules();
   // Roots are read at module load, so import after setting the env.
-   
-  ({ usePatientAssets } =
+
+  ({ importPatientArchiveFile } =
     require('./patients.service') as typeof PatientsService);
   models = {
     ...require('../db/models/PatientImage.model'),
     ...require('../db/models/PatientImagesCluster.model'),
   } as typeof models;
-   
 });
 
 afterEach(async () => {
@@ -121,31 +120,42 @@ const listTree = async (dir: string): Promise<string[]> => {
   return out.sort();
 };
 
-const studyArchive = async () =>
-  new File(
-    [
-      new Uint8Array(
-        await buildTar([
-          {
-            name: 'DICOM/SE1/IM000001',
-            data: makeSyntheticDicom({ instance: 1 }),
-          },
-          {
-            name: 'DICOM/SE1/IM000002',
-            data: makeSyntheticDicom({ instance: 2 }),
-          },
-          { name: 'README.txt', data: 'unrelated' },
-        ])
-      ),
-    ],
-    'study.tar'
-  );
+const UPLOAD_ID = '00000000-0000-4000-8000-00000000abcd';
 
-const patient = (id: string) => ({ id } as Patient);
+/** Writes a synthetic archive (as assembled by an upload session) to disk. */
+const assembledArchive = async (
+  patientId: string,
+  entries: Parameters<typeof buildTar>[0] = [
+    { name: 'DICOM/SE1/IM000001', data: makeSyntheticDicom({ instance: 1 }) },
+    { name: 'DICOM/SE1/IM000002', data: makeSyntheticDicom({ instance: 2 }) },
+    { name: 'README.txt', data: 'unrelated' },
+  ]
+) => {
+  const bytes = await buildTar(entries);
+  const archivePath = path.join(tmp, 'assembled.bin');
+  await writeFile(archivePath, bytes);
+  return {
+    uploadId: UPLOAD_ID,
+    patientId,
+    archivePath,
+    extension: '.tar' as const,
+    size: bytes.length,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+  };
+};
 
-describe('usePatientAssets import rollback', () => {
+describe('importPatientArchiveFile import rollback', () => {
   it('imports inside one transaction and stores the original archive', async () => {
-    await usePatientAssets(patient('patient-1'), await studyArchive());
+    const result = await importPatientArchiveFile(
+      await assembledArchive('patient-1')
+    );
+    expect(result).toEqual({
+      importedImages: 2,
+      alreadyImported: 0,
+      clusters: 1,
+      brokenImages: 0,
+      skippedFiles: 1,
+    });
 
     expect(await listTree(uploadRoot)).toEqual([
       'patient-1',
@@ -153,10 +163,11 @@ describe('usePatientAssets import rollback', () => {
       'patient-1/cluster0/IM000001',
       'patient-1/cluster0/IM000002',
     ]);
-    const archives = await readdir(archivesRoot);
-    expect(archives).toHaveLength(2);
-    expect(archives.some((f) => f.endsWith('.tar'))).toBe(true);
-    expect(archives.some((f) => f.endsWith('.json'))).toBe(true);
+    // The stored original is named after the upload session.
+    expect((await readdir(archivesRoot)).sort()).toEqual([
+      `${UPLOAD_ID}.json`,
+      `${UPLOAD_ID}.tar`,
+    ]);
     expect(await readdir(workRoot)).toEqual([]);
     // Every DB write is bound to the transaction.
     expect(models.PatientImagesCluster.findOrCreate).toHaveBeenCalledWith(
@@ -181,7 +192,7 @@ describe('usePatientAssets import rollback', () => {
       mockState[failure] = true;
 
       await expect(
-        usePatientAssets(patient('patient-new'), await studyArchive())
+        importPatientArchiveFile(await assembledArchive('patient-new'))
       ).rejects.toThrow(message);
 
       expect(await listTree(uploadRoot)).toEqual([]);
@@ -199,7 +210,7 @@ describe('usePatientAssets import rollback', () => {
     mockState.failBulkCreate = true;
 
     await expect(
-      usePatientAssets(patient('patient-1'), await studyArchive())
+      importPatientArchiveFile(await assembledArchive('patient-1'))
     ).rejects.toThrow('db insert failed');
 
     expect(await listTree(uploadRoot)).toEqual([
@@ -215,16 +226,12 @@ describe('usePatientAssets import rollback', () => {
   });
 
   it('writes nothing to the DB or storage when the archive has no usable DICOM', async () => {
-    const archive = new File(
-      [
-        new Uint8Array(
-          await buildTar([{ name: 'README.txt', data: 'unrelated' }])
-        ),
-      ],
-      'study.tar'
-    );
     await expect(
-      usePatientAssets(patient('patient-1'), archive)
+      importPatientArchiveFile(
+        await assembledArchive('patient-1', [
+          { name: 'README.txt', data: 'unrelated' },
+        ])
+      )
     ).rejects.toMatchObject({ code: 'NO_USABLE_DICOM' });
     expect(models.PatientImagesCluster.findOrCreate).not.toHaveBeenCalled();
     expect(await listTree(uploadRoot)).toEqual([]);

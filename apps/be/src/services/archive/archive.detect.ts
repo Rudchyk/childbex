@@ -103,6 +103,30 @@ const readHead = async (filePath: string): Promise<Buffer> => {
 
 const supportedList = ARCHIVE_EXTENSIONS.join(', ');
 
+const unsupportedMessages = {
+  rar: 'RAR archives are not supported. Please repack the study as a ZIP archive and upload it again.',
+  '7z': '7z archives are not supported yet. Please repack the study as a ZIP archive and upload it again.',
+  other: `Unsupported archive type. Supported types: ${supportedList}.`,
+};
+
+/** Client-safe error for an archive type outside the allowlist. */
+export const unsupportedArchiveError = (
+  kind: keyof typeof unsupportedMessages = 'other'
+) => new ArchiveError('UNSUPPORTED_FORMAT', unsupportedMessages[kind]);
+
+/**
+ * Validates a client file name against the allowlist before any data is
+ * uploaded. The content signature is still validated after assembly.
+ */
+export const requireAllowedExtension = (fileName: string): ArchiveExtension => {
+  const extension = extensionFromFileName(fileName);
+  if (extension) return extension;
+  const lower = fileName.trim().toLowerCase();
+  if (lower.endsWith('.rar')) throw unsupportedArchiveError('rar');
+  if (lower.endsWith('.7z')) throw unsupportedArchiveError('7z');
+  throw unsupportedArchiveError();
+};
+
 /**
  * Determines the archive format from BOTH the client file name and the
  * content signature, and rejects archives where they disagree.
@@ -113,26 +137,11 @@ export const detectArchiveFormat = async (
 ): Promise<DetectedArchive> => {
   const signature = sniffSignature(await readHead(filePath));
 
-  if (signature === 'rar') {
-    throw new ArchiveError(
-      'UNSUPPORTED_FORMAT',
-      'RAR archives are not supported. Please repack the study as a ZIP archive and upload it again.'
-    );
-  }
-  if (signature === '7z') {
-    throw new ArchiveError(
-      'UNSUPPORTED_FORMAT',
-      '7z archives are not supported yet. Please repack the study as a ZIP archive and upload it again.'
-    );
-  }
+  if (signature === 'rar') throw unsupportedArchiveError('rar');
+  if (signature === '7z') throw unsupportedArchiveError('7z');
 
   const extension = extensionFromFileName(clientFileName);
-  if (!extension) {
-    throw new ArchiveError(
-      'UNSUPPORTED_FORMAT',
-      `Unsupported archive type. Supported types: ${supportedList}.`
-    );
-  }
+  if (!extension) throw unsupportedArchiveError();
   const format = formatByExtension[extension];
 
   if (signature === 'empty') {

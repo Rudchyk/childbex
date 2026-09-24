@@ -46,10 +46,10 @@ const getAPIHeaders = () => {
 };
 
 // https://nx.dev/docs/technologies/react/guides/use-environment-variables-in-react
-const baseUrl = import.meta.env.VITE_PUBLIC_API || apiRoute;
+export const apiBaseUrl = import.meta.env.VITE_PUBLIC_API || apiRoute;
 
 const baseQuery = fetchBaseQuery({
-  baseUrl,
+  baseUrl: apiBaseUrl,
   prepareHeaders: (headers, { getState }) => {
     const headersConfig = getAPIHeaders();
     if (headersConfig) {
@@ -126,17 +126,6 @@ export const apiStore = createApi({
         method: 'PATCH',
       }),
       invalidatesTags: [TagTypesEnum.PATIENTS],
-    }),
-    uploadPatientAssets: builder.mutation<
-      Patient,
-      IDProperty & { body: FormData }
-    >({
-      query: ({ id, body }) => ({
-        url: generatePath(apiRoutes.patientAssetsUpload, { id }),
-        body,
-        method: 'POST',
-      }),
-      invalidatesTags: [TagTypesEnum.PATIENTS, TagTypesEnum.PATIENT],
     }),
     deleteOrRestoreTrashedPatient: builder.mutation<
       Patient,
@@ -251,7 +240,6 @@ export const {
   useAddPatientMutation,
   useDeletePatientMutation,
   useUpdatePatientMutation,
-  useUploadPatientAssetsMutation,
   useGetTrashedPatientsQuery,
   useDeleteOrRestoreTrashedPatientMutation,
   useGetPatientBySlugQuery,

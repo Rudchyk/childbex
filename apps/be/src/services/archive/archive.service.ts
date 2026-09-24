@@ -1,11 +1,9 @@
-import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import {
   chmod,
   copyFile,
   mkdir,
   mkdtemp,
-  open,
   readdir,
   rm,
   writeFile,
@@ -59,53 +57,6 @@ export const withUploadWorkspace = async <T>(
       )
     );
   }
-};
-
-export interface SavedUpload {
-  path: string;
-  size: number;
-  sha256: string;
-}
-
-/**
- * Streams the uploaded file into the workspace under an internal name,
- * enforcing the upload limit and computing its SHA-256 checksum.
- */
-export const saveUploadToWorkspace = async (
-  file: Blob,
-  workspace: string,
-  limits: Pick<ArchiveLimits, 'maxUploadBytes'> = archiveLimits
-): Promise<SavedUpload> => {
-  const tooLarge = () =>
-    new ArchiveError(
-      'UPLOAD_TOO_LARGE',
-      `The archive exceeds the maximum upload size of ${Math.floor(
-        limits.maxUploadBytes / 1024 / 1024
-      )} MB.`
-    );
-  if (file.size > limits.maxUploadBytes) throw tooLarge();
-
-  const target = path.join(workspace, 'upload.bin');
-  const hash = createHash('sha256');
-  const handle = await open(target, 'wx', 0o600);
-  let size = 0;
-  try {
-    const reader = file.stream().getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > limits.maxUploadBytes) {
-        await reader.cancel();
-        throw tooLarge();
-      }
-      hash.update(value);
-      await handle.write(value);
-    }
-  } finally {
-    await handle.close();
-  }
-  return { path: target, size, sha256: hash.digest('hex') };
 };
 
 export interface ExtractedArchive extends DetectedArchive {

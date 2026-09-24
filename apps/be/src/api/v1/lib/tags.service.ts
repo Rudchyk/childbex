@@ -3,5 +3,6 @@ export enum Tags {
   DEVELOPMENT = 'Development',
   DATA = 'Data',
   PATIENTS = 'Patients',
+  UPLOADS = 'Uploads',
   LLM_SERVICE = 'LLM Service',
 }

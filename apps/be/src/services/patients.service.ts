@@ -1,5 +1,4 @@
 import path from 'path';
-import { randomUUID } from 'node:crypto';
 import { ImportFileTracker } from './archive/import-file-tracker';
 import { logger } from './logger.service';
 import {
@@ -13,17 +12,17 @@ import {
   PatientImageCreationAttributes,
 } from '../db/models/PatientImage.model';
 import { sequelize } from '../db/sequelize';
+import type { ArchiveExtension } from '@libs/constants';
 import {
-  Patient,
   PatientImage as IPatientImage,
   PatientImageStatus,
+  type UploadSessionResult,
 } from '@libs/schemas';
 import {
   ArchiveError,
   extractArchive,
   listCandidateFiles,
   removeStoredArchive,
-  saveUploadToWorkspace,
   storeOriginalArchive,
   withUploadWorkspace,
 } from './archive/archive.service';
@@ -162,29 +161,46 @@ const countByReason = (items: { reason: string }[]) =>
     return acc;
   }, {});
 
+export interface ImportPatientArchiveFileRequest {
+  /** Upload session id; also names the stored original archive. */
+  uploadId: string;
+  patientId: string;
+  /** Assembled archive on disk (outside any public directory). */
+  archivePath: string;
+  /** Allowlisted extension; the content signature is validated against it. */
+  extension: ArchiveExtension;
+  size: number;
+  sha256: string;
+}
+
 /**
- * Imports an uploaded study archive for a patient.
+ * Imports an assembled study archive for a patient.
  *
- * 1. Stream the upload into an isolated temporary workspace (+ SHA-256).
- * 2. Validate the archive type and extract it safely with limits.
- * 3. Parse and cluster DICOM images; reject if none are usable.
- * 4. Store the original archive byte-for-byte in private storage.
- * 5. Create DB rows and place image files in one transaction; on failure,
+ * 1. Validate the archive type and extract it safely with limits into an
+ *    isolated temporary workspace.
+ * 2. Parse and cluster DICOM images; reject if none are usable.
+ * 3. Store the original archive byte-for-byte in private storage.
+ * 4. Create DB rows and place image files in one transaction; on failure,
  *    roll back and remove every file created by this import.
  *
  * The workspace is always removed. Nothing is written to the DB before
  * the archive has been fully validated and parsed.
  */
-export const usePatientAssets = async (patient: Patient, archive: File) => {
-  const { id: patientId } = patient;
-  const uploadId = randomUUID();
-
-  await withUploadWorkspace(async (workspace) => {
-    const upload = await saveUploadToWorkspace(archive, workspace);
+export const importPatientArchiveFile = async ({
+  uploadId,
+  patientId,
+  archivePath,
+  extension,
+  size,
+  sha256,
+}: ImportPatientArchiveFileRequest): Promise<UploadSessionResult> =>
+  withUploadWorkspace(async (workspace) => {
     const extractedDir = path.join(workspace, 'extracted');
+    // Only the allowlisted extension is passed on; the client file name is
+    // never used. Detection still checks it against the content signature.
     const extracted = await extractArchive(
-      upload.path,
-      archive.name,
+      archivePath,
+      `archive${extension}`,
       extractedDir
     );
     const candidates = await listCandidateFiles(extractedDir);
@@ -199,8 +215,8 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
       uploadId,
       patientId,
       format: extracted.format,
-      sizeBytes: upload.size,
-      sha256: upload.sha256,
+      sizeBytes: size,
+      sha256,
       ...extracted.stats,
       candidateFiles: candidates.length,
       usableImages,
@@ -218,20 +234,27 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
     }
 
     const stored = await storeOriginalArchive({
-      sourcePath: upload.path,
+      sourcePath: archivePath,
       archivesRoot,
       publicRoots: [uploadRoot],
       uploadId,
       patientId,
       detected: extracted,
-      size: upload.size,
-      sha256: upload.sha256,
+      size,
+      sha256,
     });
 
     const tracker = new ImportFileTracker();
     try {
       const counts = await persistClusters(patientId, result, tracker);
       logger.info({ ...summary, ...counts }, 'patient archive imported');
+      return {
+        importedImages: counts.imported,
+        alreadyImported: counts.alreadyImported,
+        clusters: result.clusters.length,
+        brokenImages: result.broken.length,
+        skippedFiles: result.skipped.length,
+      };
     } catch (error) {
       await tracker.rollback();
       await removeStoredArchive(stored).catch((e) =>
@@ -244,4 +267,3 @@ export const usePatientAssets = async (patient: Patient, archive: File) => {
       throw error;
     }
   });
-};
