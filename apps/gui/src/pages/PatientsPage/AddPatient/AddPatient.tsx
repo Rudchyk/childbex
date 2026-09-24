@@ -3,15 +3,16 @@ import AddIcon from '@mui/icons-material/Add';
 import { useToggle } from '../../../hooks';
 import { usePatients } from '../../../store/slices';
 import { useNotifications } from '../../../modules/notifications';
+import {
+  ArchiveUploadProgress,
+  useArchiveUpload,
+} from '../../../modules/archiveUpload';
 import { SubmitHandler, SubmitErrorHandler } from 'react-hook-form';
 import { AddPatientForm } from './AddPatientForm';
 import { DialogForm } from '../../../components';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AddPatientFormData } from './addPatientForm.schema';
-import {
-  useAddPatientMutation,
-  useUploadPatientAssetsMutation,
-} from '../../../store/apis';
+import { useAddPatientMutation } from '../../../store/apis';
 
 export const AddPatient = () => {
   const title = 'Add patient';
@@ -24,41 +25,45 @@ export const AddPatient = () => {
       isLoading: isAddPatientLoading,
       error: addPatientError,
       isSuccess: isAddPatientSuccess,
+      reset: resetAddPatient,
     },
   ] = useAddPatientMutation();
-  const [
-    uploadPatientAssets,
-    {
-      isLoading: isUploadPatientAssetsLoading,
-      error: uploadPatientAssetsError,
-      isSuccess: isUploadPatientAssetsSuccess,
-      isError: isUploadPatientAssetsError,
-    },
-  ] = useUploadPatientAssetsMutation();
-  const isLoading = useMemo(
-    () => isAddPatientLoading || isUploadPatientAssetsLoading,
-    [isAddPatientLoading, isUploadPatientAssetsLoading]
-  );
+  const upload = useArchiveUpload();
+  const isLoading = isAddPatientLoading || upload.isActive;
+  // Once the patient exists, "Send" must not create it again; a failed
+  // upload is retried from the progress panel instead.
+  const isPatientCreated = isAddPatientSuccess && !!addedPatient;
   const [archive, setArchive] = useState<File | undefined>();
   const { notifyError, notifySuccess } = useNotifications();
   const [open, toggleOpen] = useToggle(false);
   const { setIsLoading } = usePatients();
+
+  const close = () => {
+    upload.reset();
+    resetAddPatient();
+    setArchive(undefined);
+    toggleOpen();
+  };
   const onSubmit: SubmitHandler<AddPatientFormData> = async ({
     archive,
     ...other
   }) => {
+    if (isPatientCreated) return;
     setPatientName(other.name);
     setArchive(archive);
     addPatient(other);
-    toggleOpen();
   };
   const onError: SubmitErrorHandler<AddPatientFormData> = async (err) => {
     console.error(err);
   };
+  const onDialogClose = () => {
+    if (isLoading) return;
+    close();
+  };
 
   useEffect(() => {
-    setIsLoading(isUploadPatientAssetsLoading);
-  }, [isUploadPatientAssetsLoading]);
+    setIsLoading(upload.isActive);
+  }, [upload.isActive]);
 
   useEffect(() => {
     if (isAddPatientError) {
@@ -70,24 +75,22 @@ export const AddPatient = () => {
     if (isAddPatientSuccess && addedPatient) {
       notifySuccess(`Patient ${addedPatient.name} was added successfully!`);
       if (archive) {
-        const formData = new FormData();
-        formData.append('archive', archive);
-        uploadPatientAssets({ id: addedPatient.id, body: formData });
+        upload.start(addedPatient.id, archive);
+      } else {
+        close();
       }
     }
   }, [isAddPatientSuccess]);
 
   useEffect(() => {
-    if (isUploadPatientAssetsError) {
-      notifyError(uploadPatientAssetsError);
+    if (upload.state.phase === 'failed') {
+      notifyError(upload.state.error);
     }
-  }, [isUploadPatientAssetsError]);
-
-  useEffect(() => {
-    if (isUploadPatientAssetsSuccess) {
+    if (upload.state.phase === 'completed') {
       notifySuccess(`Archive for ${patientName} was added successfully!`);
+      close();
     }
-  }, [isUploadPatientAssetsSuccess]);
+  }, [upload.state.phase]);
 
   return (
     <>
@@ -106,15 +109,24 @@ export const AddPatient = () => {
         open={open}
         isButtonCancel={!isLoading}
         isButtonClose={!isLoading}
-        onDialogClose={toggleOpen}
+        onDialogClose={onDialogClose}
+        slotProps={{
+          buttonProps: { disabled: isPatientCreated },
+        }}
         form={
           <AddPatientForm
             onSubmit={onSubmit}
             onError={onError}
-            loading={isLoading}
+            loading={isLoading || isPatientCreated}
           />
         }
-      />
+      >
+        <ArchiveUploadProgress
+          state={upload.state}
+          onRetry={upload.retry}
+          onCancel={upload.cancel}
+        />
+      </DialogForm>
     </>
   );
 };

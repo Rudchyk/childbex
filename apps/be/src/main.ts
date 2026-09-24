@@ -15,12 +15,16 @@ import { logger } from './services/logger.service';
 import { setupSecurity } from './services/security.service';
 import { apiDocFullRoute, apiDocRoute, apiRoute } from '@libs/constants';
 import { dbSetup } from './db/sequelize';
+import { uploadSessionService } from './services/upload-sessions';
 
 const setupServer = async () => {
   try {
     const app = express();
 
     await dbSetup();
+    // Recovers uploads interrupted by a restart, then cleans up periodically.
+    await uploadSessionService.init();
+    uploadSessionService.startCleanupTimer();
 
     app.set('port', port);
 

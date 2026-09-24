@@ -9,7 +9,7 @@ export * from './lib/PatientImagesCluster.schemas.js';
 export * from './lib/PatientImage.schema.js';
 export * from './lib/PatientImageReviewVote.schema.js';
 export * from './lib/CreatePatientRequestBody.schema.js';
-export * from './lib/UploadPatientArchiveRequestBody.schema.js';
+export * from './lib/UploadSession.schema.js';
 export * from './lib/UpdatePatientRequestBody.schema.js';
 export * from './lib/GetPatientResponse.schema.js';
 export * from './lib/TrashedPatientsActionParam.schema.js';

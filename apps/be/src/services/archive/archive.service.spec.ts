@@ -26,7 +26,6 @@ import {
 import {
   extractArchive,
   listCandidateFiles,
-  saveUploadToWorkspace,
   storeOriginalArchive,
   withUploadWorkspace,
 } from './archive.service';
@@ -454,25 +453,6 @@ describe('upload workspace and original archive storage', () => {
       )
     );
     expect(new Set(seen).size).toBe(3);
-  });
-
-  it('saves the upload under an internal name with its SHA-256', async () => {
-    const content = Buffer.from('synthetic archive bytes');
-    const saved = await saveUploadToWorkspace(new Blob([content]), tmp);
-    expect(path.basename(saved.path)).toBe('upload.bin');
-    expect(saved.size).toBe(content.length);
-    expect(saved.sha256).toBe(
-      createHash('sha256').update(content).digest('hex')
-    );
-  });
-
-  it('rejects uploads above the upload limit', async () => {
-    await expectArchiveError(
-      saveUploadToWorkspace(new Blob([Buffer.alloc(100)]), tmp, {
-        maxUploadBytes: 10,
-      }),
-      'UPLOAD_TOO_LARGE'
-    );
   });
 
   it('stores the original archive byte-for-byte with metadata and no client file name', async () => {

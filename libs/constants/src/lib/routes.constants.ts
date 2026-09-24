@@ -21,7 +21,7 @@ const patients = {
   trashedPatient: '/patients/:id/trash',
   patient: '/patients/:id',
   patientSlug: '/patients/slug/:slug',
-  patientAssetsUpload: '/patients/:id/upload',
+  patientUploadSessions: '/patients/:id/upload-sessions',
   patientImagesCluster: '/patients/clusters/:id',
   patientSlugImagesClustersCluster:
     '/patients/slug/:slug/clusters/cluster/:cluster',
@@ -29,9 +29,16 @@ const patients = {
   patientImageReviewVote: '/patients/images/:id/review-votes/:voteId',
 };
 
+const uploadSessions = {
+  uploadSession: '/upload-sessions/:uploadId',
+  uploadSessionChunk: '/upload-sessions/:uploadId/chunks/:index',
+  uploadSessionComplete: '/upload-sessions/:uploadId/complete',
+};
+
 export const apiRoutes = {
   ...security,
   ...patients,
+  ...uploadSessions,
   ...llmService,
 };
 

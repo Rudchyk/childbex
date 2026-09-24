@@ -1,5 +1,6 @@
 import { HTTPError } from 'fets';
 import type { ArchiveError } from '../../../services/archive/archive.errors';
+import type { UploadSessionError } from '../../../services/upload-sessions/upload-session.errors';
 
 export const getSecurityServiceUnavailableError = () =>
   new HTTPError(
@@ -65,6 +66,19 @@ export const getArchiveHttpError = (error: ArchiveError) => {
       return new HTTPError(400, 'Invalid request', {}, details);
   }
 };
+
+/** Maps an upload session error to a client-safe HTTP error. */
+export const getUploadSessionHttpError = (error: UploadSessionError) =>
+  new HTTPError(
+    error.status,
+    error.name,
+    {},
+    {
+      message: error.message,
+      code: error.code,
+      ...(error.details ?? {}),
+    }
+  );
 
 export const getInvalidRequestError = (msg?: string) =>
   new HTTPError(

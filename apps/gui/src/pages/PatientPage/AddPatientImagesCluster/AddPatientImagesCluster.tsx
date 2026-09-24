@@ -1,8 +1,11 @@
 import { Fab, Tooltip } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import { useToggle } from '../../../hooks';
-import { useUploadPatientAssetsMutation } from '../../../store/apis';
 import { useNotifications } from '../../../modules/notifications';
+import {
+  ArchiveUploadProgress,
+  useArchiveUpload,
+} from '../../../modules/archiveUpload';
 import { SubmitHandler, SubmitErrorHandler } from 'react-hook-form';
 import { AddPatientImagesClusterForm } from './AddPatientImagesClusterForm';
 import { DialogForm } from '../../../components';
@@ -17,35 +20,36 @@ export const AddPatientImagesCluster: FC<AddPatientImagesClusterProps> = ({
   id,
 }) => {
   const title = 'Add patient asset';
-  const [uploadPatientAssets, { isLoading, isSuccess, error, isError }] =
-    useUploadPatientAssetsMutation();
+  const { state, isActive, start, retry, cancel, reset } = useArchiveUpload();
   const { notifyError, notifySuccess } = useNotifications();
   const [open, toggleOpen] = useToggle(false);
   const onSubmit: SubmitHandler<AddPatientImagesClusterFormData> = async ({
     archive,
   }) => {
-    const formData = new FormData();
-    formData.append('archive', archive);
-    uploadPatientAssets({ id, body: formData });
-    toggleOpen();
+    // The dialog stays open to show progress; it closes on success.
+    start(id, archive);
   };
   const onError: SubmitErrorHandler<AddPatientImagesClusterFormData> = async (
     err
   ) => {
     console.error(err);
   };
+  const onDialogClose = () => {
+    if (isActive) return;
+    reset();
+    toggleOpen();
+  };
 
   useEffect(() => {
-    if (isError) {
-      notifyError(error);
+    if (state.phase === 'failed') {
+      notifyError(state.error);
     }
-  }, [isError]);
-
-  useEffect(() => {
-    if (isSuccess) {
+    if (state.phase === 'completed') {
       notifySuccess(`Asset was uploaded successfully!`);
+      reset();
+      toggleOpen();
     }
-  }, [isSuccess]);
+  }, [state.phase]);
 
   return (
     <>
@@ -55,20 +59,26 @@ export const AddPatientImagesCluster: FC<AddPatientImagesClusterProps> = ({
         </Fab>
       </Tooltip>
       <DialogForm
-        isLoading={isLoading}
+        isLoading={isActive}
         title={title}
         open={open}
-        isButtonCancel={!isLoading}
-        isButtonClose={!isLoading}
-        onDialogClose={toggleOpen}
+        isButtonCancel={!isActive}
+        isButtonClose={!isActive}
+        onDialogClose={onDialogClose}
         form={
           <AddPatientImagesClusterForm
             onSubmit={onSubmit}
             onError={onError}
-            loading={isLoading}
+            loading={isActive}
           />
         }
-      />
+      >
+        <ArchiveUploadProgress
+          state={state}
+          onRetry={retry}
+          onCancel={cancel}
+        />
+      </DialogForm>
     </>
   );
 };
