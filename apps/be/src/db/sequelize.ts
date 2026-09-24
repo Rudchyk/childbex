@@ -5,6 +5,7 @@ const {
   DB_USER: username = '',
   DB_PASS: password = '',
   DB_NAME: database = '',
+  DB_HOST: host = 'localhost',
   DB_SYNC = 'true',
 } = process.env;
 
@@ -22,6 +23,7 @@ export const sequelize: Sequelize = new Sequelize(
   password,
   {
     dialect: 'postgres',
+    host,
     logging: false,
   }
 );
