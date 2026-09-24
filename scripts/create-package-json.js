@@ -1,6 +1,5 @@
 const {
   createProjectGraphAsync,
-  readCachedProjectGraph,
   detectPackageManager,
   writeJsonFile,
 } = require('@nx/devkit');
@@ -10,6 +9,7 @@ const {
   getLockFileName,
 } = require('@nx/js');
 const { writeFileSync, mkdirSync } = require('fs');
+const { execFileSync } = require('child_process');
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -34,7 +34,7 @@ async function main() {
     );
     process.exit(1);
   }
-  const graph = readCachedProjectGraph() || (await createProjectGraphAsync());
+  const graph = await createProjectGraphAsync();
   const node = graph.nodes[project];
   if (!node) {
     console.error(`Project "${project}" not found in Nx graph.`);
@@ -49,15 +49,36 @@ async function main() {
     );
     process.exit(1);
   }
+
   const pkg = createPackageJson(project, graph, {
     isProduction: true,
-    root: node.data.root,
+    helperDependencies: ['npm:pg', 'npm:pg-hstore'],
   });
   const pm = detectPackageManager();
   const lock = createLockFile(pkg, graph, pm);
   mkdirSync(outDir, { recursive: true });
   writeJsonFile(`${outDir}/package.json`, pkg);
   writeFileSync(`${outDir}/${getLockFileName(pm)}`, lock, 'utf8');
+  if (pm === 'npm') {
+    const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+
+    execFileSync(
+      npmCommand,
+      [
+        'install',
+        '--package-lock-only',
+        '--omit=dev',
+        '--ignore-scripts',
+        '--no-audit',
+        '--no-fund',
+      ],
+      {
+        cwd: outDir,
+        stdio: 'inherit',
+        shell: process.platform === 'win32',
+      }
+    );
+  }
   console.info(`✅ Wrote ${outDir}/package.json and pruned lockfile`);
 }
 

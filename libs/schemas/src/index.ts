@@ -2,6 +2,5 @@ export * as schemas from './schemas/index.js';
 export * from './schemas/index.js';
 export * from './utils/typebox-helpers.js';
 export * from '@sinclair/typebox';
-export { typeboxResolver } from '@hookform/resolvers/typebox';
 export { Value } from '@sinclair/typebox/value';
 export * from './utils/responses.js';
