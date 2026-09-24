@@ -43,6 +43,8 @@ export interface Cluster {
 export interface ClusterResult {
   clusters: Cluster[];
   broken: { file: string; reason: string }[];
+  /** Files that are not usable DICOM images (unrelated files, non-image objects). */
+  skipped: { file: string; reason: string }[];
 }
 
 export const brokenImageClusterName = 'broken';
@@ -66,16 +68,55 @@ function parseDicomDateTime(
   return new Date(year, month, day, hour, minute, second, ms);
 }
 
-function parseDicom(filePath: string): SliceMeta | null {
+// Transfer syntaxes tried for datasets stored without the Part-10 header
+// (no preamble / "DICM" marker): implicit VR LE (the DICOM default) and
+// explicit VR LE.
+const RAW_DATASET_TRANSFER_SYNTAXES = [
+  '1.2.840.10008.1.2',
+  '1.2.840.10008.1.2.1',
+];
+
+const hasPart10Marker = (bytes: Uint8Array) =>
+  bytes.length >= 132 &&
+  bytes[128] === 0x44 && // D
+  bytes[129] === 0x49 && // I
+  bytes[130] === 0x43 && // C
+  bytes[131] === 0x4d; // M
+
+type ParseResult = { meta: SliceMeta } | { meta: null; reason: string };
+
+function parseDicom(filePath: string): ParseResult {
   const buffer = fs.readFileSync(filePath);
   const byteArray = new Uint8Array(buffer);
-  let dataSet: dicomParser.DataSet;
-  try {
-    dataSet = dicomParser.parseDicom(byteArray);
-  } catch {
-    return null;
-  }
 
+  // The "DICM" marker only selects the parsing strategy; files without it are
+  // still accepted when they parse as a usable raw DICOM dataset.
+  if (hasPart10Marker(byteArray)) {
+    try {
+      const meta = readSliceMeta(filePath, dicomParser.parseDicom(byteArray));
+      return meta ? { meta } : { meta: null, reason: 'not_an_image' };
+    } catch {
+      return { meta: null, reason: 'dicom_parse_failed' };
+    }
+  }
+  for (const TransferSyntaxUID of RAW_DATASET_TRANSFER_SYNTAXES) {
+    try {
+      const meta = readSliceMeta(
+        filePath,
+        dicomParser.parseDicom(byteArray, { TransferSyntaxUID })
+      );
+      if (meta) return { meta };
+    } catch {
+      // Not parseable with this transfer syntax.
+    }
+  }
+  return { meta: null, reason: 'not_dicom' };
+}
+
+function readSliceMeta(
+  filePath: string,
+  dataSet: dicomParser.DataSet
+): SliceMeta | null {
   const getStr = (tag: string) => dataSet.string(tag);
   const getFloats = (tag: string): number[] | undefined => {
     const str = getStr(tag);
@@ -172,13 +213,16 @@ export function clusterByOrientation(
 
   const metas: SliceMeta[] = [];
   const broken: { file: string; reason: string }[] = [];
+  const skipped: { file: string; reason: string }[] = [];
 
   for (const f of files) {
-    const meta = parseDicom(f);
-    if (!meta) {
-      broken.push({ file: f, reason: 'parse_failed' });
+    const parsed = parseDicom(f);
+    if (!parsed.meta) {
+      // Unrelated or non-image files are skipped, not reported as broken images.
+      skipped.push({ file: f, reason: parsed.reason });
       continue;
     }
+    const { meta } = parsed;
     if (!meta.validPixelData) {
       broken.push({ file: f, reason: meta.reason || 'pixeldata_invalid' });
       continue;
@@ -304,5 +348,5 @@ export function clusterByOrientation(
     cl.files.sort((a, b) => a.positionScalar - b.positionScalar);
   }
 
-  return { clusters, broken };
+  return { clusters, broken, skipped };
 }

@@ -1,4 +1,5 @@
 import { FromSchema } from 'fets';
+import { ARCHIVE_MAX_UPLOAD_BYTES } from '@libs/constants';
 
 export const UploadPatientArchiveRequestBodySchema = {
   type: 'object',
@@ -8,7 +9,7 @@ export const UploadPatientArchiveRequestBodySchema = {
     archive: {
       type: 'string',
       format: 'binary',
-      maxLength: 1024 * 1024 * 500, // 5MB
+      maxLength: ARCHIVE_MAX_UPLOAD_BYTES, // 500 MiB
     },
   },
 } as const;

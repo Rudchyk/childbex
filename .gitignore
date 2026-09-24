@@ -49,3 +49,10 @@ test-output
 .env.local
 .env
 __pycache__
+
+# Medical data: uploaded studies and stored original archives must never be committed
+/uploads/
+/archives/
+*.dcm
+*.DCM
+DICOMDIR

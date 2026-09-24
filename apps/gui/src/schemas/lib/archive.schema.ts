@@ -1,33 +1,27 @@
 import { z } from 'zod';
+import { ARCHIVE_EXTENSIONS, ARCHIVE_MAX_UPLOAD_BYTES } from '@libs/constants';
 
-const MAX_SIZE = 500 * 1024 * 1024; // 500 MB
-// const ALLOWED_EXT = ['zip', 'tar', 'gz', 'tgz', '7z'];
-const ALLOWED_EXT = ['tar', 'gz', 'tgz'] as const;
-const ALLOWED_MIME = [
-  // 'application/zip',
-  'application/x-tar',
-  'application/gzip',
-  // 'application/x-zip-compressed',
-  // 'application/x-compressed',
-] as const;
+const MAX_SIZE = ARCHIVE_MAX_UPLOAD_BYTES;
 
 export const ARCHIVE_KEY = 'archive';
-export const accept = [...ALLOWED_EXT, ...ALLOWED_MIME].join(',');
+// Browsers match `accept` by the last extension, so also list the plain
+// compression suffixes; the full name is validated below and on the server.
+export const accept = [
+  ...new Set([...ARCHIVE_EXTENSIONS, '.gz', '.bz2', '.xz']),
+].join(',');
 export const archiveSchema = z
   .instanceof(File)
-  // fileType
-  .refine(
-    (f) => (f ? ALLOWED_MIME.includes(f.type as any) || f.type === '' : true),
-    { message: `Supported only ${ALLOWED_EXT.join(' / ')}` }
-  )
-  // fileExt
+  // fileExt (MIME types are not checked: browsers report them inconsistently
+  // for archives; the server validates the actual archive content)
   .refine(
     (f) => {
       if (!f) return true;
-      const ext = f.name.toLowerCase().split('.').pop() ?? '';
-      return (ALLOWED_EXT as readonly string[]).includes(ext);
+      const name = f.name.toLowerCase();
+      return ARCHIVE_EXTENSIONS.some(
+        (ext) => name.endsWith(ext) && name.length > ext.length
+      );
     },
-    { message: 'Invalid extension' }
+    { message: `Supported only ${ARCHIVE_EXTENSIONS.join(' / ')}` }
   )
   // fileSize
   .refine((f) => (f ? f.size <= MAX_SIZE : true), {

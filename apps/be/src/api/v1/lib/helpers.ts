@@ -1,4 +1,5 @@
 import { HTTPError } from 'fets';
+import type { ArchiveError } from '../../../services/archive/archive.errors';
 
 export const getSecurityServiceUnavailableError = () =>
   new HTTPError(
@@ -39,6 +40,31 @@ export const getInternalServerRequestError = (msg?: string) =>
       message: msg ?? 'Internal Server Error',
     }
   );
+
+export const getPayloadTooLargeError = (msg?: string, code?: string) =>
+  new HTTPError(
+    413,
+    'Payload Too Large',
+    {},
+    {
+      message: msg ?? 'The request payload is too large.',
+      code,
+    }
+  );
+
+/** Maps an archive validation error to a client-safe HTTP error. */
+export const getArchiveHttpError = (error: ArchiveError) => {
+  const details = { message: error.message, code: error.code };
+  switch (error.code) {
+    case 'UPLOAD_TOO_LARGE':
+    case 'LIMIT_EXCEEDED':
+      return getPayloadTooLargeError(error.message, error.code);
+    case 'EXTRACTION_FAILED':
+      return new HTTPError(500, 'Internal Server Error', {}, details);
+    default:
+      return new HTTPError(400, 'Invalid request', {}, details);
+  }
+};
 
 export const getInvalidRequestError = (msg?: string) =>
   new HTTPError(

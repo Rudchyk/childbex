@@ -37,13 +37,23 @@ import {
   getInvalidRequestError,
   getNotFoundError,
   getInternalServerRequestError,
+  getPayloadTooLargeError,
+  getArchiveHttpError,
 } from '../lib/helpers';
 import { usePatientAssets } from '../../../services/patients.service';
+import {
+  archiveLimits,
+  isArchiveError,
+} from '../../../services/archive/archive.service';
+import { logger } from '../../../services/logger.service';
 import { PatientImagesCluster } from '../../../db/models/PatientImagesCluster.model';
 import { PatientImage } from '../../../db/models/PatientImage.model';
 import { getSecurityContentFromResponse } from '../lib/security.service';
 import { Op } from 'sequelize';
 import { PatientImageReviewVote } from '../../../db/models/PatientImageReviewVote.model';
+
+/** Allowance for multipart boundaries/headers on top of the file size. */
+const MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
 
 router
   // Get patients
@@ -354,12 +364,52 @@ router
       if (!patient) {
         throw getNotFoundError('patient');
       }
-      const body = await request.formData();
-      const archive = body.get('archive');
+      const { maxUploadBytes } = archiveLimits;
+      const uploadTooLarge = () =>
+        getPayloadTooLargeError(
+          `The archive exceeds the maximum upload size of ${Math.floor(
+            maxUploadBytes / 1024 / 1024
+          )} MB.`,
+          'UPLOAD_TOO_LARGE'
+        );
+      // Reject before the multipart body is read into memory.
+      const contentLength = Number(request.headers.get('content-length') || 0);
+      if (contentLength > maxUploadBytes + MULTIPART_OVERHEAD_BYTES) {
+        throw uploadTooLarge();
+      }
+      let archive: FormDataEntryValue | null;
+      try {
+        // formDataLimits makes the streaming multipart parser stop early.
+        const body = await (
+          request as unknown as {
+            formData(options: {
+              formDataLimits: { fileSize: number; files: number };
+            }): Promise<FormData>;
+          }
+        ).formData({ formDataLimits: { fileSize: maxUploadBytes, files: 1 } });
+        archive = body.get('archive');
+      } catch (error) {
+        if (/file size limit exceeded/i.test((error as Error)?.message ?? '')) {
+          throw uploadTooLarge();
+        }
+        throw getInvalidRequestError('Invalid multipart form data.');
+      }
+      if (!archive || typeof archive === 'string') {
+        throw getInvalidRequestError('An archive file is required.');
+      }
       try {
         await usePatientAssets(patient, archive);
       } catch (error) {
-        throw getInternalServerRequestError((error as Error).message);
+        if (isArchiveError(error)) {
+          logger.warn(
+            { patientId: id, code: error.code, cause: error.cause },
+            'patient archive rejected'
+          );
+          throw getArchiveHttpError(error);
+        }
+        // Details stay in the server log; never expose paths/stack traces.
+        logger.error(error, 'patient archive import failed');
+        throw getInternalServerRequestError('Failed to import the archive.');
       }
       return Response.json(null, { status: 204 });
     },
