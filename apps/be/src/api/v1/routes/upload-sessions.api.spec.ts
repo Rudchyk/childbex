@@ -28,7 +28,6 @@ jest.mock('../../../services/patients.service', () => ({
   ...jest.requireActual('../../../services/patients.service'),
   importPatientArchiveFile: jest.fn(
     async ({ archivePath }: { archivePath: string }) => {
-       
       const fs = require('node:fs/promises');
       mockImported.push(await fs.readFile(archivePath));
       return {
@@ -75,11 +74,10 @@ beforeAll(async () => {
   process.env.UPLOAD_SESSIONS_DIR = sessionsDir;
   process.env.UPLOAD_CHUNK_SIZE_BYTES = String(8 * MiB);
 
-   
   const { setupAPIRoutes } = require('../api') as typeof ApiModule;
   sessions = require('../../../services/upload-sessions');
   const { Patient } = require('../../../db/models/Patient.model');
-   
+
   jest
     .spyOn(Patient, 'findByPk')
     .mockImplementation(async (id: unknown) =>
@@ -245,6 +243,52 @@ describe('chunked upload API', () => {
     expect(
       (await call('GET', `/upload-sessions/${uploadId}`, { user: null })).status
     ).toBe(401);
+  });
+
+  it("lists the caller's unfinished sessions with their fingerprint", async () => {
+    const created = await (
+      await call('POST', `/patients/${PATIENT}/upload-sessions`, {
+        json: {
+          fileName: 'study.zip',
+          fileSize: 100,
+          clientFingerprint: 'fp_listing_test_0001',
+        },
+      })
+    ).json();
+    const mine = await (await call('GET', '/upload-sessions')).json();
+    expect(mine).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          uploadId: created.uploadId,
+          patientId: PATIENT,
+          clientFingerprint: 'fp_listing_test_0001',
+          extension: '.zip',
+          fileSize: 100,
+        }),
+      ])
+    );
+    const others = await (
+      await call('GET', '/upload-sessions', { user: 'user-b' })
+    ).json();
+    expect(others.map((s: { uploadId: string }) => s.uploadId)).not.toContain(
+      created.uploadId
+    );
+    await call('DELETE', `/upload-sessions/${created.uploadId}`);
+  });
+
+  it('rejects a malformed clientFingerprint', async () => {
+    const response = await call(
+      'POST',
+      `/patients/${PATIENT}/upload-sessions`,
+      {
+        json: {
+          fileName: 'study.zip',
+          fileSize: 100,
+          clientFingerprint: 'bad fp',
+        },
+      }
+    );
+    expect(response.status).toBe(400);
   });
 
   it('rejects unsupported archives and unknown patients before any upload', async () => {

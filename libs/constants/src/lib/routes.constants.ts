@@ -30,6 +30,7 @@ const patients = {
 };
 
 const uploadSessions = {
+  uploadSessions: '/upload-sessions',
   uploadSession: '/upload-sessions/:uploadId',
   uploadSessionChunk: '/upload-sessions/:uploadId/chunks/:index',
   uploadSessionComplete: '/upload-sessions/:uploadId/complete',

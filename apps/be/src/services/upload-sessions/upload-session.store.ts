@@ -20,6 +20,8 @@ export interface SessionRecord {
   ownerSub: string;
   /** Allowlisted archive extension; the client file name is never stored. */
   extension: ArchiveExtension;
+  /** Opaque client-provided identifier for finding the session again. */
+  clientFingerprint?: string;
   fileSize: number;
   chunkSize: number;
   totalChunks: number;

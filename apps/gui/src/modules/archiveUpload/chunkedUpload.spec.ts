@@ -4,7 +4,11 @@
 import { createHash } from 'node:crypto';
 import type { UploadSession } from '@libs/schemas';
 import {
-  resumeKey,
+  archiveExtensionOf,
+  findResumableSession,
+  fingerprintSource,
+  isResumableFor,
+  resumeHintKey,
   uploadArchive,
   UploadRequestError,
   type ResumeStore,
@@ -38,6 +42,7 @@ class FakeServer implements UploadTransport {
   /** Status sequence returned by getSession while processing. */
   processing: Status[] = [status('processing'), status('completed')];
   onComplete?: (session: UploadSession) => void;
+  creates = 0;
   private nextId = 1;
 
   private view(id: string): UploadSession {
@@ -53,13 +58,19 @@ class FakeServer implements UploadTransport {
     };
   }
 
-  async createSession(patientId: string, body: { fileSize: number }) {
+  async createSession(
+    patientId: string,
+    body: { fileName?: string; fileSize: number; clientFingerprint?: string }
+  ) {
+    this.creates++;
     const uploadId = `upload-${this.nextId++}`;
     this.sessions.set(uploadId, {
       uploadId,
       patientId,
       status: status('uploading'),
       fileSize: body.fileSize,
+      extension: archiveExtensionOf(body.fileName ?? 'x.tar.gz') ?? '',
+      clientFingerprint: body.clientFingerprint,
       chunkSize: CHUNK,
       totalChunks: Math.ceil(body.fileSize / CHUNK),
       receivedChunks: [],
@@ -69,6 +80,15 @@ class FakeServer implements UploadTransport {
       stored: new Map(),
     } as UploadSession & { stored: Map<number, Buffer> });
     return this.view(uploadId);
+  }
+
+  async listSessions() {
+    return [...this.sessions.keys()]
+      .map((id) => this.view(id))
+      .filter(
+        (s) =>
+          s.status !== 'completed' && !(s.status === 'failed' && !s.retryable)
+      );
   }
 
   async getSession(uploadId: string) {
@@ -154,9 +174,13 @@ beforeEach(() => {
   store = memoryStore();
 });
 
+const fingerprintOf = (file: File) =>
+  createHash('sha256').update(fingerprintSource(file)).digest('hex');
+
 const run = (overrides: Partial<Parameters<typeof uploadArchive>[0]> = {}) =>
   uploadArchive({
     file: makeFile(),
+    fingerprint: fingerprintOf(overrides.file ?? makeFile()),
     patientId: PATIENT,
     transport: server,
     hashChunk,
@@ -187,19 +211,22 @@ describe('uploadArchive', () => {
     expect(store.data.size).toBe(0);
   });
 
-  it('does not store the file name in the resume key', () => {
-    expect(resumeKey(PATIENT, makeFile())).not.toContain('Patient.tar');
+  it('does not put the raw file name into the resume hint key', () => {
+    const key = resumeHintKey(fingerprintOf(makeFile()));
+    expect(key).not.toContain('Patient');
   });
 
   it('resumes a previous session and uploads only the missing chunks', async () => {
     const file = makeFile();
     const session = await server.createSession(PATIENT, {
+      fileName: file.name,
       fileSize: file.size,
+      clientFingerprint: fingerprintOf(file),
     });
     const stored = server.sessions.get(session.uploadId)!.stored;
     stored.set(0, CONTENT.subarray(0, 10));
     stored.set(3, CONTENT.subarray(30, 40));
-    store.set(resumeKey(PATIENT, file), session.uploadId);
+    store.set(resumeHintKey(fingerprintOf(file)), session.uploadId);
 
     const progress: UploadProgress[] = [];
     const result = await run({ file, onProgress: (p) => progress.push(p) });
@@ -214,7 +241,7 @@ describe('uploadArchive', () => {
   });
 
   it('starts a new session when the saved one no longer exists', async () => {
-    store.set(resumeKey(PATIENT, makeFile()), 'expired-session');
+    store.set(resumeHintKey(fingerprintOf(makeFile())), 'expired-session');
     const session = await run();
     expect(session.uploadId).toBe('upload-1');
     expect(server.puts).toHaveLength(5);
@@ -314,5 +341,145 @@ describe('uploadArchive', () => {
     await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
     expect(server.puts.length).toBeLessThan(5);
     expect(store.data.size).toBe(1);
+  });
+});
+
+describe('recovering unfinished uploads', () => {
+  const OTHER_PATIENT = 'patient-2';
+
+  /** An unfinished session on the server with chunks 0 and 3 stored. */
+  const existingSession = async (
+    overrides: { patientId?: string; fileName?: string; fileSize?: number } = {}
+  ) => {
+    const file = makeFile();
+    const session = await server.createSession(overrides.patientId ?? PATIENT, {
+      fileName: overrides.fileName ?? file.name,
+      fileSize: overrides.fileSize ?? file.size,
+      clientFingerprint: fingerprintOf(file),
+    });
+    const stored = server.sessions.get(session.uploadId)!.stored;
+    stored.set(0, CONTENT.subarray(0, 10));
+    stored.set(3, CONTENT.subarray(30, 40));
+    server.creates = 0;
+    return session;
+  };
+
+  it('after a reload (no local state) resumes from the server list without a new session', async () => {
+    const session = await existingSession();
+    expect(store.data.size).toBe(0);
+
+    const result = await run();
+
+    expect(result.uploadId).toBe(session.uploadId);
+    expect(server.creates).toBe(0);
+    expect(server.puts.sort()).toEqual([1, 2, 4]);
+    expect(server.assembled(session.uploadId).equals(CONTENT)).toBe(true);
+  });
+
+  it('resumes a session chosen by the user for its original patient', async () => {
+    const session = await existingSession({ patientId: OTHER_PATIENT });
+    const result = await run({ patientId: OTHER_PATIENT, session });
+    expect(result.uploadId).toBe(session.uploadId);
+    expect(result.patientId).toBe(OTHER_PATIENT);
+    expect(server.creates).toBe(0);
+    expect(server.puts.sort()).toEqual([1, 2, 4]);
+  });
+
+  it.each([
+    ['a different file size', { fileSize: CONTENT.length + 1 }],
+    ['a different archive type', { fileName: 'Some Patient.zip' }],
+    ['another patient', { patientId: OTHER_PATIENT }],
+  ])(
+    'does not resume a session with the same fingerprint but %s',
+    async (_label, overrides) => {
+      const session = await existingSession(overrides);
+      const result = await run();
+      expect(result.uploadId).not.toBe(session.uploadId);
+      expect(server.creates).toBe(1);
+      expect(server.puts.sort()).toEqual([0, 1, 2, 3, 4]);
+    }
+  );
+
+  it("ignores a local hint that points to another patient's session", async () => {
+    const foreign = await existingSession({ patientId: OTHER_PATIENT });
+    store.set(resumeHintKey(fingerprintOf(makeFile())), foreign.uploadId);
+    const result = await run();
+    expect(result.uploadId).not.toBe(foreign.uploadId);
+    expect(result.patientId).toBe(PATIENT);
+  });
+
+  it('sends the fingerprint (not the file name) for new sessions', async () => {
+    const result = await run();
+    const created = server.sessions.get(result.uploadId)!;
+    expect(created.clientFingerprint).toBe(fingerprintOf(makeFile()));
+  });
+});
+
+describe('matching helpers', () => {
+  const base = {
+    uploadId: 'u1',
+    patientId: PATIENT,
+    status: status('uploading'),
+    fileSize: 45,
+    extension: '.tar.gz',
+    clientFingerprint: 'fp_0123456789abcdef',
+    chunkSize: CHUNK,
+    totalChunks: 5,
+    receivedChunks: [],
+    missingChunks: [0, 1, 2, 3, 4],
+    expiresAt: '',
+    retryable: false,
+  } as UploadSession;
+  const criteria = {
+    fingerprint: 'fp_0123456789abcdef',
+    fileSize: 45,
+    extension: '.tar.gz',
+  };
+
+  it('requires fingerprint, size and extension to match', () => {
+    expect(isResumableFor(base, criteria)).toBe(true);
+    expect(
+      isResumableFor(base, { ...criteria, fingerprint: 'fp_other_000000000' })
+    ).toBe(false);
+    expect(isResumableFor(base, { ...criteria, fileSize: 46 })).toBe(false);
+    expect(isResumableFor(base, { ...criteria, extension: '.zip' })).toBe(
+      false
+    );
+    expect(
+      isResumableFor({ ...base, clientFingerprint: undefined }, criteria)
+    ).toBe(false);
+  });
+
+  it('only matches sessions that can still continue', () => {
+    expect(
+      isResumableFor({ ...base, status: status('completed') }, criteria)
+    ).toBe(false);
+    expect(
+      isResumableFor({ ...base, status: status('failed') }, criteria)
+    ).toBe(false);
+    expect(
+      isResumableFor(
+        { ...base, status: status('failed'), retryable: true },
+        criteria
+      )
+    ).toBe(true);
+    expect(
+      isResumableFor({ ...base, status: status('processing') }, criteria)
+    ).toBe(true);
+  });
+
+  it('finds a match for any patient unless one is required', () => {
+    expect(findResumableSession([base], criteria)).toBe(base);
+    expect(
+      findResumableSession([base], { ...criteria, patientId: 'x' })
+    ).toBeUndefined();
+  });
+
+  it('gives the same file a different fingerprint when it was modified', () => {
+    const a = new File([CONTENT], 'study.tar.gz', { lastModified: 1 });
+    const b = new File([CONTENT], 'study.tar.gz', { lastModified: 2 });
+    expect(fingerprintSource(a)).not.toBe(fingerprintSource(b));
+    expect(archiveExtensionOf('STUDY.TAR.GZ')).toBe('.tar.gz');
+    expect(archiveExtensionOf('study.rar')).toBeUndefined();
   });
 });

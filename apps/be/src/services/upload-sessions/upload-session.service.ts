@@ -66,6 +66,7 @@ const { UPLOADING, ASSEMBLING, PROCESSING, COMPLETED, FAILED } =
   UploadSessionStatus;
 
 const SHA256_RX = /^[0-9a-f]{64}$/i;
+const CLIENT_FINGERPRINT_RX = /^[A-Za-z0-9_-]{16,128}$/;
 const INDEX_RX = /^(0|[1-9][0-9]*)$/;
 const CREATE_LOCK = '__create__';
 
@@ -195,6 +196,10 @@ export class UploadSessionService {
       patientId: record.patientId,
       status: record.status,
       fileSize: record.fileSize,
+      extension: record.extension,
+      ...(record.clientFingerprint
+        ? { clientFingerprint: record.clientFingerprint }
+        : {}),
       chunkSize: record.chunkSize,
       totalChunks: record.totalChunks,
       receivedChunks: received,
@@ -260,8 +265,19 @@ export class UploadSessionService {
     ownerSub: string;
     fileName: string;
     fileSize: number;
+    clientFingerprint?: string;
   }): Promise<UploadSession> {
     const extension = requireAllowedExtension(input.fileName);
+    const { clientFingerprint } = input;
+    if (
+      clientFingerprint !== undefined &&
+      !CLIENT_FINGERPRINT_RX.test(clientFingerprint)
+    ) {
+      throw new UploadSessionError(
+        'INVALID_REQUEST',
+        'clientFingerprint must be 16–128 characters of [A-Za-z0-9_-].'
+      );
+    }
     const { fileSize } = input;
     if (!Number.isSafeInteger(fileSize) || fileSize <= 0) {
       throw new ArchiveError('CORRUPT_ARCHIVE', 'The archive is empty.');
@@ -306,6 +322,7 @@ export class UploadSessionService {
         patientId: input.patientId,
         ownerSub: input.ownerSub,
         extension,
+        ...(clientFingerprint ? { clientFingerprint } : {}),
         fileSize,
         chunkSize,
         totalChunks: Math.ceil(fileSize / chunkSize),
@@ -358,6 +375,19 @@ export class UploadSessionService {
   }
 
   // ------------------------------------------------------------ status ---
+
+  /**
+   * Unfinished sessions of a user (uploading, being processed or failed but
+   * retryable), most recently active first. Used to resume after the client
+   * lost its state, e.g. after a page reload.
+   */
+  async listForOwner(ownerSub: string): Promise<UploadSession[]> {
+    return (await this.listRecords())
+      .filter((record) => record.ownerSub === ownerSub)
+      .filter((record) => this.holdsStorage(record))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map((record) => this.toView(record));
+  }
 
   async get(uploadId: string, ownerSub: string): Promise<UploadSession> {
     return this.toView(await this.loadOwned(uploadId, ownerSub));

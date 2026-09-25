@@ -498,6 +498,88 @@ describe('cancel', () => {
   });
 });
 
+describe('listForOwner and clientFingerprint', () => {
+  const FINGERPRINT = 'fp_0123456789abcdef';
+
+  it('stores the opaque fingerprint and returns it with the extension', async () => {
+    const session = await service.create({
+      patientId: PATIENT,
+      ownerSub: OWNER,
+      fileName: 'study.tar.gz',
+      fileSize: 25,
+      clientFingerprint: FINGERPRINT,
+    });
+    expect(session).toMatchObject({
+      clientFingerprint: FINGERPRINT,
+      extension: '.tar.gz',
+      fileSize: 25,
+    });
+  });
+
+  it.each([
+    'short',
+    'has spaces in it!!',
+    'x'.repeat(129),
+    '../../etc/passwd00',
+  ])('rejects a malformed fingerprint %p', async (clientFingerprint) => {
+    await expectCode(
+      service.create({
+        patientId: PATIENT,
+        ownerSub: OWNER,
+        fileName: 'a.zip',
+        fileSize: 25,
+        clientFingerprint,
+      }),
+      'INVALID_REQUEST'
+    );
+  });
+
+  it("lists only the owner's unfinished sessions", async () => {
+    const pending = await createSession();
+    await put(pending.uploadId, 0);
+    const done = await createSession();
+    await uploadAll(done.uploadId);
+    await service.complete(done.uploadId, OWNER);
+    await service.whenIdle();
+    await service.create({
+      patientId: PATIENT,
+      ownerSub: 'user-b',
+      fileName: 'a.zip',
+      fileSize: 25,
+    });
+
+    const listed = await service.listForOwner(OWNER);
+    expect(listed.map((s) => s.uploadId)).toEqual([pending.uploadId]);
+    expect(listed[0]).toMatchObject({
+      receivedChunks: [0],
+      missingChunks: [1, 2],
+    });
+  });
+
+  it('includes retryable failures but not permanent failures or expired sessions', async () => {
+    importImpl = async () => {
+      throw new Error('database unavailable');
+    };
+    const retryable = await createSession();
+    await uploadAll(retryable.uploadId);
+    await service.complete(retryable.uploadId, OWNER);
+    await service.whenIdle();
+    importImpl = async () => {
+      throw new ArchiveError('NO_USABLE_DICOM', 'No usable DICOM images.');
+    };
+    const permanent = await createSession();
+    await uploadAll(permanent.uploadId);
+    await service.complete(permanent.uploadId, OWNER);
+    await service.whenIdle();
+
+    expect((await service.listForOwner(OWNER)).map((s) => s.uploadId)).toEqual([
+      retryable.uploadId,
+    ]);
+    now += 60_001;
+    expect(await service.listForOwner(OWNER)).toEqual([]);
+  });
+});
+
 describe('cancelForPatient', () => {
   const OTHER_PATIENT = '33333333-3333-4333-8333-333333333333';
 
