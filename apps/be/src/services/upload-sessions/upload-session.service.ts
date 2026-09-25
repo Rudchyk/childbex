@@ -779,6 +779,45 @@ export class UploadSessionService {
     });
   }
 
+  /**
+   * Removes all unfinished sessions of a patient (used when the patient is
+   * trashed or deleted). Sessions being assembled/imported are left alone:
+   * their import fails cleanly because the patient no longer exists.
+   * Returns the number of removed sessions.
+   */
+  async cancelForPatient(patientId: string): Promise<number> {
+    let names: string[];
+    try {
+      names = await readdir(this.config.rootDir);
+    } catch {
+      return 0;
+    }
+    let removed = 0;
+    for (const uploadId of names.filter(isValidUploadId)) {
+      await this.mutex.run(uploadId, async () => {
+        const record = await readRecord(this.paths, uploadId);
+        if (
+          !record ||
+          record.patientId !== patientId ||
+          this.jobs.has(uploadId) ||
+          record.status === ASSEMBLING ||
+          record.status === PROCESSING
+        ) {
+          return;
+        }
+        await removeSessionDir(this.paths, uploadId);
+        removed += 1;
+      });
+    }
+    if (removed) {
+      logger.info(
+        { patientId, removed },
+        'upload sessions removed for deleted patient'
+      );
+    }
+    return removed;
+  }
+
   // ----------------------------------------------------------- cleanup ---
 
   /**

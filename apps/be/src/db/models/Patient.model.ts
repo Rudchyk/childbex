@@ -16,6 +16,7 @@ import { PatientImagesCluster } from './PatientImagesCluster.model';
 import { removePath } from '../../utils';
 import path from 'path';
 import { uploadRoot } from '../../services/patients.service';
+import { logger } from '../../services/logger.service';
 
 type PatientCreationAttributes = Omit<
   PatientBaseCreationAttributes,
@@ -131,8 +132,16 @@ Patient.init(
         }
       },
       async afterDestroy(instance, options) {
-        if (options.force) {
+        if (!options.force) return;
+        // Runs after the row was deleted: a cleanup problem must not turn the
+        // completed deletion into an error (a missing directory is fine).
+        try {
           await removePath(path.join(uploadRoot, instance.id));
+        } catch (error) {
+          logger.error(
+            { err: error, patientId: instance.id },
+            'patient deleted, but removing its upload directory failed'
+          );
         }
       },
     },

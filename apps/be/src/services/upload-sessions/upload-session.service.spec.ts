@@ -498,6 +498,59 @@ describe('cancel', () => {
   });
 });
 
+describe('cancelForPatient', () => {
+  const OTHER_PATIENT = '33333333-3333-4333-8333-333333333333';
+
+  it("removes the patient's unfinished sessions only and frees the quota", async () => {
+    const first = await createSession();
+    await put(first.uploadId, 0);
+    const second = await createSession();
+    const other = await service.create({
+      patientId: OTHER_PATIENT,
+      ownerSub: OWNER,
+      fileName: 'a.zip',
+      fileSize: 25,
+    });
+    // Per-user quota (3) is exhausted.
+    await expectCode(createSession(), 'TOO_MANY_SESSIONS');
+
+    await expect(service.cancelForPatient(PATIENT)).resolves.toBe(2);
+
+    expect(await readdir(root)).toEqual([other.uploadId]);
+    await expectCode(service.get(first.uploadId, OWNER), 'SESSION_NOT_FOUND');
+    await expectCode(service.get(second.uploadId, OWNER), 'SESSION_NOT_FOUND');
+    await expect(createSession()).resolves.toBeDefined();
+  });
+
+  it('also removes a retryable failed session (assembled data included)', async () => {
+    importImpl = async () => {
+      throw new Error('database unavailable');
+    };
+    const { uploadId } = await createSession();
+    await uploadAll(uploadId);
+    await service.complete(uploadId, OWNER);
+    await service.whenIdle();
+    await expect(service.cancelForPatient(PATIENT)).resolves.toBe(1);
+    expect(await readdir(root)).toEqual([]);
+  });
+
+  it('leaves a session that is being imported alone', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    importImpl = async () => {
+      await gate;
+      return RESULT;
+    };
+    const { uploadId } = await createSession();
+    await uploadAll(uploadId);
+    await service.complete(uploadId, OWNER);
+
+    await expect(service.cancelForPatient(PATIENT)).resolves.toBe(0);
+    expect(await readdir(root)).toEqual([uploadId]);
+    release();
+  });
+});
+
 describe('cleanup', () => {
   it('deletes expired unfinished sessions', async () => {
     const { uploadId } = await createSession();

@@ -33,6 +33,7 @@ import { getKeycloakSecurity } from '../lib/security.service';
 import { Tags } from '../lib/tags.service';
 import { Ctx } from '../lib/types';
 import {
+  getInternalServerRequestError,
   getInvalidRequestError,
   getNotFoundError,
 } from '../lib/helpers';
@@ -41,6 +42,33 @@ import { PatientImage } from '../../../db/models/PatientImage.model';
 import { getSecurityContentFromResponse } from '../lib/security.service';
 import { Op } from 'sequelize';
 import { PatientImageReviewVote } from '../../../db/models/PatientImageReviewVote.model';
+import { uploadSessionService } from '../../../services/upload-sessions';
+import { logger } from '../../../services/logger.service';
+
+/**
+ * Unfinished uploads of a trashed/deleted patient can never be imported;
+ * remove them. Best effort: never fails the already completed deletion.
+ */
+const cancelUploadSessions = async (patientId: string) => {
+  try {
+    await uploadSessionService.cancelForPatient(patientId);
+  } catch (error) {
+    logger.error(
+      { err: error, patientId },
+      'removing upload sessions of a deleted patient failed'
+    );
+  }
+};
+
+const destroyPatient = async (patient: Patient, force: boolean) => {
+  try {
+    await patient.destroy({ force });
+  } catch (error) {
+    logger.error({ err: error, patientId: patient.id }, 'patient delete failed');
+    throw getInternalServerRequestError('Failed to delete the patient.');
+  }
+  await cancelUploadSessions(patient.id);
+};
 
 router
   // Get patients
@@ -210,7 +238,7 @@ router
       if (!patient) {
         throw getNotFoundError('patient');
       }
-      await patient.destroy();
+      await destroyPatient(patient, false);
       return Response.json(patient.toJSON());
     },
   })
@@ -315,7 +343,7 @@ router
 
       switch (type) {
         case TrashedPatientsActionTypes.DELETE:
-          await patient.destroy({ force: true });
+          await destroyPatient(patient, true);
           break;
         case TrashedPatientsActionTypes.RESTORE:
           await patient.restore();
