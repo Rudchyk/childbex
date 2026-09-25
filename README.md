@@ -7,19 +7,21 @@ upload session; the GUI does this automatically and shows progress. All
 endpoints are under `/api/v1` and require Keycloak authentication; a session
 is only visible to the user who created it.
 
-| Step            | Request                                                       | Notes                                                                                                                                                                                                                        |
-| --------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Create          | `POST /patients/:id/upload-sessions` `{ fileName, fileSize }` | Returns `uploadId`, `chunkSize`, `totalChunks`. The extension is checked here; the file name is not stored.                                                                                                                  |
-| Upload chunks   | `PUT /upload-sessions/:uploadId/chunks/:index` (raw bytes)    | Headers `x-chunk-count` (total chunks), `x-chunk-sha256` (hex SHA-256, required), `Content-Length` (exact chunk size). Chunks may be sent in any order and in parallel; a repeated chunk with the same checksum returns 200. |
-| Resume / status | `GET /upload-sessions/:uploadId`                              | `receivedChunks`, `missingChunks`, `status`, `error`, `result`.                                                                                                                                                              |
-| Complete        | `POST /upload-sessions/:uploadId/complete`                    | 202; assembles the chunks in order, re-verifies checksums and imports the archive in the background. Poll the status until `completed` or `failed`.                                                                          |
-| Cancel          | `DELETE /upload-sessions/:uploadId`                           | Deletes the temporary data (not possible while processing).                                                                                                                                                                  |
+| Step            | Request                                                                           | Notes                                                                                                                                                                                                                        |
+| --------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create          | `POST /patients/:id/upload-sessions` `{ fileName, fileSize, clientFingerprint? }` | Returns `uploadId`, `chunkSize`, `totalChunks`. The extension is checked here; the file name is not stored. `clientFingerprint` is an opaque client identifier (`[A-Za-z0-9_-]{16,128}`) used to find the session again.     |
+| Upload chunks   | `PUT /upload-sessions/:uploadId/chunks/:index` (raw bytes)                        | Headers `x-chunk-count` (total chunks), `x-chunk-sha256` (hex SHA-256, required), `Content-Length` (exact chunk size). Chunks may be sent in any order and in parallel; a repeated chunk with the same checksum returns 200. |
+| List unfinished | `GET /upload-sessions`                                                            | The caller's unfinished sessions (uploading, processing, retryable failures), e.g. to resume after a page reload or discard abandoned uploads.                                                                               |
+| Resume / status | `GET /upload-sessions/:uploadId`                                                  | `receivedChunks`, `missingChunks`, `status`, `error`, `result`.                                                                                                                                                              |
+| Complete        | `POST /upload-sessions/:uploadId/complete`                                        | 202; assembles the chunks in order, re-verifies checksums and imports the archive in the background. Poll the status until `completed` or `failed`.                                                                          |
+| Cancel          | `DELETE /upload-sessions/:uploadId`                                               | Deletes the temporary data (not possible while processing).                                                                                                                                                                  |
 
 The assembled archive goes through the same validation, safe extraction and
 DICOM import as before. Session state and chunks are kept on the file system
 in `UPLOAD_SESSIONS_DIR` (single backend instance). Unfinished sessions expire
 after `UPLOAD_SESSION_TTL_MS` of inactivity; a cleanup job removes expired
 sessions and stale partial chunks and recovers uploads interrupted by a restart.
+Trashing or deleting a patient removes that patient's unfinished uploads.
 
 Supported formats (extension **and** content signature are validated):
 `.zip`, `.tar`, `.tar.gz` / `.tgz`, `.tar.bz2` / `.tbz2`, `.tar.xz` / `.txz`.

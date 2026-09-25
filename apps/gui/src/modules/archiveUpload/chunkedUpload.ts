@@ -1,12 +1,15 @@
+import { ARCHIVE_EXTENSIONS } from '@libs/constants';
 import type { UploadSession } from '@libs/schemas';
 
 /** Network operations of the chunked upload API (injected for testability). */
 export interface UploadTransport {
   createSession(
     patientId: string,
-    body: { fileName: string; fileSize: number }
+    body: { fileName: string; fileSize: number; clientFingerprint?: string }
   ): Promise<UploadSession>;
   getSession(uploadId: string): Promise<UploadSession>;
+  /** The caller's unfinished sessions (server-side source of truth). */
+  listSessions(): Promise<UploadSession[]>;
   putChunk(args: {
     uploadId: string;
     index: number;
@@ -65,6 +68,10 @@ export interface UploadProgress {
 export interface UploadArchiveOptions {
   file: File;
   patientId: string;
+  /** Opaque identifier of the file (see `fingerprintSource`). */
+  fingerprint: string;
+  /** A session chosen by the user to resume (still validated). */
+  session?: UploadSession;
   transport: UploadTransport;
   /** Hex SHA-256 of a chunk. */
   hashChunk: (data: Blob) => Promise<string>;
@@ -84,25 +91,58 @@ export interface UploadArchiveOptions {
 
 const MAX_COMPLETE_ROUNDS = 3;
 
-/** FNV-1a hash, so no file name (possibly containing PHI) is persisted. */
-const fnv1a = (value: string) => {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < value.length; i++) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(16);
+/**
+ * Input for the file fingerprint: identifies "the same selected file" across
+ * page reloads, independently of the patient. It is hashed before use, so the
+ * raw file name is neither sent nor persisted.
+ */
+export const fingerprintSource = (file: File) =>
+  [file.name, file.size, file.lastModified].join('\n');
+
+/** localStorage key of the fast resume hint (the server list is the truth). */
+export const resumeHintKey = (fingerprint: string) =>
+  `childbex.upload:${fingerprint}`;
+
+/** Allowlisted archive extension of a file name (longest match). */
+export const archiveExtensionOf = (fileName: string) => {
+  const lower = fileName.trim().toLowerCase();
+  return [...ARCHIVE_EXTENSIONS]
+    .sort((a, b) => b.length - a.length)
+    .find((ext) => lower.endsWith(ext) && lower.length > ext.length);
 };
 
-/** Identifies "the same file for the same patient" across page reloads. */
-export const resumeKey = (patientId: string, file: File) =>
-  [
-    'childbex.upload',
-    patientId,
-    file.size,
-    file.lastModified,
-    fnv1a(file.name),
-  ].join(':');
+export interface ResumeCriteria {
+  fingerprint: string;
+  fileSize: number;
+  extension: string | undefined;
+  /** Restrict to one patient (known when uploading from the patient page). */
+  patientId?: string;
+}
+
+/**
+ * Whether a session can continue the upload of the described file. The
+ * fingerprint is never trusted alone: size, extension and state must match;
+ * ownership is enforced by the server.
+ */
+export const isResumableFor = (
+  session: UploadSession,
+  { fingerprint, fileSize, extension, patientId }: ResumeCriteria
+) =>
+  (session.status === 'uploading' ||
+    session.status === 'assembling' ||
+    session.status === 'processing' ||
+    (session.status === 'failed' && session.retryable)) &&
+  !!session.clientFingerprint &&
+  session.clientFingerprint === fingerprint &&
+  session.fileSize === fileSize &&
+  !!extension &&
+  session.extension === extension &&
+  (patientId === undefined || session.patientId === patientId);
+
+export const findResumableSession = (
+  sessions: UploadSession[],
+  criteria: ResumeCriteria
+) => sessions.find((session) => isResumableFor(session, criteria));
 
 const abortError = () => new DOMException('Upload cancelled', 'AbortError');
 
@@ -131,6 +171,8 @@ export const isAbortError = (error: unknown) =>
 export async function uploadArchive({
   file,
   patientId,
+  fingerprint,
+  session: chosenSession,
   transport,
   hashChunk,
   resumeStore,
@@ -143,7 +185,13 @@ export async function uploadArchive({
   pollIntervalMs = 2000,
   sleep = defaultSleep,
 }: UploadArchiveOptions): Promise<UploadSession> {
-  const key = resumeKey(patientId, file);
+  const key = resumeHintKey(fingerprint);
+  const criteria: ResumeCriteria = {
+    fingerprint,
+    fileSize: file.size,
+    extension: archiveExtensionOf(file.name),
+    patientId,
+  };
   const totalBytes = file.size;
   const report = (phase: UploadPhase, uploadedBytes: number) =>
     onProgress?.({
@@ -174,32 +222,44 @@ export async function uploadArchive({
   const chunkBytes = (session: UploadSession, index: number) =>
     Math.min(session.chunkSize, file.size - index * session.chunkSize);
 
-  const resumeOrCreate = async (): Promise<UploadSession> => {
-    const saved = resumeStore?.get(key);
-    if (saved) {
-      try {
-        const session = await withRetry(() => transport.getSession(saved));
-        const finished =
-          session.status === 'completed' ||
-          (session.status === 'failed' && !session.retryable);
-        if (
-          !finished &&
-          session.patientId === patientId &&
-          session.fileSize === file.size
-        ) {
-          return session;
-        }
-      } catch (error) {
-        if (!(error instanceof UploadRequestError && error.status === 404)) {
-          throw error;
-        }
+  /** Current server state of a session, or undefined if it is gone. */
+  const fetchSession = async (uploadId: string) => {
+    try {
+      return await withRetry(() => transport.getSession(uploadId));
+    } catch (error) {
+      if (error instanceof UploadRequestError && error.status === 404) {
+        return undefined;
       }
+      throw error;
+    }
+  };
+
+  /**
+   * 1. the session chosen by the user, 2. the local hint, 3. the server list
+   * of unfinished sessions; each validated against the file. Otherwise a new
+   * session is created.
+   */
+  const resumeOrCreate = async (): Promise<UploadSession> => {
+    if (chosenSession) {
+      const current = await fetchSession(chosenSession.uploadId);
+      if (current && isResumableFor(current, criteria)) return current;
+    }
+    const hinted = resumeStore?.get(key);
+    if (hinted) {
+      const current = await fetchSession(hinted);
+      if (current && isResumableFor(current, criteria)) return current;
       resumeStore?.remove(key);
     }
+    const listed = findResumableSession(
+      await withRetry(() => transport.listSessions()),
+      criteria
+    );
+    if (listed) return listed;
     return withRetry(() =>
       transport.createSession(patientId, {
         fileName: file.name,
         fileSize: file.size,
+        clientFingerprint: fingerprint,
       })
     );
   };

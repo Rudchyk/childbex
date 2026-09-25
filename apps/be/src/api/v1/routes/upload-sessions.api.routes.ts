@@ -12,6 +12,7 @@ import {
   UploadSessionChunkParamsSchema,
   UploadSessionParamsSchema,
   UploadSessionSchema,
+  Type,
   Value,
 } from '@libs/schemas';
 import {
@@ -104,14 +105,39 @@ router
             'fileName (string) and fileSize (positive integer) are required.'
           );
         }
-        const { fileName, fileSize } = body;
+        const { fileName, fileSize, clientFingerprint } = body;
         const session = await uploadSessionService.create({
           patientId: patient.id,
           ownerSub,
           fileName,
           fileSize,
+          clientFingerprint,
         });
         return Response.json(session, { status: 201 });
+      } catch (error) {
+        throw toHttpError(error);
+      }
+    },
+  })
+  // List the caller's unfinished upload sessions (to resume after reloads)
+  .route({
+    description:
+      "List the caller's unfinished upload sessions (uploading, processing or retryable)",
+    method: 'GET',
+    path: apiRoutes.uploadSessions,
+    tags: [Tags.UPLOADS],
+    ...getKeycloakSecurity(),
+    schemas: {
+      responses: {
+        200: Type.Array(UploadSessionSchema),
+        ...sessionResponses,
+      },
+    },
+    async handler(_request, ctx) {
+      try {
+        return Response.json(
+          await uploadSessionService.listForOwner(ownerOf(ctx))
+        );
       } catch (error) {
         throw toHttpError(error);
       }

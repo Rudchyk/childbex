@@ -6,6 +6,7 @@ import {
 } from '@libs/constants';
 import type { UploadSession } from '@libs/schemas';
 import {
+  fingerprintSource,
   UploadRequestError,
   type ResumeStore,
   type UploadTransport,
@@ -115,6 +116,8 @@ export const createHttpUploadTransport = ({
       ),
     getSession: (uploadId) =>
       request<UploadSession>('GET', sessionUrl(uploadId)),
+    listSessions: () =>
+      request<UploadSession[]>('GET', apiRoutes.uploadSessions),
     complete: (uploadId) =>
       request<UploadSession>(
         'POST',
@@ -178,8 +181,7 @@ export const createHttpUploadTransport = ({
   };
 };
 
-/** Hex SHA-256 of a chunk (WebCrypto; requires HTTPS or localhost). */
-export const sha256Hex = async (data: Blob): Promise<string> => {
+const digestHex = async (data: BufferSource): Promise<string> => {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) {
     throw new UploadRequestError(
@@ -189,11 +191,22 @@ export const sha256Hex = async (data: Blob): Promise<string> => {
       false
     );
   }
-  const digest = await subtle.digest('SHA-256', await data.arrayBuffer());
+  const digest = await subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(digest), (b) =>
     b.toString(16).padStart(2, '0')
   ).join('');
 };
+
+/** Hex SHA-256 of a chunk (WebCrypto; requires HTTPS or localhost). */
+export const sha256Hex = async (data: Blob): Promise<string> =>
+  digestHex(await data.arrayBuffer());
+
+/**
+ * Opaque identifier of a selected file (SHA-256 of name, size and
+ * modification time), used to find its unfinished upload again.
+ */
+export const computeFileFingerprint = (file: File): Promise<string> =>
+  digestHex(new TextEncoder().encode(fingerprintSource(file)));
 
 /** localStorage-backed resume store that never throws. */
 export const localResumeStore: ResumeStore = {

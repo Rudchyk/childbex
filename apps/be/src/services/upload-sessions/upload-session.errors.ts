@@ -1,5 +1,6 @@
 export type UploadSessionErrorCode =
   | 'SESSION_NOT_FOUND'
+  | 'INVALID_REQUEST'
   | 'INVALID_CHUNK'
   | 'CHUNK_CHECKSUM_MISMATCH'
   | 'CHUNK_CONFLICT'
@@ -15,6 +16,7 @@ export type UploadSessionErrorCode =
 
 const statusByCode: Record<UploadSessionErrorCode, number> = {
   SESSION_NOT_FOUND: 404,
+  INVALID_REQUEST: 400,
   INVALID_CHUNK: 400,
   CHUNK_CHECKSUM_MISMATCH: 400,
   CHUNK_CONFLICT: 409,

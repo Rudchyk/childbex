@@ -104,6 +104,10 @@ export const apiStore = createApi({
       }),
       invalidatesTags: [TagTypesEnum.PATIENTS],
     }),
+    getPatient: builder.query<Patient, IDProperty>({
+      query: ({ id }) => generatePath(apiRoutes.patient, { id }),
+      providesTags: [TagTypesEnum.PATIENT],
+    }),
     getPatientBySlug: builder.query<GetPatientResponse, SlugProperty>({
       query: ({ slug }) => ({
         url: generatePath(apiRoutes.patientSlug, { slug }),
@@ -208,6 +212,7 @@ export const {
   useUpdatePatientMutation,
   useGetTrashedPatientsQuery,
   useDeleteOrRestoreTrashedPatientMutation,
+  useGetPatientQuery,
   useGetPatientBySlugQuery,
   useUpdatePatientImagesClusterMutation,
   useGetPatientImagesClusterQuery,

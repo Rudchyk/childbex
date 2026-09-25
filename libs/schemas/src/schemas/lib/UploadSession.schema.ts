@@ -11,12 +11,22 @@ export enum UploadSessionStatus {
   FAILED = 'failed',
 }
 
+export const ClientFingerprintSchema = Type.String({
+  pattern: '^[A-Za-z0-9_-]{16,128}$',
+});
+
 export const CreateUploadSessionRequestBodySchema = Type.Object(
   {
     /** Used only to determine the archive type; never stored. */
     fileName: Type.String({ minLength: 1, maxLength: 255 }),
     /** The size limit is enforced by the server (413 with a clear message). */
     fileSize: Type.Integer({ minimum: 1 }),
+    /**
+     * Opaque client-provided identifier used to find the session again for
+     * resuming (e.g. after a page reload). Not interpreted by the server;
+     * never trusted alone for matching.
+     */
+    clientFingerprint: Type.Optional(ClientFingerprintSchema),
   },
   { additionalProperties: false }
 );
@@ -55,6 +65,9 @@ export const UploadSessionSchema = Type.Object({
   patientId: Type.String({ format: 'uuid' }),
   status: Type.Enum(UploadSessionStatus),
   fileSize: Type.Integer(),
+  /** Allowlisted archive extension, e.g. `.tar.gz`. */
+  extension: Type.String(),
+  clientFingerprint: Type.Optional(ClientFingerprintSchema),
   chunkSize: Type.Integer(),
   totalChunks: Type.Integer(),
   receivedChunks: Type.Array(Type.Integer()),

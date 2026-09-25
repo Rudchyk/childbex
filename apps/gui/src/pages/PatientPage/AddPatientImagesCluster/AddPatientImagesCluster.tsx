@@ -4,8 +4,11 @@ import { useToggle } from '../../../hooks';
 import { useNotifications } from '../../../modules/notifications';
 import {
   ArchiveUploadProgress,
+  PendingUploadsList,
   useArchiveUpload,
+  usePendingUploads,
 } from '../../../modules/archiveUpload';
+import type { UploadSession } from '@libs/schemas';
 import { SubmitHandler, SubmitErrorHandler } from 'react-hook-form';
 import { AddPatientImagesClusterForm } from './AddPatientImagesClusterForm';
 import { DialogForm } from '../../../components';
@@ -21,6 +24,8 @@ export const AddPatientImagesCluster: FC<AddPatientImagesClusterProps> = ({
 }) => {
   const title = 'Add patient asset';
   const { state, isActive, start, retry, cancel, reset } = useArchiveUpload();
+  // Unfinished uploads for this patient; selecting the same file resumes.
+  const pending = usePendingUploads(id);
   const { notifyError, notifySuccess } = useNotifications();
   const [open, toggleOpen] = useToggle(false);
   const onSubmit: SubmitHandler<AddPatientImagesClusterFormData> = async ({
@@ -34,11 +39,22 @@ export const AddPatientImagesCluster: FC<AddPatientImagesClusterProps> = ({
   ) => {
     console.error(err);
   };
+  const discardPending = async (session: UploadSession) => {
+    try {
+      await pending.discard(session);
+    } catch (error) {
+      notifyError(error);
+    }
+  };
   const onDialogClose = () => {
     if (isActive) return;
     reset();
     toggleOpen();
   };
+
+  useEffect(() => {
+    if (open) pending.refresh();
+  }, [open]);
 
   useEffect(() => {
     if (state.phase === 'failed') {
@@ -73,6 +89,14 @@ export const AddPatientImagesCluster: FC<AddPatientImagesClusterProps> = ({
           />
         }
       >
+        {state.phase === 'idle' && (
+          <PendingUploadsList
+            sessions={pending.sessions}
+            error={pending.error}
+            showPatient={false}
+            onDiscard={discardPending}
+          />
+        )}
         <ArchiveUploadProgress
           state={state}
           onRetry={retry}
