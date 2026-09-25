@@ -1,10 +1,4 @@
-import {
-  BaseQueryFn,
-  FetchArgs,
-  FetchBaseQueryError,
-  createApi,
-  fetchBaseQuery,
-} from '@reduxjs/toolkit/query/react';
+import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { apiRoute, apiRoutes } from '@libs/constants';
 import {
   CreatePatientRequestBody,
@@ -27,6 +21,7 @@ import {
   LLMServiceInferenceRequestBody,
 } from '@libs/schemas';
 import { generatePath } from 'react-router-dom';
+import { createReauthBaseQuery, keycloakRefresher } from '../../../auth/reauth';
 
 export enum TagTypesEnum {
   DATA = 'data',
@@ -36,57 +31,28 @@ export enum TagTypesEnum {
   LLM_SERVICE = 'LLM Service',
 }
 
-const getAPIHeaders = () => {
-  if (window.keycloak) {
-    return {
-      authorization: `Bearer ${window.keycloak.token}`,
-    };
-  }
-  return undefined;
-};
-
 // https://nx.dev/docs/technologies/react/guides/use-environment-variables-in-react
 export const apiBaseUrl = import.meta.env.VITE_PUBLIC_API || apiRoute;
 
 const baseQuery = fetchBaseQuery({
   baseUrl: apiBaseUrl,
-  prepareHeaders: (headers, { getState }) => {
-    const headersConfig = getAPIHeaders();
-    if (headersConfig) {
-      Object.entries(headersConfig).forEach(([key, value]) => {
-        headers.set(key, value);
-      });
+  prepareHeaders: (headers) => {
+    const token = window.keycloak?.token;
+    // Never send "Bearer undefined" after the token was cleared.
+    if (token) {
+      headers.set('authorization', `Bearer ${token}`);
     }
-
     return headers;
   },
 });
 
-// https://redux-toolkit.js.org/rtk-query/usage/customizing-queries#automatic-re-authorization-by-extending-fetchbasequery
-const baseQueryWithReauth: BaseQueryFn<
-  string | FetchArgs,
-  unknown,
-  FetchBaseQueryError
-> = async (args, api, extraOptions) => {
-  const result = await baseQuery(args, api, extraOptions);
-
-  if (result.error) {
-    if (result.error.status === 'FETCH_ERROR') {
-      const isTokenExpired = await window.keycloak?.isTokenExpired();
-
-      if (isTokenExpired) {
-        await window.keycloak?.updateToken(5);
-        const result = await baseQuery(args, api, extraOptions);
-        return result;
-      }
-
-      window.location.reload();
-      return result;
-    }
-  }
-
-  return result;
-};
+// Tokens are refreshed before they expire; on 401 one shared refresh and a
+// single retry. A failed refresh ends the session and the existing sign-in
+// flow redirects (no page reloads).
+const baseQueryWithReauth = createReauthBaseQuery(baseQuery, {
+  getAuth: () => window.keycloak,
+  refresher: keycloakRefresher,
+});
 
 export const apiStore = createApi({
   reducerPath: 'apiStore',

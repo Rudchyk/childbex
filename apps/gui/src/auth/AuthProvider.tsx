@@ -38,6 +38,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       ).flatMap((r) => r.roles ?? []);
       setRoles([...new Set([...realmRoles, ...resourceRoles])]);
 
+      // keycloak-js clears the token when a refresh is rejected (e.g. the
+      // SSO session expired). Marking the user unauthenticated lets
+      // ProtectedRoute redirect to sign-in once, as a normal navigation.
+      keycloak.onAuthLogout = () => {
+        setToken(undefined);
+        setAuthenticated(false);
+      };
+      keycloak.onAuthRefreshSuccess = () => setToken(keycloak.token);
+
       // Keep token fresh
       keycloak.onTokenExpired = async () => {
         try {
