@@ -14,6 +14,7 @@ import {
 } from './chunkedUpload';
 import {
   computeFileFingerprint,
+  createdPatientHints,
   createHttpUploadTransport,
   localResumeStore,
   sha256Hex,
@@ -106,7 +107,12 @@ export const useArchiveUpload = () => {
           setState((prev) => ({
             ...prev,
             phase: 'failed',
-            error: getErrorMessage(error) || 'The upload failed.',
+            // UploadRequestError has a `status` field, which getErrorMessage()
+            // mistakes for an RTK Query error (and then loses the message).
+            error:
+              (error instanceof Error
+                ? error.message
+                : getErrorMessage(error)) || 'The upload failed.',
             retryable:
               !(error instanceof UploadRequestError) || error.retryable,
           }));
@@ -198,28 +204,53 @@ export const usePendingUploads = (patientId?: string) => {
     }
   }, [transport, patientId]);
 
-  /** Cancels an unfinished upload and deletes its data on the server. */
+  /**
+   * Cancels an unfinished upload, deletes its data on the server and clears
+   * the local hints for that file. Never creates anything.
+   */
   const discard = useCallback(
     async (session: UploadSession) => {
       await transport.cancel(session.uploadId);
       if (session.clientFingerprint) {
         localResumeStore.remove(resumeHintKey(session.clientFingerprint));
+        createdPatientHints.remove(session.clientFingerprint);
       }
       await refresh();
     },
     [transport, refresh]
   );
 
-  /** The unfinished upload of this exact file, for any patient, if any. */
-  const findForFile = useCallback(
-    async (file: File) =>
-      findResumableSession(await transport.listSessions(), {
-        fingerprint: await computeFileFingerprint(file),
+  /**
+   * What already exists for this exact file: an unfinished upload (any
+   * patient), or else a patient created for it whose upload never started
+   * (local hint, verified on the server).
+   */
+  const lookup = useCallback(
+    async (
+      file: File
+    ): Promise<{
+      fingerprint: string;
+      session?: UploadSession;
+      createdPatientId?: string;
+    }> => {
+      const fingerprint = await computeFileFingerprint(file);
+      const session = findResumableSession(await transport.listSessions(), {
+        fingerprint,
         fileSize: file.size,
         extension: archiveExtensionOf(file.name),
-      }),
+      });
+      if (session) return { fingerprint, session };
+      const hinted = createdPatientHints.get(fingerprint);
+      if (hinted) {
+        if (await transport.patientExists(hinted)) {
+          return { fingerprint, createdPatientId: hinted };
+        }
+        createdPatientHints.remove(fingerprint);
+      }
+      return { fingerprint };
+    },
     [transport]
   );
 
-  return { sessions, error, refresh, discard, findForFile };
+  return { sessions, error, refresh, discard, lookup };
 };

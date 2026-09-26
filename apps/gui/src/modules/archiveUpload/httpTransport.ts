@@ -118,6 +118,20 @@ export const createHttpUploadTransport = ({
       request<UploadSession>('GET', sessionUrl(uploadId)),
     listSessions: () =>
       request<UploadSession[]>('GET', apiRoutes.uploadSessions),
+    patientExists: async (patientId) => {
+      try {
+        await request(
+          'GET',
+          generatePath(apiRoutes.patient, { id: patientId })
+        );
+        return true;
+      } catch (error) {
+        if (error instanceof UploadRequestError && error.status === 404) {
+          return false;
+        }
+        throw error;
+      }
+    },
     complete: (uploadId) =>
       request<UploadSession>(
         'POST',
@@ -230,5 +244,24 @@ export const localResumeStore: ResumeStore = {
     } catch {
       // Ignore.
     }
+  },
+};
+
+/**
+ * Local hint: the patient created by "Add patient" for a file (by file
+ * fingerprint), recorded before its upload session exists. Lets a later
+ * attempt upload to that patient instead of creating another one; always
+ * verified against the server before use.
+ */
+export const createdPatientHints = {
+  key: (fingerprint: string) => `childbex.addPatient:${fingerprint}`,
+  get(fingerprint: string) {
+    return localResumeStore.get(this.key(fingerprint));
+  },
+  set(fingerprint: string, patientId: string) {
+    localResumeStore.set(this.key(fingerprint), patientId);
+  },
+  remove(fingerprint: string) {
+    localResumeStore.remove(this.key(fingerprint));
   },
 };

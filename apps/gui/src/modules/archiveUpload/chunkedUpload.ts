@@ -10,6 +10,8 @@ export interface UploadTransport {
   getSession(uploadId: string): Promise<UploadSession>;
   /** The caller's unfinished sessions (server-side source of truth). */
   listSessions(): Promise<UploadSession[]>;
+  /** Whether a patient exists (and is visible to the user). */
+  patientExists(patientId: string): Promise<boolean>;
   putChunk(args: {
     uploadId: string;
     index: number;

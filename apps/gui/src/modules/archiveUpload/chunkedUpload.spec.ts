@@ -82,6 +82,10 @@ class FakeServer implements UploadTransport {
     return this.view(uploadId);
   }
 
+  async patientExists() {
+    return true;
+  }
+
   async listSessions() {
     return [...this.sessions.keys()]
       .map((id) => this.view(id))
