@@ -174,7 +174,8 @@ describe('DICOM discovery', () => {
     const candidates = await listCandidateFiles(dest);
     expect(basenames(candidates)).toEqual(basenames(result.files));
 
-    const { clusters, broken, skipped } = clusterByOrientation(candidates);
+    const { clusters, broken, skipped } =
+      await clusterByOrientation(candidates);
     expect(clusters.map((c) => [c.group, c.files.length]).sort()).toEqual([
       ['SYNTHETIC AXIAL', 2],
       ['SYNTHETIC RAW', 1],
@@ -204,7 +205,7 @@ describe('DICOM discovery', () => {
       ]),
       'study.tar'
     );
-    const { clusters, broken } = clusterByOrientation(
+    const { clusters, broken } = await clusterByOrientation(
       await listCandidateFiles(dest)
     );
     expect(clusters).toHaveLength(1);

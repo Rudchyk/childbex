@@ -204,7 +204,7 @@ export const importPatientArchiveFile = async ({
       extractedDir
     );
     const candidates = await listCandidateFiles(extractedDir);
-    const result = clusterByOrientation(candidates);
+    const result = await clusterByOrientation(candidates);
     const usableImages = result.clusters.reduce(
       (n, c) => n + c.files.length,
       0
