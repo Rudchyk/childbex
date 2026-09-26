@@ -18,6 +18,7 @@ import {
   type UploadSessionResult,
 } from '@libs/schemas';
 import { logger } from '../logger.service';
+import { withPhase } from '../diagnostics/event-loop.diagnostics';
 import { ArchiveError, isArchiveError } from '../archive/archive.errors';
 import { requireAllowedExtension } from '../archive/archive.detect';
 import type { UploadSessionConfig } from './upload-session.config';
@@ -642,7 +643,10 @@ export class UploadSessionService {
       if (!record) return;
 
       if (!(await exists(assembledPath)) || !record.sha256) {
-        const assembly = await this.assemble(record);
+        const current = record;
+        const assembly = await withPhase('assemble', () =>
+          this.assemble(current)
+        );
         if (!assembly.ok) {
           // Chunks vanished or were damaged on disk: ask the client to
           // upload them again instead of failing the whole upload.

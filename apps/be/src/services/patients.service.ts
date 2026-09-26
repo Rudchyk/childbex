@@ -26,6 +26,7 @@ import {
   storeOriginalArchive,
   withUploadWorkspace,
 } from './archive/archive.service';
+import { withPhase } from './diagnostics/event-loop.diagnostics';
 
 const { ARCHIVES_ROOT = './archives', UPLOAD_ROOT = './uploads' } = process.env;
 
@@ -198,13 +199,15 @@ export const importPatientArchiveFile = async ({
     const extractedDir = path.join(workspace, 'extracted');
     // Only the allowlisted extension is passed on; the client file name is
     // never used. Detection still checks it against the content signature.
-    const extracted = await extractArchive(
-      archivePath,
-      `archive${extension}`,
-      extractedDir
+    const extracted = await withPhase('extract', () =>
+      extractArchive(archivePath, `archive${extension}`, extractedDir)
     );
-    const candidates = await listCandidateFiles(extractedDir);
-    const result = await clusterByOrientation(candidates);
+    const candidates = await withPhase('list', () =>
+      listCandidateFiles(extractedDir)
+    );
+    const result = await withPhase('cluster', () =>
+      clusterByOrientation(candidates)
+    );
     const usableImages = result.clusters.reduce(
       (n, c) => n + c.files.length,
       0
@@ -233,20 +236,24 @@ export const importPatientArchiveFile = async ({
       );
     }
 
-    const stored = await storeOriginalArchive({
-      sourcePath: archivePath,
-      archivesRoot,
-      publicRoots: [uploadRoot],
-      uploadId,
-      patientId,
-      detected: extracted,
-      size,
-      sha256,
-    });
+    const stored = await withPhase('store', () =>
+      storeOriginalArchive({
+        sourcePath: archivePath,
+        archivesRoot,
+        publicRoots: [uploadRoot],
+        uploadId,
+        patientId,
+        detected: extracted,
+        size,
+        sha256,
+      })
+    );
 
     const tracker = new ImportFileTracker();
     try {
-      const counts = await persistClusters(patientId, result, tracker);
+      const counts = await withPhase('persist', () =>
+        persistClusters(patientId, result, tracker)
+      );
       logger.info({ ...summary, ...counts }, 'patient archive imported');
       return {
         importedImages: counts.imported,
