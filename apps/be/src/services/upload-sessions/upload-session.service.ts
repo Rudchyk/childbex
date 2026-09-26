@@ -382,9 +382,15 @@ export class UploadSessionService {
    * lost its state, e.g. after a page reload.
    */
   async listForOwner(ownerSub: string): Promise<UploadSession[]> {
-    return (await this.listRecords())
+    const records = (await this.listRecords())
       .filter((record) => record.ownerSub === ownerSub)
-      .filter((record) => this.holdsStorage(record))
+      .filter((record) => this.holdsStorage(record));
+    // Sessions of deleted patients can never be imported: not offered.
+    const alive = await Promise.all(
+      records.map((record) => this.deps.patientExists(record.patientId))
+    );
+    return records
+      .filter((_record, i) => alive[i])
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .map((record) => this.toView(record));
   }
@@ -908,6 +914,14 @@ export class UploadSessionService {
 
     if (this.now() > Date.parse(record.expiresAt)) {
       await removeSessionDir(this.paths, uploadId);
+      return;
+    }
+
+    // The patient was deleted (e.g. before sessions were removed on delete):
+    // the upload can never be imported. Only a definite "no" removes data.
+    if (!(await this.deps.patientExists(record.patientId))) {
+      await removeSessionDir(this.paths, uploadId);
+      logger.info({ uploadId }, 'removed upload session of a deleted patient');
       return;
     }
 

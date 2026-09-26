@@ -40,6 +40,9 @@ let service: UploadSessionService;
 let imported: { request: ImportArchiveRequest; bytes: Buffer }[];
 let importImpl: (request: ImportArchiveRequest) => Promise<UploadSessionResult>;
 let patientExists: boolean;
+/** Patients that no longer exist (or `Error` to simulate a DB failure). */
+let deletedPatients: Set<string>;
+let patientCheckError: Error | undefined;
 
 const config = (overrides: Partial<UploadSessionConfig> = {}) => ({
   rootDir: root,
@@ -59,7 +62,10 @@ const config = (overrides: Partial<UploadSessionConfig> = {}) => ({
 const createService = (overrides: Partial<UploadSessionConfig> = {}) =>
   new UploadSessionService(config(overrides), {
     importArchive: (request) => importImpl(request),
-    patientExists: async () => patientExists,
+    patientExists: async (id) => {
+      if (patientCheckError) throw patientCheckError;
+      return patientExists && !deletedPatients.has(id);
+    },
     now: () => now,
   });
 
@@ -68,6 +74,8 @@ beforeEach(async () => {
   now = Date.parse('2026-01-01T00:00:00Z');
   imported = [];
   patientExists = true;
+  deletedPatients = new Set();
+  patientCheckError = undefined;
   importImpl = async (request) => {
     imported.push({ request, bytes: await readFile(request.archivePath) });
     return RESULT;
@@ -577,6 +585,59 @@ describe('listForOwner and clientFingerprint', () => {
     ]);
     now += 60_001;
     expect(await service.listForOwner(OWNER)).toEqual([]);
+  });
+});
+
+describe('sessions of deleted patients', () => {
+  const GONE = '44444444-4444-4444-8444-444444444444';
+  const sessionFor = (patientId: string) =>
+    service.create({
+      patientId,
+      ownerSub: OWNER,
+      fileName: 'study.zip',
+      fileSize: 25,
+      clientFingerprint: 'fp_0123456789abcdef',
+    });
+
+  it('are not listed for resuming', async () => {
+    const orphan = await sessionFor(GONE);
+    const alive = await createSession();
+    deletedPatients.add(GONE);
+    const listed = (await service.listForOwner(OWNER)).map((s) => s.uploadId);
+    expect(listed).toEqual([alive.uploadId]);
+    expect(listed).not.toContain(orphan.uploadId);
+  });
+
+  it('are removed by the cleanup job', async () => {
+    const orphan = await sessionFor(GONE);
+    const alive = await createSession();
+    deletedPatients.add(GONE);
+    await service.cleanup();
+    expect(await readdir(root)).toEqual([alive.uploadId]);
+    expect(orphan.uploadId).toBeDefined();
+  });
+
+  it('are kept when the patient check fails (e.g. database unavailable)', async () => {
+    const session = await sessionFor(GONE);
+    patientCheckError = new Error('database unavailable');
+    await service.cleanup();
+    expect(await readdir(root)).toEqual([session.uploadId]);
+  });
+
+  it('are not removed while being imported', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    importImpl = async () => {
+      await gate;
+      return RESULT;
+    };
+    const { uploadId } = await createSession();
+    await uploadAll(uploadId);
+    await service.complete(uploadId, OWNER);
+    deletedPatients.add(PATIENT);
+    await service.cleanup();
+    expect(await readdir(root)).toEqual([uploadId]);
+    release();
   });
 });
 
