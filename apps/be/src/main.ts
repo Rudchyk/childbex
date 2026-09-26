@@ -16,10 +16,20 @@ import { setupSecurity } from './services/security.service';
 import { apiDocFullRoute, apiDocRoute, apiRoute } from '@libs/constants';
 import { dbSetup } from './db/sequelize';
 import { uploadSessionService } from './services/upload-sessions';
+import {
+  isEventLoopDiagnosticsEnabled,
+  startEventLoopDiagnostics,
+} from './services/diagnostics/event-loop.diagnostics';
 
 const setupServer = async () => {
   try {
     const app = express();
+
+    // Optional (EVENT_LOOP_DIAGNOSTICS=1): logs event-loop blocking per
+    // processing phase. Disabled by default.
+    if (isEventLoopDiagnosticsEnabled()) {
+      startEventLoopDiagnostics();
+    }
 
     await dbSetup();
     // Recovers uploads interrupted by a restart, then cleans up periodically.

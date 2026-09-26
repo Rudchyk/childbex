@@ -60,5 +60,14 @@ SHA-256). The client file name is not stored.
 
 Invalid values stop the backend at startup.
 
+### Diagnostics
+
+`EVENT_LOOP_DIAGNOSTICS=1` (disabled by default) logs event-loop blocking
+while archives are processed: a heartbeat reports blocks longer than 200 ms
+with the running phase (`assemble`, `extract`, `list`, `cluster`,
+`store`, `persist`), each phase logs its duration, and a
+`monitorEventLoopDelay` summary (p50/p99/max) is logged every 10 s. Only phase
+names and timings are logged.
+
 Archives created before this change were stored as Brotli-compressed tar
 (`*.br`); they can still be unpacked with `brotli -d file.br -o file.tar`.
