@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import dicomParser from 'dicom-parser';
 
 interface SliceMeta {
@@ -85,9 +85,10 @@ const hasPart10Marker = (bytes: Uint8Array) =>
 
 type ParseResult = { meta: SliceMeta } | { meta: null; reason: string };
 
-function parseDicom(filePath: string): ParseResult {
-  const buffer = fs.readFileSync(filePath);
-  const byteArray = new Uint8Array(buffer);
+async function parseDicom(filePath: string): Promise<ParseResult> {
+  // Asynchronous read keeps the event loop responsive while large studies
+  // are processed; a Buffer already is a Uint8Array (no copy needed).
+  const byteArray = await readFile(filePath);
 
   // The "DICM" marker only selects the parsing strategy; files without it are
   // still accepted when they parse as a usable raw DICOM dataset.
@@ -197,14 +198,18 @@ function readSliceMeta(
   };
 }
 
-export function clusterByOrientation(
+/**
+ * Files are read one at a time (sequentially), so only one DICOM file is in
+ * memory at once and the event loop is never blocked by file I/O.
+ */
+export async function clusterByOrientation(
   files: string[],
   opts?: {
     tolOrientation?: number;
     tolPixelSpacing?: number;
     separateGeometry?: boolean;
   }
-): ClusterResult {
+): Promise<ClusterResult> {
   const {
     tolOrientation = 1e-3,
     tolPixelSpacing = 1e-6,
@@ -216,7 +221,7 @@ export function clusterByOrientation(
   const skipped: { file: string; reason: string }[] = [];
 
   for (const f of files) {
-    const parsed = parseDicom(f);
+    const parsed = await parseDicom(f);
     if (!parsed.meta) {
       // Unrelated or non-image files are skipped, not reported as broken images.
       skipped.push({ file: f, reason: parsed.reason });
