@@ -189,7 +189,7 @@ export const storeOriginalArchive = async (options: {
 
   await copyFile(options.sourcePath, archivePath, fsConstants.COPYFILE_EXCL);
   try {
-    await chmod(archivePath, 0o600);
+    await chmod(archivePath, 0o640);
     const metadata = {
       uploadId,
       patientId: options.patientId,
@@ -201,7 +201,7 @@ export const storeOriginalArchive = async (options: {
     };
     await writeFile(metadataPath, JSON.stringify(metadata, null, 2) + '\n', {
       flag: 'wx',
-      mode: 0o600,
+      mode: 0o640,
     });
   } catch (error) {
     await rm(archivePath, { force: true });
