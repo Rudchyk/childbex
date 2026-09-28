@@ -17,6 +17,7 @@
         "bundle": true,
         "clean": true,
         "main": "apps/be/src/main.ts",
+        "additionalEntryPoints": ["apps/be/src/migrate.ts"],
         "tsConfig": "apps/be/tsconfig.app.json",
         "assets": [
           {
@@ -101,8 +102,50 @@
       }
     },
     "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/jest.preset.js",
+        { "externalDependencies": ["jest"] },
+        { "env": "TEST_DATABASE_URL" }
+      ],
       "options": {
         "passWithNoTests": true
+      }
+    },
+    "migrate": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js up"
+      }
+    },
+    "migrate-status": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js status"
+      }
+    },
+    "migrate-down": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js down"
+      }
+    },
+    "migrate-baseline-check": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js baseline --check"
+      }
+    },
+    "migrate-baseline-apply": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js baseline --apply"
       }
     }
   }
