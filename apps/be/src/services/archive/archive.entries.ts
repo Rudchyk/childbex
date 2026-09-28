@@ -218,7 +218,7 @@ export class ExtractionSink {
     }
 
     const target = path.join(this.destDir, this.uniqueName(segments));
-    const handle = await open(target, 'wx', 0o600);
+    const handle = await open(target, 'wx', 0o640);
     let entryBytes = 0;
     try {
       for await (const chunk of await openData()) {
