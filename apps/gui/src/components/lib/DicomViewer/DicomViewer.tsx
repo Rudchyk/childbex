@@ -35,6 +35,11 @@ import { DicomViewerDropbox } from './DicomViewerDropbox';
 
 interface DicomViewerProps {
   list?: string[];
+  /**
+   * Headers for loading `list` (e.g. `authorization` for protected URLs).
+   * Resolved once, right before the URLs are loaded.
+   */
+  getRequestHeaders?: () => Promise<Record<string, string>>;
   isClean?: boolean;
   onCurrentItemChange?: (source: string) => void;
   toolbar?: ReactElement | ReactNode;
@@ -50,6 +55,7 @@ interface DicomViewerProps {
 
 export const DicomViewer: FC<DicomViewerProps> = ({
   list = [],
+  getRequestHeaders,
   isClean,
   onCurrentItemChange,
   toolbar,
@@ -57,6 +63,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<App>(null);
+  const isMountedRef = useRef(false);
   const theme = useTheme();
   const matches = useMediaQuery(theme.breakpoints.down('sm'));
   const [loadedItemsMapping, setLoadedItemsMapping] = useState<
@@ -165,8 +172,11 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   };
 
   useEffect(() => {
+    isMountedRef.current = true;
     if (appRef.current) {
-      return;
+      return () => {
+        isMountedRef.current = false;
+      };
     }
 
     const app = new App();
@@ -271,13 +281,25 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     window.addEventListener('resize', app.onResize);
 
     if (list?.length) {
-      app.loadURLs(list);
+      Promise.resolve(getRequestHeaders?.() ?? {}).then((headers) => {
+        // Unmounted while the headers were being resolved.
+        if (!isMountedRef.current) return;
+        app.loadURLs(list, {
+          requestHeaders: Object.entries(headers).map(([name, value]) => ({
+            name,
+            value,
+          })),
+        });
+      });
     } else {
       setIsShowDropbox(true);
     }
     appRef.current = app;
 
-    return () => appRef.current?.reset();
+    return () => {
+      isMountedRef.current = false;
+      appRef.current?.reset();
+    };
   }, []);
 
   useEffect(() => {

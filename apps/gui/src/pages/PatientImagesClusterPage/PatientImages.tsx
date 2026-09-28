@@ -11,21 +11,37 @@ import {
 } from '@mui/material';
 import { PatientImagesTags } from './PatientImagesTags';
 import { PatientImageReview } from './PatientImageReview';
+import { generatePath } from 'react-router-dom';
+import { apiRoutes } from '@libs/constants';
 import { GetPatientClusterResponse } from '@libs/schemas';
 import { DicomViewer } from '../../components';
+import { apiBaseUrl } from '../../store/apis';
+import { keycloakAuthHeaders } from '../../modules/archiveUpload/httpTransport';
 
 interface PatientImagesProps {
   data: GetPatientClusterResponse;
 }
 
+/** Files are only served by the authenticated API (never from `source`). */
+const getImageFileUrl = (patientId: string, imageId: string) =>
+  apiBaseUrl +
+  generatePath(apiRoutes.patientImageFile, { id: patientId, imageId });
+
 export const PatientImages: FC<PatientImagesProps> = ({ data }) => {
+  // Keyed by file URL: the viewer reports loaded items by their URL.
   const itemsMapping = useMemo(
-    () => Object.fromEntries(data.images.map((item) => [item.source, item])),
+    () =>
+      Object.fromEntries(
+        data.images.map((item) => [
+          getImageFileUrl(data.patientId, item.id),
+          item,
+        ])
+      ),
     [data]
   );
   const theme = useTheme();
   const matches = useMediaQuery(theme.breakpoints.down('sm'));
-  const sources = data.images.map(({ source }) => source);
+  const sources = Object.keys(itemsMapping);
   const [currentSource, setCurrentSource] = useState<string | undefined>();
   const onCurrentItemChange = (newCurrentSource: string) => {
     setCurrentSource(newCurrentSource);
@@ -72,6 +88,7 @@ export const PatientImages: FC<PatientImagesProps> = ({ data }) => {
       )}
       <DicomViewer
         list={sources}
+        getRequestHeaders={keycloakAuthHeaders}
         onCurrentItemChange={onCurrentItemChange}
         sidebarItemIcon={(source: string) =>
           itemsMapping[source].isAbnormal ? (

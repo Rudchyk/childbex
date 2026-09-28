@@ -10,7 +10,6 @@ import {
 } from '../services/prometheus.service';
 import { logger } from '../services/logger.service';
 import { apiRoute } from '@libs/constants';
-import { uploadRoot } from '../services/patients.service';
 
 export const serverRoutes = {
   metrics: metricsRoute,
@@ -23,7 +22,13 @@ export const serverRoutes = {
 export const setupRoutes = (app: Express) => {
   const router = Router();
   const clientDir = path.join(__dirname, process.env.GUI_DIR || '../gui');
-  logger.debug({ clientDir, uploadRoot });
+  logger.debug({ clientDir });
+  // Image files are never served statically (DICOM headers contain PHI):
+  // only via the authenticated patient image file API route. An explicit
+  // 404 keeps old links from falling through to the SPA index.html.
+  router.use(serverRoutes.uploads, (_req, res) => {
+    res.status(404).json({ message: 'Not found.' });
+  });
   router.use(
     express.static(clientDir, {
       index: false,
@@ -33,7 +38,6 @@ export const setupRoutes = (app: Express) => {
     serverRoutes.assets,
     express.static(path.join(__dirname, 'assets'))
   );
-  router.use(serverRoutes.uploads, express.static(uploadRoot));
   router.use(
     apiRoute,
     express.static(path.join(__dirname, 'html', 'oauth2-redirect'))

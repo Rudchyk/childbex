@@ -25,6 +25,8 @@ const patients = {
   patientImagesCluster: '/patients/clusters/:id',
   patientSlugImagesClustersCluster:
     '/patients/slug/:slug/clusters/cluster/:cluster',
+  /** DICOM file of a patient image (authenticated; `id` is the patient id). */
+  patientImageFile: '/patients/:id/images/:imageId/file',
   patientImagesReviewsVotes: '/patients/images/:id/review-votes',
   patientImageReviewVote: '/patients/images/:id/review-votes/:voteId',
 };
