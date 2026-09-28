@@ -1,3 +1,4 @@
+process.env.NX_DAEMON ??= 'false';
 const {
   createProjectGraphAsync,
   detectPackageManager,
