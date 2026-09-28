@@ -28,6 +28,7 @@ import {
   PatientImageReviewVoteRequestBodySchema,
   PatientImageReviewVoteRequestBody,
   PatientImageReviewVoteParamsSchema,
+  PatientImageFileParamsSchema,
 } from '@libs/schemas';
 import { getKeycloakSecurity } from '../lib/security.service';
 import { Tags } from '../lib/tags.service';
@@ -44,6 +45,10 @@ import { Op } from 'sequelize';
 import { PatientImageReviewVote } from '../../../db/models/PatientImageReviewVote.model';
 import { uploadSessionService } from '../../../services/upload-sessions';
 import { logger } from '../../../services/logger.service';
+import {
+  findPatientImageSource,
+  openUploadFile,
+} from '../../../services/patient-image-file.service';
 
 /**
  * Unfinished uploads of a trashed/deleted patient can never be imported;
@@ -459,6 +464,52 @@ router
         throw getNotFoundError('images cluster');
       }
       return Response.json(imagesCluster.toJSON<GetPatientClusterResponse>());
+    },
+  })
+  // Get the DICOM file of a patient image
+  .route({
+    description:
+      'Get the DICOM file of a patient image (streamed as application/dicom)',
+    method: 'GET',
+    path: apiRoutes.patientImageFile,
+    tags: [Tags.PATIENTS],
+    ...getKeycloakSecurity(),
+    schemas: {
+      request: {
+        params: PatientImageFileParamsSchema,
+      },
+      responses: {
+        200: { description: 'DICOM file (application/dicom)' },
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request) {
+      const { id, imageId } = request.params;
+      // The same 404 for an unknown image, an image of another patient and
+      // an unavailable file: the response does not reveal which one it was.
+      const source = await findPatientImageSource(id, imageId);
+      if (!source) {
+        throw getNotFoundError('patient image');
+      }
+      const file = await openUploadFile(source);
+      if (!file.ok) {
+        // Ids only: never the stored path or the original file name.
+        logger.warn(
+          { patientId: id, imageId, reason: file.reason },
+          'patient image file unavailable'
+        );
+        throw getNotFoundError('patient image');
+      }
+      return new Response(file.stream, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/dicom',
+          'Content-Length': String(file.size),
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'private, no-store',
+        },
+      });
     },
   })
   // Add patient image review vote

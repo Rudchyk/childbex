@@ -19,6 +19,7 @@ export * from './lib/GetPatientClusterParams.schema.js';
 export * from './lib/GetPatientClusterResponse.schema.js';
 export * from './lib/PatientImageReviewVoteRequestBody.schema.js';
 export * from './lib/PatientImageReviewVoteParams.schema.js';
+export * from './lib/PatientImageFileParams.schema.js';
 export * from './lib/LLMServiceCheckItemsResponse.schema.js';
 export * from './lib/LLMServiceHealthResponse.schema.js';
 export * from './lib/LLMServiceInferenceResponse.schema.js';
