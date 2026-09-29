@@ -148,6 +148,43 @@ async function parseDicom(filePath: string): Promise<ParseResult> {
   return { meta: null, reason: 'not_dicom' };
 }
 
+/** Length dicom-parser keeps when an undefined-length element is not closed. */
+const UNDEFINED_LENGTH = 0xffffffff;
+
+/**
+ * Why the Pixel Data is unusable, or `undefined` when it is present.
+ *
+ * - Native pixel data must hold at least the uncompressed size
+ *   (`expectedBytes`).
+ * - Encapsulated pixel data (undefined length, split into fragments; written
+ *   for compressed transfer syntaxes such as JPEG Lossless, JPEG-LS,
+ *   JPEG 2000 or RLE) is recognized from its structure, as parsed by
+ *   dicom-parser. Its encoded length is not comparable with the
+ *   uncompressed size; it must contain at least one non-empty fragment and
+ *   end with the sequence delimiter. It is not decoded here: whether a
+ *   compressed image can be used later is a separate decision.
+ */
+export function pixelDataProblem(
+  dataSet: dicomParser.DataSet,
+  expectedBytes: number
+): string | undefined {
+  const pixelData = dataSet.elements.x7fe00010;
+  if (!pixelData) return 'pixeldata_missing';
+
+  if (pixelData.encapsulatedPixelData) {
+    // Without the delimiter the file ended after a fragment: fragments of
+    // the image may be missing, which cannot be detected.
+    if (pixelData.length === UNDEFINED_LENGTH) return 'pixeldata_unterminated';
+    const hasData = (pixelData.fragments ?? []).some(({ length }) => length > 0);
+    return hasData ? undefined : 'pixeldata_empty_fragments';
+  }
+
+  if (expectedBytes > 0 && pixelData.length < expectedBytes) {
+    return `pixeldata_size(expected=${expectedBytes},actual=${pixelData.length})`;
+  }
+  return undefined;
+}
+
 /**
  * Files without SOPInstanceUID, a complete ImagePositionPatient /
  * ImageOrientationPatient, Rows or Columns are not treated as images
@@ -209,20 +246,11 @@ function readSliceMeta(
   const ps = getFloats('x00280030');
   if (ps && ps.length >= 2) pixelSpacing = [ps[0], ps[1]];
 
-  // PixelData check
-  let validPixelData = true;
-  let reason: string | undefined;
-  const pixelElement = (dataSet.elements as any).x7fe00010;
-  if (!pixelElement) {
-    validPixelData = false;
-    reason = 'pixeldata_missing';
-  } else {
-    const expectedBytes = rows * cols * samplesPerPixel * (bitsAllocated / 8);
-    if (expectedBytes > 0 && pixelElement.length < expectedBytes) {
-      validPixelData = false;
-      reason = `pixeldata_size(expected=${expectedBytes},actual=${pixelElement.length})`;
-    }
-  }
+  const reason = pixelDataProblem(
+    dataSet,
+    rows * cols * samplesPerPixel * (bitsAllocated / 8)
+  );
+  const validPixelData = !reason;
 
   return {
     file: filePath,

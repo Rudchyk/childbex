@@ -68,10 +68,11 @@ export interface SyntheticDicomOptions {
   /** File meta Transfer Syntax UID (default explicit VR LE); null omits it. */
   transferSyntaxUid?: string | null;
   /**
-   * Pixel data as an encapsulated fragment (undefined length, empty basic
-   * offset table), as written for compressed transfer syntaxes.
+   * Pixel data as encapsulated fragments (undefined length, empty basic
+   * offset table), as written for compressed transfer syntaxes. A single
+   * buffer is one fragment; `[]` writes the offset table but no fragment.
    */
-  encapsulatedPixelData?: Buffer;
+  encapsulatedPixelData?: Buffer | Buffer[];
 }
 
 const CT_IMAGE_STORAGE = '1.2.840.10008.5.1.4.1.1.2';
@@ -123,7 +124,7 @@ export const SYNTHETIC_SERIES_UID = '2.25.300000000000000000000000001';
 export const SYNTHETIC_FRAME_OF_REFERENCE_UID =
   '2.25.400000000000000000000000001';
 
-const encapsulated = (fragment: Buffer) => {
+const encapsulated = (fragments: Buffer | Buffer[]) => {
   const item = (group: number, elem: number, value: Buffer) => {
     const header = Buffer.alloc(8);
     header.writeUInt16LE(group, 0);
@@ -141,7 +142,9 @@ const encapsulated = (fragment: Buffer) => {
   return Buffer.concat([
     header,
     item(0xfffe, 0xe000, Buffer.alloc(0)), // basic offset table (empty)
-    item(0xfffe, 0xe000, padValue('OB', fragment)),
+    ...[fragments]
+      .flat()
+      .map((fragment) => item(0xfffe, 0xe000, padValue('OB', fragment))),
     item(0xfffe, 0xe0dd, Buffer.alloc(0)), // sequence delimiter
   ]);
 };

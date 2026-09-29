@@ -344,6 +344,30 @@ describe('importPatientArchiveFile DICOM metadata', () => {
     });
   });
 
+  it('imports compressed (encapsulated) slices as regular, not broken, images', async () => {
+    const data = makeSyntheticDicom({
+      rows: 64,
+      cols: 64,
+      transferSyntaxUid: '1.2.840.10008.1.2.4.70', // JPEG Lossless
+      // Far smaller than the 8192 uncompressed bytes.
+      encapsulatedPixelData: Buffer.alloc(300, 7),
+    });
+
+    const result = await importPatientArchiveFile(
+      await assembledArchive('patient-1', [{ name: 'IM1', data }])
+    );
+
+    expect(result).toMatchObject({ importedImages: 1, brokenImages: 0 });
+    const [row] = createdRows();
+    expect(row).toMatchObject({
+      transferSyntaxUid: '1.2.840.10008.1.2.4.70',
+      fileSha256: sha256(data),
+      slicePosition: 1,
+    });
+    expect(row.isBrocken).toBeUndefined();
+    expect(row.status).toBeUndefined();
+  });
+
   it('never logs the series description', async () => {
     await importPatientArchiveFile(
       await assembledArchive('patient-1', [

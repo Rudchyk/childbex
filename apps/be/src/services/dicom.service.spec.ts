@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { clusterByOrientation } from './dicom.service';
+import { clusterByOrientation, type ClusterResult } from './dicom.service';
 import {
   makeSyntheticDicom,
   SYNTHETIC_FRAME_OF_REFERENCE_UID,
@@ -82,6 +82,8 @@ describe('clusterByOrientation', () => {
     ]);
   });
 });
+
+const JPEG_LOSSLESS = '1.2.840.10008.1.2.4.70';
 
 describe('DICOM metadata', () => {
   let n = 0;
@@ -199,23 +201,13 @@ describe('DICOM metadata', () => {
   );
 
   it('keeps metadata and the transfer syntax of encapsulated (compressed) pixel data', async () => {
-    // Current behavior: the pixel data size check compares the encapsulated
-    // (compressed) length with the uncompressed size, so a compressed slice
-    // smaller than the raw pixels is reported as broken. It is still stored
-    // (as broken) with its metadata; no decoder is involved.
-    const { image, result } = await parseImage({
-      transferSyntaxUid: '1.2.840.10008.1.2.4.70', // JPEG Lossless
+    const { image } = await parseImage({
+      transferSyntaxUid: JPEG_LOSSLESS,
       encapsulatedPixelData: Buffer.alloc(20, 1),
     });
 
-    expect(result.clusters).toEqual([]);
-    expect(result.broken).toEqual([
-      expect.objectContaining({
-        reason: 'pixeldata_size(expected=128,actual=44)',
-      }),
-    ]);
     expect(image.metadata.image).toMatchObject({
-      transferSyntaxUid: '1.2.840.10008.1.2.4.70',
+      transferSyntaxUid: JPEG_LOSSLESS,
       sopInstanceUid: expect.any(String),
       rescaleSlope: 1,
     });
@@ -326,5 +318,131 @@ describe('DICOM metadata', () => {
     expect(result.skipped).toEqual([
       expect.objectContaining({ reason: 'not_an_image' }),
     ]);
+  });
+});
+
+describe('pixel data validation', () => {
+  let n = 0;
+  /** Writes one synthetic 8x8 file and parses it on its own. */
+  const parseBytes = async (bytes: Buffer) => {
+    const file = path.join(dir, `pixels-${n++}`);
+    await writeFile(file, bytes);
+    return clusterByOrientation([file]);
+  };
+  const parse = (options: SyntheticDicomOptions = {}) =>
+    parseBytes(makeSyntheticDicom({ rows: 8, cols: 8, ...options }));
+  /** 8 x 8 x 16 bit = 128 bytes uncompressed. */
+  const compressed = (encapsulatedPixelData: Buffer | Buffer[]) =>
+    parse({ transferSyntaxUid: JPEG_LOSSLESS, encapsulatedPixelData });
+  const clusteredCount = (result: ClusterResult) =>
+    result.clusters.flatMap(({ files }) => files).length;
+
+  describe('native (uncompressed) pixel data', () => {
+    it('accepts complete pixel data', async () => {
+      const result = await parse();
+
+      expect(clusteredCount(result)).toBe(1);
+      expect(result.broken).toEqual([]);
+    });
+
+    it('still reports truncated pixel data as broken', async () => {
+      const result = await parse({ pixelDataBytes: 64 });
+
+      expect(clusteredCount(result)).toBe(0);
+      expect(result.broken).toEqual([
+        expect.objectContaining({
+          reason: 'pixeldata_size(expected=128,actual=64)',
+        }),
+      ]);
+    });
+
+    it('reports missing pixel data as broken', async () => {
+      const bytes = makeSyntheticDicom({ rows: 8, cols: 8 });
+      // Cut the file before the Pixel Data element (tag e0 7f 10 00).
+      const pixelTag = bytes.lastIndexOf(Buffer.from([0xe0, 0x7f, 0x10, 0x00]));
+
+      const result = await parseBytes(bytes.subarray(0, pixelTag));
+
+      expect(result.broken).toEqual([
+        expect.objectContaining({ reason: 'pixeldata_missing' }),
+      ]);
+    });
+  });
+
+  describe('encapsulated (compressed) pixel data', () => {
+    it('accepts JPEG Lossless data smaller than the uncompressed size', async () => {
+      const result = await compressed(Buffer.alloc(20, 1));
+
+      expect(result.broken).toEqual([]);
+      const [image] = result.clusters.flatMap(({ files }) => files);
+      expect(image.metadata.image).toMatchObject({
+        transferSyntaxUid: JPEG_LOSSLESS,
+        sopInstanceUid: expect.any(String),
+        rows: 8,
+        columns: 8,
+        rescaleSlope: 1,
+        rescaleIntercept: -1024,
+      });
+      expect(image.fileInfo.sha256).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it.each([
+      ['several fragments', [Buffer.alloc(6, 1), Buffer.alloc(10, 2)]],
+      ['an empty fragment before a non-empty one', [Buffer.alloc(0), Buffer.alloc(8, 3)]],
+      ['data larger than the uncompressed size', [Buffer.alloc(200, 4)]],
+    ])('accepts %s', async (_, fragments) => {
+      const result = await compressed(fragments);
+
+      expect(clusteredCount(result)).toBe(1);
+      expect(result.broken).toEqual([]);
+    });
+
+    it.each([
+      ['only a basic offset table', []],
+      ['only empty fragments', [Buffer.alloc(0), Buffer.alloc(0)]],
+    ])('reports %s as broken, keeping the metadata', async (_, fragments) => {
+      const result = await compressed(fragments);
+
+      expect(clusteredCount(result)).toBe(0);
+      expect(result.broken).toEqual([
+        expect.objectContaining({ reason: 'pixeldata_empty_fragments' }),
+      ]);
+      expect(result.broken[0].metadata.image.transferSyntaxUid).toBe(
+        JPEG_LOSSLESS
+      );
+      expect(result.broken[0].fileInfo.sha256).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('reports pixel data without the sequence delimiter as broken', async () => {
+      const bytes = makeSyntheticDicom({
+        rows: 8,
+        cols: 8,
+        transferSyntaxUid: JPEG_LOSSLESS,
+        encapsulatedPixelData: Buffer.alloc(20, 1),
+      });
+
+      // The file ends after the last fragment (8-byte delimiter removed).
+      const result = await parseBytes(bytes.subarray(0, bytes.length - 8));
+
+      expect(result.broken).toEqual([
+        expect.objectContaining({ reason: 'pixeldata_unterminated' }),
+      ]);
+    });
+
+    it('skips a file cut inside a fragment (unparseable, current behavior)', async () => {
+      const bytes = makeSyntheticDicom({
+        rows: 8,
+        cols: 8,
+        transferSyntaxUid: JPEG_LOSSLESS,
+        encapsulatedPixelData: Buffer.alloc(20, 1),
+      });
+
+      const result = await parseBytes(bytes.subarray(0, bytes.length - 14));
+
+      expect(result.broken).toEqual([]);
+      expect(result.skipped).toEqual([
+        expect.objectContaining({ reason: 'dicom_parse_failed' }),
+      ]);
+    });
   });
 });

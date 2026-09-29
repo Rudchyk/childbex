@@ -49,10 +49,16 @@ Current import behavior (unchanged):
   `dicom_parse_failed` (not parsed with a guessed transfer syntax). Files
   without a meta header are parsed as raw data sets; their
   `transferSyntaxUid` is `NULL`.
-- Encapsulated (compressed) pixel data: the pixel data size check compares
-  the compressed length with the uncompressed size, so a compressed slice
-  that is smaller than its raw pixels is imported as **broken**
-  (`pixeldata_size(...)`), with its metadata.
+- Pixel data validity (`pixelDataProblem` in `services/dicom.service.ts`):
+  native pixel data must hold at least the uncompressed size
+  (`pixeldata_size(...)`). Encapsulated (compressed) pixel data is recognized
+  from its structure (undefined length, fragments) and is not compared with
+  the uncompressed size; it is broken without any non-empty fragment
+  (`pixeldata_empty_fragments`) or without its sequence delimiter
+  (`pixeldata_unterminated`). A file cut inside a fragment cannot be parsed
+  and is skipped (`dicom_parse_failed`). Compressed images are not decoded;
+  being importable does not make them usable for ML (see
+  `transferSyntaxUid`).
 - A multi-frame image is one `PatientImage` (frames are not expanded).
 
 ## Commands
