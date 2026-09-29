@@ -10,7 +10,13 @@ export type ArchiveErrorCode =
   /** A study UID of the archive is stored for another patient. */
   | 'STUDY_BELONGS_TO_ANOTHER_PATIENT'
   /** A series UID of the archive belongs to another study. */
-  | 'SERIES_BELONGS_TO_ANOTHER_STUDY';
+  | 'SERIES_BELONGS_TO_ANOTHER_STUDY'
+  /** A SOP instance UID is stored with other (or unverified) content. */
+  | 'SOP_INSTANCE_CONTENT_CONFLICT'
+  /** A SOP instance UID is stored for another patient. */
+  | 'SOP_INSTANCE_BELONGS_TO_ANOTHER_PATIENT'
+  /** A SOP instance UID is stored in another study or series. */
+  | 'SOP_INSTANCE_BELONGS_TO_ANOTHER_SERIES';
 
 /**
  * Error raised while validating/extracting an uploaded archive.

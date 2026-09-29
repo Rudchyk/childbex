@@ -15,6 +15,14 @@ import {
   linkPatientHierarchy,
   type HierarchyImage,
 } from './dicom-hierarchy.service';
+import {
+  acquireImportLock,
+  findExistingInstances,
+  InstanceConflictError,
+  planInstances,
+  type IncomingInstance,
+  type InstancePlan,
+} from './instance-dedup.service';
 import { PatientImagesCluster } from '../db/models/PatientImagesCluster.model';
 import {
   PatientImage,
@@ -79,14 +87,17 @@ const persistClusters = async (
   let alreadyImported = 0;
 
   await sequelize.transaction(async (transaction) => {
+    // Serializes the persistence phase of all imports: the instance
+    // deduplication below and the inserts cannot race another import.
+    // Taken before any Study/Series/cluster/image write.
+    await acquireImportLock(sequelize, transaction);
+
+    const images = [...clusters.flatMap(({ files }) => files), ...broken];
     // Patient -> Study -> Series, in parallel with the clusters (transition).
     const hierarchy = await linkPatientHierarchy(
       sequelize,
       patientId,
-      [
-        ...clusters.flatMap(({ files }) => files),
-        ...broken,
-      ].map(({ metadata }) => toHierarchyImage(metadata)),
+      images.map(({ metadata }) => toHierarchyImage(metadata)),
       transaction
     ).catch((error) => {
       // A study of another patient or a series of another study: reject
@@ -106,6 +117,40 @@ const persistClusters = async (
         hierarchy.seriesIds.get(image.seriesInstanceUid)) ||
       null;
 
+    // DICOM instance identity (SOP Instance UID + file hash), decided before
+    // any file is placed: a conflict rejects the archive without leftovers.
+    const incoming: IncomingInstance[] = images.map(
+      ({ file, metadata, fileInfo }) => ({
+        file,
+        sopInstanceUid: metadata.image.sopInstanceUid,
+        fileSha256: fileInfo.sha256,
+        studyInstanceUid: metadata.image.studyInstanceUid,
+        seriesInstanceUid: metadata.image.seriesInstanceUid,
+        seriesId: seriesIdOf(metadata),
+      })
+    );
+    let plan: InstancePlan;
+    try {
+      plan = planInstances(
+        patientId,
+        incoming,
+        await findExistingInstances(sequelize, incoming, transaction)
+      );
+    } catch (error) {
+      if (error instanceof InstanceConflictError) {
+        throw new ArchiveError(error.code, error.message);
+      }
+      throw error;
+    }
+    if (plan.possibleDuplicateContent.length) {
+      // Image ids only (no UIDs, hashes or names).
+      logger.warn(
+        { patientId, storedImageIds: plan.possibleDuplicateContent },
+        'possible_duplicate_content: stored images with the same file hash under another SOP Instance UID'
+      );
+    }
+    alreadyImported = plan.alreadyImported.size;
+
     const importGroup = async (
       clusterValues: {
         name: string;
@@ -114,11 +159,14 @@ const persistClusters = async (
         notes: string;
         studyDate?: string | null;
       },
-      files: {
+      allFiles: {
         file: string;
         row: Omit<PatientImageRow, 'source' | 'clusterId'>;
       }[]
     ) => {
+      // Instances already stored keep their row (and cluster) unchanged.
+      const files = allFiles.filter(({ file }) => plan.toImport.has(file));
+      if (!files.length) return;
       const [imageCluster] = await PatientImagesCluster.findOrCreate({
         where: clusterValues,
         defaults: clusterValues,
@@ -127,28 +175,10 @@ const persistClusters = async (
       const folder = path.join(destDir, imageCluster.id);
       await tracker.ensureDir(folder);
 
-      // Same file re-uploaded into the same cluster: keep the existing image.
-      const existing = new Set(
-        (
-          await PatientImage.findAll({
-            attributes: ['source'],
-            where: {
-              source: files.map(({ file }) =>
-                toSource(patientId, imageCluster.id, path.basename(file))
-              ),
-            },
-            transaction,
-          })
-        ).map((image) => image.source)
-      );
-
       const rows: PatientImageRow[] = [];
       for (const { file, row } of files) {
+        // The file name is only a storage name (made unique if taken).
         const name = path.basename(file);
-        if (existing.has(toSource(patientId, imageCluster.id, name))) {
-          alreadyImported += 1;
-          continue;
-        }
         const finalName = await tracker.placeFile(file, folder, name);
         rows.push({
           ...row,

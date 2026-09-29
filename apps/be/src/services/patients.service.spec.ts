@@ -27,6 +27,14 @@ const mockState = {
   hierarchyConflict: false,
 };
 
+// The lock and the lookup (SQL) are covered by the PostgreSQL integration
+// tests; the deduplication decision itself is the real one.
+jest.mock('./instance-dedup.service', () => ({
+  ...jest.requireActual('./instance-dedup.service'),
+  acquireImportLock: jest.fn(async () => undefined),
+  findExistingInstances: jest.fn(async () => []),
+}));
+
 // The real hierarchy (SQL) is covered by the PostgreSQL integration tests.
 jest.mock('./dicom-hierarchy.service', () => {
   const actual = jest.requireActual('./dicom-hierarchy.service');

@@ -147,8 +147,42 @@ returned by the API).
   image prevents its series from being deleted (NO ACTION). Deleting a
   cluster deletes its images and files as before, but not the studies and
   series (they may be left without images).
-- Import quirk (unchanged): a file whose name already exists in the target
-  cluster is skipped as already imported, even if it is another instance.
+
+### DICOM instance identity (import deduplication)
+
+An image is identified by its **SOP Instance UID**; the file SHA-256 tells
+whether a known UID comes with the same content. File names, storage paths
+(`source`) and clusters are not identity (a file name already taken in the
+cluster only gets a `_1`, `_2`, ... suffix). See
+`services/instance-dedup.service.ts`.
+
+| Archive image vs. stored images | Result |
+| --- | --- |
+| New SOP UID | imported |
+| Same SOP UID, same hash, same patient / study / series (any cluster) | `alreadyImported`: no row, no file; the stored row (id, cluster, review state, votes, metadata) is unchanged |
+| Same SOP UID, other hash, or a stored row without hash | archive rejected: `SOP_INSTANCE_CONTENT_CONFLICT` |
+| Same SOP UID stored for another patient (also in the trash) | archive rejected: `SOP_INSTANCE_BELONGS_TO_ANOTHER_PATIENT` |
+| Same SOP UID in another study or series | archive rejected: `SOP_INSTANCE_BELONGS_TO_ANOTHER_SERIES` |
+| Same SOP UID twice in one archive | same hash: one row (`alreadyImported`); other hash: `SOP_INSTANCE_CONTENT_CONFLICT` |
+| Other SOP UID, hash stored under another UID (legacy inconsistency) | imported; `possible_duplicate_content` warning (image ids only) |
+| No SOP UID | unchanged: skipped as `not_an_image` |
+
+Broken images follow the same rules. A rejected archive rolls back its
+transaction (studies, series, clusters, images) and removes every file it
+placed. The decision is taken before any file is placed.
+
+The persistence phase of every import (one transaction: hierarchy,
+deduplication, file placement, inserts) runs under one global
+transaction-level advisory lock (`IMPORT_PERSISTENCE_LOCK_KEY`), so
+concurrent imports cannot both insert an instance; extraction and parsing
+run in parallel. `patients_images.sopInstanceUid` and `fileSha256` have
+non-unique indexes (migration `202609301200-patient-image-instance-indexes`);
+a UNIQUE constraint needs a cleanup of legacy duplicates first (see the
+`backfill dicom-metadata` report).
+
+Images imported before migration `202609281200-patient-image-dicom-metadata`
+have no SOP UID until `backfill dicom-metadata` fills it: run it right after
+deploying, otherwise a re-upload of such an instance is not recognized.
 
 ### Linking existing images: `backfill study-series`
 

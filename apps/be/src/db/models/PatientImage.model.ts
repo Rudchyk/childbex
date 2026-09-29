@@ -304,7 +304,13 @@ PatientImage.init(
     sequelize,
     tableName: 'patients_images',
     timestamps: true,
-    indexes: [{ name: 'patients_images_series_id', fields: ['seriesId'] }],
+    indexes: [
+      { name: 'patients_images_series_id', fields: ['seriesId'] },
+      // Not unique (legacy duplicates may exist); used by the import
+      // deduplication.
+      { name: 'patients_images_sop_instance_uid', fields: ['sopInstanceUid'] },
+      { name: 'patients_images_file_sha256', fields: ['fileSha256'] },
+    ],
     hooks: {
       async afterDestroy({ source }) {
         const root = uploadRoot.replace('uploads', '');

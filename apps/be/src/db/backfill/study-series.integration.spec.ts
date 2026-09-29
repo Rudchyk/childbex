@@ -105,6 +105,14 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
 
   // --- Helpers -----------------------------------------------------------------
 
+  const { migrations } = require('../migrations') as typeof import('../migrations');
+  /** The migrations up to Study/Series (later ones build on it). */
+  const upToStudySeries = () =>
+    migrations.slice(
+      0,
+      migrations.findIndex(({ name }) => name === '202609291200-study-series') + 1
+    );
+
   const count = async (table: string, where = 'TRUE') => {
     const [row] = await sequelize.query<{ n: string }>(
       `SELECT count(*) AS n FROM ${table} WHERE ${where}`,
@@ -126,16 +134,18 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
    * exists in the cluster (existing behavior, keyed by path).
    */
   const importSlices = async (patientId: string, slices: SyntheticDicomOptions[]) => {
+    // Taken before the first await: concurrent calls get their own numbers.
+    const number = ++archiveCount;
     const bytes = await buildTar(
       slices.map((options, i) => ({
-        name: `DICOM/A${archiveCount}-IM${i}`,
+        name: `DICOM/A${number}-IM${i}`,
         data: makeSyntheticDicom(options),
       }))
     );
-    const archivePath = path.join(tmp, `archive-${archiveCount++}.tar`);
+    const archivePath = path.join(tmp, `archive-${number}.tar`);
     await writeFile(archivePath, bytes);
     return importPatientArchiveFile({
-      uploadId: `00000000-0000-4000-8000-${String(archiveCount).padStart(12, '0')}`,
+      uploadId: `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`,
       patientId,
       archivePath,
       extension: '.tar',
@@ -199,14 +209,18 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
     });
 
     it('can be rolled back and applied again', async () => {
-      const reverted = await migrator.migrateDown(sequelize);
+      // Later migrations first, then this one.
+      const later = migrations.length - upToStudySeries().length;
+      for (let i = 0; i < later; i++) await migrator.migrateDown(sequelize);
+
+      const reverted = await migrator.migrateDown(sequelize, upToStudySeries());
 
       expect(reverted.map(({ name }) => name)).toEqual(['202609291200-study-series']);
       const { columns } = await migrator.readActualSchema(sequelize);
       expect(columns.studies).toBeUndefined();
       expect(columns.series).toBeUndefined();
       expect(columns.patients_images).not.toHaveProperty('seriesId');
-      expect(await migrator.migrateUp(sequelize)).toHaveLength(1);
+      expect(await migrator.migrateUp(sequelize)).toHaveLength(later + 1);
     });
   });
 
@@ -340,14 +354,16 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
     });
 
     it('creates the hierarchy once for concurrent imports of one study', async () => {
-      const results = await Promise.allSettled([
+      const results = await Promise.all([
         importSlices(P1, [{ instance: 1 }, { instance: 2 }]),
         importSlices(P1, [{ instance: 1 }, { instance: 2 }]),
       ]);
 
-      expect(results.some(({ status }) => status === 'fulfilled')).toBe(true);
+      // Both succeed; the instances are stored once (deduplication).
+      expect(results.map(({ importedImages }) => importedImages).sort()).toEqual([0, 2]);
       expect(await count('studies')).toBe(1);
       expect(await count('series')).toBe(1);
+      expect(await count('patients_images')).toBe(2);
       expect(await count('patients_images', '"seriesId" IS NULL')).toBe(0);
     });
   });
@@ -623,7 +639,8 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
     });
 
     it('refuses to run before the Study/Series migration is applied', async () => {
-      await migrator.migrateDown(sequelize);
+      const toRevert = migrations.length - upToStudySeries().length + 1;
+      for (let i = 0; i < toRevert; i++) await migrator.migrateDown(sequelize);
 
       await expect(run({ apply: true })).rejects.toThrow(
         /Pending database migrations: 202609291200-study-series/

@@ -1,6 +1,7 @@
 import { baselineMigration } from './202609280000-baseline-schema';
 import { patientImageDicomMetadataMigration } from './202609281200-patient-image-dicom-metadata';
 import { studySeriesMigration } from './202609291200-study-series';
+import { patientImageInstanceIndexesMigration } from './202609301200-patient-image-instance-indexes';
 import type { Migration } from './types';
 
 export type { Migration, MigrationContext } from './types';
@@ -14,4 +15,5 @@ export const migrations: Migration[] = [
   baselineMigration,
   patientImageDicomMetadataMigration,
   studySeriesMigration,
+  patientImageInstanceIndexesMigration,
 ];
