@@ -180,6 +180,7 @@ describe('patient cluster', () => {
     ];
     expect(options.include[0].attributes.exclude).toEqual([
       ...patientImageDicomMetadataAttributes,
+      'seriesId',
     ]);
     findPatient.mockRestore();
     findCluster.mockRestore();

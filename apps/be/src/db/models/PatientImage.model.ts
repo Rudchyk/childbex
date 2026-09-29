@@ -23,14 +23,15 @@ import path from 'path';
 import { uploadRoot } from '../../services/patients.service';
 import type { PatientImageDicomMetadata } from '../../services/dicom.metadata';
 
-/** The API shape plus the backend-internal DICOM metadata. */
-type PatientImageAttributes = IPatientImage & PatientImageDicomMetadata;
+/** The API shape plus the backend-internal DICOM metadata and series. */
+type PatientImageAttributes = IPatientImage &
+  PatientImageDicomMetadata & { seriesId: string | null };
 
 export type PatientImageCreationAttributes = Pick<
   IPatientImage,
   'details' | 'clusterId' | 'notes' | 'source'
 > &
-  Partial<PatientImageDicomMetadata>;
+  Partial<PatientImageDicomMetadata> & { seriesId?: string | null };
 
 export class PatientImage
   extends Model<PatientImageAttributes, PatientImageCreationAttributes>
@@ -83,6 +84,8 @@ export class PatientImage
   declare fileSha256: PatientImageDicomMetadata['fileSha256'];
   /** BIGINT: read back as a string by the pg driver. */
   declare fileSize: PatientImageDicomMetadata['fileSize'];
+  /** DICOM series (backend-internal; null until linked). */
+  declare seriesId: string | null;
 
   // Sequelize‑generated:
   declare readonly createdAt: IPatientImage['createdAt'];
@@ -287,12 +290,21 @@ PatientImage.init(
     transferSyntaxUid: { type: DataTypes.STRING(64), allowNull: true },
     fileSha256: { type: DataTypes.CHAR(64), allowNull: true },
     fileSize: { type: DataTypes.BIGINT, allowNull: true },
+    // Migration 202609291200-study-series. Referenced by table name: the
+    // Series model is not imported here (it would create an import cycle).
+    seriesId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: 'series', key: 'id' },
+      onDelete: 'NO ACTION',
+    },
     ...timestampFields,
   },
   {
     sequelize,
     tableName: 'patients_images',
     timestamps: true,
+    indexes: [{ name: 'patients_images_series_id', fields: ['seriesId'] }],
     hooks: {
       async afterDestroy({ source }) {
         const root = uploadRoot.replace('uploads', '');

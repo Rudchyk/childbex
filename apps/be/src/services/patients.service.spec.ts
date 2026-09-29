@@ -23,7 +23,43 @@ const transaction = { id: 'tx' };
 const mockState = {
   failBulkCreate: false,
   failCommit: false,
+  /** Makes the hierarchy report an ownership conflict. */
+  hierarchyConflict: false,
 };
+
+// The real hierarchy (SQL) is covered by the PostgreSQL integration tests.
+jest.mock('./dicom-hierarchy.service', () => {
+  const actual = jest.requireActual('./dicom-hierarchy.service');
+  return {
+    ...actual,
+    linkPatientHierarchy: jest.fn(
+      async (
+        _sequelize: unknown,
+        _patientId: string,
+        images: { seriesInstanceUid: string | null }[]
+      ) => {
+        if (mockState.hierarchyConflict) {
+          throw new actual.HierarchyConflictError(
+            'STUDY_BELONGS_TO_ANOTHER_PATIENT'
+          );
+        }
+        return {
+          seriesIds: new Map(
+            images
+              .filter(({ seriesInstanceUid }) => seriesInstanceUid)
+              .map(({ seriesInstanceUid }) => [
+                seriesInstanceUid,
+                `series-of-${seriesInstanceUid}`,
+              ])
+          ),
+          studiesCreated: 1,
+          seriesCreated: 1,
+          warnings: [],
+        };
+      }
+    ),
+  };
+});
 
 jest.mock('./logger.service', () => ({
   logger: {
@@ -83,6 +119,7 @@ beforeEach(async () => {
   process.env.ARCHIVE_WORK_DIR = workRoot;
   mockState.failBulkCreate = false;
   mockState.failCommit = false;
+  mockState.hierarchyConflict = false;
   jest.resetModules();
   // Roots are read at module load, so import after setting the env.
 
@@ -366,6 +403,43 @@ describe('importPatientArchiveFile DICOM metadata', () => {
     });
     expect(row.isBrocken).toBeUndefined();
     expect(row.status).toBeUndefined();
+  });
+
+  it('links every image to its series', async () => {
+    await importPatientArchiveFile(await assembledArchive('patient-1'));
+
+    const rows = createdRows();
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.seriesId).toBe(`series-of-${row.seriesInstanceUid}`);
+    }
+  });
+
+  it('leaves images without a study or series UID unlinked', async () => {
+    await importPatientArchiveFile(
+      await assembledArchive('patient-1', [
+        {
+          name: 'IM1',
+          data: makeSyntheticDicom({ attributes: { StudyInstanceUID: null } }),
+        },
+      ])
+    );
+
+    expect(createdRows()[0].seriesId).toBeNull();
+  });
+
+  it('rejects the whole archive when a study belongs to another patient', async () => {
+    mockState.hierarchyConflict = true;
+
+    await expect(
+      importPatientArchiveFile(await assembledArchive('patient-1'))
+    ).rejects.toMatchObject({
+      name: 'ArchiveError',
+      code: 'STUDY_BELONGS_TO_ANOTHER_PATIENT',
+    });
+    expect(models.PatientImage.bulkCreate).not.toHaveBeenCalled();
+    expect(await listTree(uploadRoot)).toEqual([]);
+    expect(await readdir(archivesRoot)).toEqual([]);
   });
 
   it('never logs the series description', async () => {

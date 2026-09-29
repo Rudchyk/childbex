@@ -452,8 +452,10 @@ router
           {
             model: PatientImage,
             as: 'images',
-            // The DICOM metadata is backend-internal.
-            attributes: { exclude: [...patientImageDicomMetadataAttributes] },
+            // The DICOM metadata and series are backend-internal.
+            attributes: {
+              exclude: [...patientImageDicomMetadataAttributes, 'seriesId'],
+            },
             include: [
               {
                 model: PatientImageReviewVote,

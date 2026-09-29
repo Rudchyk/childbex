@@ -229,6 +229,16 @@ const groupBy = (entries: GroupEntry[], key: (entry: GroupEntry) => string | nul
 const distinct = (values: (string | null)[]) =>
   [...new Set(values.filter((value): value is string => value !== null))].sort();
 
+/**
+ * Report identifier of a value (UID, hash): `k-<keyed HMAC>`. Stable for the
+ * same key; the value itself cannot be read back from it.
+ */
+export const reportKey = (hmacKey: string, kind: string, value: string) =>
+  `k-${createHmac('sha256', hmacKey)
+    .update(`${kind}:${value}`)
+    .digest('hex')
+    .slice(0, 16)}`;
+
 /** Builds the duplicate / leakage groups (pure; used by tests). */
 export const buildGroups = (
   entries: GroupEntry[],
@@ -239,10 +249,7 @@ export const buildGroups = (
     value: string,
     members: GroupEntry[]
   ): BackfillGroup => ({
-    key: `k-${createHmac('sha256', hmacKey)
-      .update(`${kind}:${value}`)
-      .digest('hex')
-      .slice(0, 16)}`,
+    key: reportKey(hmacKey, kind, value),
     imageIds: members.map(({ imageId }) => imageId).sort(),
     patientIds: distinct(members.map(({ patientId }) => patientId)),
   });

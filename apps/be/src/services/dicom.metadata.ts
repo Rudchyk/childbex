@@ -93,8 +93,32 @@ export interface ParsedDicomMetadata {
     bitsAllocated: number | null;
     highBit: number | null;
     samplesPerPixel: number | null;
+    /** StudyDate (DA) as `YYYY-MM-DD`; no time zone involved. */
+    studyDate: string | null;
+    /** StudyTime (TM) exactly as recorded, e.g. `093015.123`. */
+    studyTime: string | null;
   };
 }
+
+/** DICOM DA `YYYYMMDD` -> `YYYY-MM-DD`, only for a real calendar date. */
+export const normalizeDicomDate = (value: string | null): string | null => {
+  const match = value?.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (!match) return null;
+  const [, year, month, day] = match.map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? `${match[1]}-${match[2]}-${match[3]}`
+    : null;
+};
+
+/** DICOM TM `HH[MM[SS[.F{1,6}]]]` (leap second allowed), unchanged. */
+export const normalizeDicomTime = (value: string | null): string | null =>
+  value &&
+  /^([01]\d|2[0-3])([0-5]\d(([0-5]\d|60)(\.\d{1,6})?)?)?$/.test(value)
+    ? value
+    : null;
 
 const UID_PATTERN = /^[0-9]+(\.[0-9]+)*$/;
 const INTEGER_PATTERN = /^[+-]?\d+$/;
@@ -221,6 +245,8 @@ export const readDicomMetadata = (
       bitsAllocated: r.ushort('x00280100'),
       highBit: r.ushort('x00280102'),
       samplesPerPixel: r.ushort('x00280002'),
+      studyDate: normalizeDicomDate(r.text('x00080020')),
+      studyTime: normalizeDicomTime(r.text('x00080030')),
     },
   };
 };

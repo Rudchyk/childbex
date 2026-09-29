@@ -167,6 +167,8 @@ describe('DICOM metadata', () => {
       bitsAllocated: 16,
       highBit: 15,
       samplesPerPixel: 1,
+      studyDate: '2020-01-01',
+      studyTime: '120000',
     });
   });
 

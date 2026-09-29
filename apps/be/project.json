@@ -161,6 +161,20 @@
       "options": {
         "command": "node dist/apps/be/migrate.js backfill dicom-metadata --apply"
       }
+    },
+    "backfill-study-series": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js backfill study-series --dry-run"
+      }
+    },
+    "backfill-study-series-apply": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js backfill study-series --apply"
+      }
     }
   }
 }

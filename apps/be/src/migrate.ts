@@ -9,6 +9,9 @@
  *   node migrate.js backfill dicom-metadata [--apply] [...]
  *                                       fill image metadata from stored files
  *                                       (dry-run unless --apply)
+ *   node migrate.js backfill study-series [--apply] [...]
+ *                                       link images to Study / Series
+ *                                       (dry-run unless --apply)
  *
  * Uses the same environment (DB_*) as the backend. See db/README.md.
  */
@@ -24,10 +27,14 @@ import {
   type SchemaComparison,
 } from './db/migrator';
 import { backfillUsage, runBackfillCli } from './db/backfill/dicom-metadata.cli';
+import {
+  runStudySeriesCli,
+  studySeriesUsage,
+} from './db/backfill/study-series.cli';
 
 const usage =
   'Usage: node migrate.js <up | status | down | baseline --check | baseline --apply' +
-  ' | backfill dicom-metadata [options]>';
+  ' | backfill dicom-metadata [options] | backfill study-series [options]>';
 
 const printComparison = ({ errors, warnings }: SchemaComparison) => {
   for (const error of errors) console.error(`ERROR    ${error}`);
@@ -44,11 +51,10 @@ const run = async (
 ): Promise<number> => {
   switch (command) {
     case 'backfill': {
-      if (flag !== 'dicom-metadata') {
-        console.error(backfillUsage);
-        return 2;
-      }
-      return runBackfillCli(sequelize, rest);
+      if (flag === 'dicom-metadata') return runBackfillCli(sequelize, rest);
+      if (flag === 'study-series') return runStudySeriesCli(sequelize, rest);
+      console.error(`${backfillUsage}\n${studySeriesUsage}`);
+      return 2;
     }
     case 'up': {
       const applied = await migrateUp(sequelize);

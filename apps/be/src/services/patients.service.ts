@@ -6,7 +6,15 @@ import {
   clusterByOrientation,
   ClusterResult,
 } from './dicom.service';
-import { toPatientImageDicomMetadata } from './dicom.metadata';
+import {
+  toPatientImageDicomMetadata,
+  type ParsedDicomMetadata,
+} from './dicom.metadata';
+import {
+  HierarchyConflictError,
+  linkPatientHierarchy,
+  type HierarchyImage,
+} from './dicom-hierarchy.service';
 import { PatientImagesCluster } from '../db/models/PatientImagesCluster.model';
 import {
   PatientImage,
@@ -39,6 +47,23 @@ type PatientImageRow = PatientImageCreationAttributes &
 const toSource = (patientId: string, clusterId: string, name: string) =>
   `/uploads/${patientId}/${clusterId}/${name}`;
 
+const toHierarchyImage = ({
+  image,
+  fileOnly,
+}: ParsedDicomMetadata): HierarchyImage => ({
+  studyInstanceUid: image.studyInstanceUid,
+  seriesInstanceUid: image.seriesInstanceUid,
+  studyDate: fileOnly.studyDate,
+  studyTime: fileOnly.studyTime,
+  seriesNumber: image.seriesNumber,
+  seriesDescription: image.seriesDescription,
+  modality: image.modality,
+  imageType: image.imageType,
+  frameOfReferenceUid: image.frameOfReferenceUid,
+  convolutionKernel: image.convolutionKernel,
+  sliceThickness: image.sliceThickness,
+});
+
 /**
  * Creates clusters/images for a parsed study inside one DB transaction and
  * places the image files into the uploads directory. The caller must call
@@ -54,6 +79,33 @@ const persistClusters = async (
   let alreadyImported = 0;
 
   await sequelize.transaction(async (transaction) => {
+    // Patient -> Study -> Series, in parallel with the clusters (transition).
+    const hierarchy = await linkPatientHierarchy(
+      sequelize,
+      patientId,
+      [
+        ...clusters.flatMap(({ files }) => files),
+        ...broken,
+      ].map(({ metadata }) => toHierarchyImage(metadata)),
+      transaction
+    ).catch((error) => {
+      // A study of another patient or a series of another study: reject
+      // the whole archive (the transaction rolls back).
+      if (error instanceof HierarchyConflictError) {
+        throw new ArchiveError(error.code, error.message);
+      }
+      throw error;
+    });
+    for (const warning of hierarchy.warnings) {
+      // Ids and field names only.
+      logger.warn({ patientId, ...warning }, 'DICOM hierarchy values differ');
+    }
+    const seriesIdOf = ({ image }: ParsedDicomMetadata) =>
+      (image.studyInstanceUid &&
+        image.seriesInstanceUid &&
+        hierarchy.seriesIds.get(image.seriesInstanceUid)) ||
+      null;
+
     const importGroup = async (
       clusterValues: {
         name: string;
@@ -132,6 +184,7 @@ const persistClusters = async (
           row: {
             details: { geometry, outliers, normal },
             ...toPatientImageDicomMetadata(metadata, fileInfo, positionScalar),
+            seriesId: seriesIdOf(metadata),
           },
         }))
       );
@@ -150,6 +203,7 @@ const persistClusters = async (
             status: PatientImageStatus.BROKEN,
             // Not part of a cluster: no position along a slice normal.
             ...toPatientImageDicomMetadata(metadata, fileInfo, null),
+            seriesId: seriesIdOf(metadata),
           },
         }))
       );

@@ -121,6 +121,67 @@ Production run:
 4. Run the dry-run again: nothing should be left to update except rows with
    problems listed in the report.
 
+## DICOM Study and Series
+
+Since migration `202609291200-study-series`:
+`Patient -> Study -> Series -> PatientImage` (`patients_images.seriesId`),
+in parallel with `Patient -> PatientImagesCluster -> PatientImage` during
+the transition (the cluster API and GUI are unchanged; `seriesId` is not
+returned by the API).
+
+- `studies`: `patientId`, `studyInstanceUid` (UNIQUE), `studyDate`
+  (DICOM DA as a date, no time zone), `studyTime` (DICOM TM as recorded).
+- `series`: `studyId`, `seriesInstanceUid` (UNIQUE), `seriesNumber`,
+  `seriesDescription` (free text, never logged), `modality`, `imageType`,
+  `frameOfReferenceUid`, `convolutionKernel`, `sliceThickness`. A field is
+  only set to a value all its images agree on; stored values are never
+  overwritten (differences are logged with ids and field names only).
+- Rows are created with `INSERT ... ON CONFLICT DO NOTHING` and read back
+  (`services/dicom-hierarchy.service.ts`), in UID order: concurrent imports
+  of one study create it once. A Study UID stored for another patient or a
+  Series UID of another study rejects the whole archive
+  (`STUDY_BELONGS_TO_ANOTHER_PATIENT` / `SERIES_BELONGS_TO_ANOTHER_STUDY`);
+  nothing is re-parented.
+- Images without both UIDs stay unlinked (`seriesId` NULL).
+- Deleting: studies and series follow the patient (ON DELETE CASCADE); an
+  image prevents its series from being deleted (NO ACTION). Deleting a
+  cluster deletes its images and files as before, but not the studies and
+  series (they may be left without images).
+- Import quirk (unchanged): a file whose name already exists in the target
+  cluster is skipped as already imported, even if it is another instance.
+
+### Linking existing images: `backfill study-series`
+
+`node migrate.js backfill study-series` links images imported before the
+migration, from the UIDs already stored on them. Dry-run unless `--apply`;
+never run on startup. Options: `--apply`, `--dry-run`, `--report <file.json>`
+(same rules as above), `--include-trashed`. Needs `REPORT_HMAC_KEY` and
+`UPLOAD_ROOT` like `backfill dicom-metadata`.
+
+- Only rows with `fileSha256 IS NOT NULL` are used. The hash value itself is
+  not used: it marks that the row's metadata was read completely and without
+  conflict (by the import or `backfill dicom-metadata`). Rows with UIDs but no
+  hash (e.g. `metadata_conflict` rows of that backfill) are reported as
+  `metadata_not_verified` and are not linked. Run `backfill dicom-metadata`
+  first.
+- A Study UID under several patients or a Series UID under several studies
+  (among these rows and the existing studies/series) is reported as a
+  conflict; none of its images is linked.
+- StudyDate / StudyTime are read from one file per study (the lowest image
+  id; same safe path resolution). When unavailable they stay NULL with a
+  warning, and the images are linked anyway.
+- One transaction per study; only `seriesId` changes (`updatedAt`, status and
+  review data are unchanged). Rerunning is idempotent.
+- Per-row results: `would_link` / `linked`, `metadata_not_verified`,
+  `missing_study_uid`, `missing_series_uid`, `study_ownership_conflict`,
+  `series_ownership_conflict`, `changed_during_run`,
+  `skipped_trashed_patient`.
+
+Production order: back up, apply the migration, run
+`backfill dicom-metadata` (dry-run, then `--apply`), then
+`backfill study-series --report ~/study-series-dry-run.json`, review, then
+`--apply --report ~/study-series-apply.json`.
+
 ## Commands
 
 The CLI is bundled as `migrate.js` next to `main.js` and uses the same
@@ -136,6 +197,8 @@ directory, and `apps/be/.env.local` when run through Nx).
 | `npm run be:migrate:baseline:apply` | `node migrate.js baseline --apply` | record the baseline for an existing schema               |
 | `npm run be:backfill:dicom-metadata` | `node migrate.js backfill dicom-metadata` | metadata backfill, dry-run (see above)         |
 | `npm run be:backfill:dicom-metadata:apply` | `node migrate.js backfill dicom-metadata --apply` | metadata backfill, write              |
+| `npm run be:backfill:study-series` | `node migrate.js backfill study-series` | Study/Series linking, dry-run                       |
+| `npm run be:backfill:study-series:apply` | `node migrate.js backfill study-series --apply` | Study/Series linking, write             |
 
 The `npm run` commands build the backend first. To target another database
 than the one in `apps/be/.env.local`, set the variable in the shell (it takes

@@ -100,6 +100,8 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
     ({ PatientImage } = require('./models/PatientImage.model'));
     models = [
       require('./models/Patient.model').Patient,
+      require('./models/Study.model').Study,
+      require('./models/Series.model').Series,
       require('./models/PatientImagesCluster.model').PatientImagesCluster,
       PatientImage,
       require('./models/PatientImageReviewVote.model').PatientImageReviewVote,
@@ -301,6 +303,12 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
 
   describe('patient image DICOM metadata migration', () => {
     const metadataMigration = '202609281200-patient-image-dicom-metadata';
+    /** The migrations up to this one (later ones build on it). */
+    const upToMetadata = () =>
+      migrations.slice(
+        0,
+        migrations.findIndex(({ name }) => name === metadataMigration) + 1
+      );
     const PATIENT_ID = '11111111-1111-4111-8111-111111111111';
     const CLUSTER_ID = '22222222-2222-4222-8222-222222222222';
     const IMAGE_ID = '33333333-3333-4333-8333-333333333333';
@@ -357,7 +365,7 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
       );
       await migrator.applyBaseline(sequelize);
 
-      const applied = await migrator.migrateUp(sequelize);
+      const applied = await migrator.migrateUp(sequelize, upToMetadata());
 
       expect(applied.map(({ name }) => name)).toEqual([metadataMigration]);
       const { columns } = await migrator.readActualSchema(sequelize);
@@ -462,9 +470,9 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
     });
 
     it('can be rolled back (and applied again)', async () => {
-      await migrator.migrateUp(sequelize);
+      await migrator.migrateUp(sequelize, upToMetadata());
 
-      const reverted = await migrator.migrateDown(sequelize);
+      const reverted = await migrator.migrateDown(sequelize, upToMetadata());
 
       expect(reverted.map(({ name }) => name)).toEqual([metadataMigration]);
       const { columns } = await migrator.readActualSchema(sequelize);
@@ -476,7 +484,9 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
         warnings: [],
       });
       expect(
-        (await migrator.migrateUp(sequelize)).map(({ name }) => name)
+        (await migrator.migrateUp(sequelize, upToMetadata())).map(
+          ({ name }) => name
+        )
       ).toEqual([metadataMigration]);
     });
   });

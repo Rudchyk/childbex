@@ -6,7 +6,11 @@ export type ArchiveErrorCode =
   | 'LIMIT_EXCEEDED'
   | 'UNSAFE_ENTRY'
   | 'NO_USABLE_DICOM'
-  | 'EXTRACTION_FAILED';
+  | 'EXTRACTION_FAILED'
+  /** A study UID of the archive is stored for another patient. */
+  | 'STUDY_BELONGS_TO_ANOTHER_PATIENT'
+  /** A series UID of the archive belongs to another study. */
+  | 'SERIES_BELONGS_TO_ANOTHER_STUDY';
 
 /**
  * Error raised while validating/extracting an uploaded archive.
