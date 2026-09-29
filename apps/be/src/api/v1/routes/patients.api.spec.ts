@@ -158,3 +158,30 @@ describe('patient delete', () => {
     spy.mockRestore();
   });
 });
+
+describe('patient cluster', () => {
+  it('does not expose the backend-internal DICOM metadata of images', async () => {
+    const { PatientImagesCluster } = require('../../../db/models/PatientImagesCluster.model');
+    const { patientImageDicomMetadataAttributes } = require('../../../services/dicom.metadata');
+    const findPatient = jest
+      .spyOn(Patient, 'findOne')
+      .mockResolvedValue({ id: PATIENT } as never);
+    const findCluster = jest
+      .spyOn(PatientImagesCluster, 'findOne')
+      .mockResolvedValue({ toJSON: () => ({ id: 'cluster', images: [] }) });
+
+    const response = await fetch(
+      `${baseUrl}/patients/slug/synthetic/clusters/cluster/0`
+    );
+
+    expect(response.status).toBe(200);
+    const [options] = findCluster.mock.calls[0] as [
+      { include: { attributes: { exclude: string[] } }[] },
+    ];
+    expect(options.include[0].attributes.exclude).toEqual([
+      ...patientImageDicomMetadataAttributes,
+    ]);
+    findPatient.mockRestore();
+    findCluster.mockRestore();
+  });
+});

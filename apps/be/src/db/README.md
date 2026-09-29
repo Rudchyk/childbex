@@ -19,6 +19,42 @@ SELECT * FROM patient_images_clusters
 SELECT * FROM patient_image_review_votes
 ```
 
+## DICOM metadata on `patients_images`
+
+Since migration `202609281200-patient-image-dicom-metadata`, the import
+stores per image (see `services/dicom.metadata.ts`): the Study / Series /
+SOP Instance / SOP Class UIDs, Modality, ImageType, Series and Instance
+Number, FrameOfReferenceUID, SeriesDescription, ConvolutionKernel, IPP, IOP,
+Rows, Columns, PixelSpacing, SliceThickness, RescaleSlope / Intercept,
+PhotometricInterpretation, BitsStored, PixelRepresentation, NumberOfFrames,
+the TransferSyntaxUID of the file meta header, the lowercase hex SHA-256 and
+size of the stored file, and `slicePosition` (position along the cluster's
+slice normal, the current sort key; `null` for broken images).
+
+- The metadata is backend-internal: it is not returned by the API, and
+  free-text values (SeriesDescription) are never logged.
+- A missing or malformed value is stored as `NULL`; nothing is replaced by a
+  default (e.g. no RescaleSlope 1 / Intercept 0).
+- Images imported before this migration have `NULL` metadata until a
+  backfill reads it from the stored files.
+- No indexes or unique constraints yet; they come with Study/Series.
+- Not stored per image: ContrastBolusAgent (free text; for the future Series
+  model), BitsAllocated, HighBit, SamplesPerPixel, window values.
+
+Current import behavior (unchanged):
+
+- Files without SOPInstanceUID, a complete ImagePositionPatient /
+  ImageOrientationPatient, Rows or Columns are skipped as `not_an_image`.
+- Part 10 files whose meta header lacks the TransferSyntaxUID are skipped as
+  `dicom_parse_failed` (not parsed with a guessed transfer syntax). Files
+  without a meta header are parsed as raw data sets; their
+  `transferSyntaxUid` is `NULL`.
+- Encapsulated (compressed) pixel data: the pixel data size check compares
+  the compressed length with the uncompressed size, so a compressed slice
+  that is smaller than its raw pixels is imported as **broken**
+  (`pixeldata_size(...)`), with its metadata.
+- A multi-frame image is one `PatientImage` (frames are not expanded).
+
 ## Commands
 
 The CLI is bundled as `migrate.js` next to `main.js` and uses the same

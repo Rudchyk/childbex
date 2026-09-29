@@ -49,6 +49,7 @@ import {
   findPatientImageSource,
   openUploadFile,
 } from '../../../services/patient-image-file.service';
+import { patientImageDicomMetadataAttributes } from '../../../services/dicom.metadata';
 
 /**
  * Unfinished uploads of a trashed/deleted patient can never be imported;
@@ -451,6 +452,8 @@ router
           {
             model: PatientImage,
             as: 'images',
+            // The DICOM metadata is backend-internal.
+            attributes: { exclude: [...patientImageDicomMetadataAttributes] },
             include: [
               {
                 model: PatientImageReviewVote,

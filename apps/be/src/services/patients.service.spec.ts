@@ -239,3 +239,127 @@ describe('importPatientArchiveFile import rollback', () => {
     expect(await readdir(workRoot)).toEqual([]);
   });
 });
+
+describe('importPatientArchiveFile DICOM metadata', () => {
+  const sha256 = (bytes: Buffer) =>
+    createHash('sha256').update(bytes).digest('hex');
+
+  type Row = Record<string, unknown> & { source: string };
+  const createdRows = () =>
+    models.PatientImage.bulkCreate.mock.calls.flatMap(
+      ([rows]) => rows as Row[]
+    );
+
+  it('stores the metadata, the file SHA-256 and the slice position of every image', async () => {
+    // Out of slice order in the archive; one image with truncated pixels.
+    const slices = [2, 0, 1].map((z) => ({
+      name: `DICOM/SE1/IM${z}`,
+      data: makeSyntheticDicom({
+        instance: z + 1,
+        sliceZ: z * 2.5,
+        attributes: { ContrastBolusAgent: 'SYNTHETIC AGENT' },
+      }),
+    }));
+    const truncated = makeSyntheticDicom({ instance: 9, pixelDataBytes: 4 });
+
+    const result = await importPatientArchiveFile(
+      await assembledArchive('patient-1', [
+        ...slices,
+        { name: 'DICOM/SE1/BROKEN', data: truncated },
+      ])
+    );
+    expect(result).toMatchObject({ importedImages: 4, brokenImages: 1 });
+
+    const rows = createdRows();
+    const clustered = rows.filter(({ isBrocken }) => !isBrocken);
+    expect(clustered.map(({ slicePosition }) => slicePosition)).toEqual([
+      0, 2.5, 5,
+    ]);
+    expect(clustered.map(({ instanceNumber }) => instanceNumber)).toEqual([
+      1, 2, 3,
+    ]);
+    for (const row of clustered) {
+      const { data } = slices.find(({ name }) =>
+        row.source.endsWith(path.basename(name))
+      ) as (typeof slices)[number];
+      expect(row).toMatchObject({
+        fileSha256: sha256(data),
+        fileSize: data.length,
+        sopInstanceUid: expect.stringMatching(/^2\.25\./),
+        studyInstanceUid: expect.stringMatching(/^2\.25\./),
+        seriesInstanceUid: expect.stringMatching(/^2\.25\./),
+        modality: 'CT',
+        imagePositionPatient: [0, 0, row.slicePosition],
+        imageOrientationPatient: [1, 0, 0, 0, 1, 0],
+        rescaleSlope: 1,
+        rescaleIntercept: -1024,
+        transferSyntaxUid: '1.2.840.10008.1.2.1',
+        numberOfFrames: null,
+      });
+      // The hash is the hash of the stored file.
+      const stored = await readFile(
+        path.join(uploadRoot, row.source.replace(/^\/uploads\//, ''))
+      );
+      expect(sha256(stored)).toBe(row.fileSha256);
+      // Parser-only values are not stored.
+      expect(row).not.toHaveProperty('contrastBolusAgent');
+      expect(row).not.toHaveProperty('bitsAllocated');
+    }
+
+    const [brokenRow] = rows.filter(({ isBrocken }) => isBrocken);
+    expect(brokenRow).toMatchObject({
+      fileSha256: sha256(truncated),
+      fileSize: truncated.length,
+      slicePosition: null,
+      sopInstanceUid: expect.stringMatching(/^2\.25\./),
+    });
+  });
+
+  it('imports images whose optional metadata is missing', async () => {
+    const result = await importPatientArchiveFile(
+      await assembledArchive('patient-1', [
+        {
+          name: 'IM1',
+          data: makeSyntheticDicom({
+            attributes: {
+              StudyInstanceUID: null,
+              SeriesInstanceUID: null,
+              RescaleSlope: null,
+              RescaleIntercept: null,
+              InstanceNumber: null,
+            },
+          }),
+        },
+      ])
+    );
+
+    expect(result).toMatchObject({ importedImages: 1 });
+    expect(createdRows()[0]).toMatchObject({
+      studyInstanceUid: null,
+      seriesInstanceUid: null,
+      rescaleSlope: null,
+      rescaleIntercept: null,
+      instanceNumber: null,
+      fileSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+  });
+
+  it('never logs the series description', async () => {
+    await importPatientArchiveFile(
+      await assembledArchive('patient-1', [
+        {
+          name: 'IM1',
+          data: makeSyntheticDicom({ seriesDescription: 'SECRET FREE TEXT' }),
+        },
+      ])
+    );
+
+    const { logger } = require('./logger.service');
+    const logged = JSON.stringify(
+      Object.values(logger as Record<string, jest.Mock>).flatMap(
+        (fn) => fn.mock.calls
+      )
+    );
+    expect(logged).not.toContain('SECRET FREE TEXT');
+  });
+});

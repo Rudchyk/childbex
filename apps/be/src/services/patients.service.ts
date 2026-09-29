@@ -6,6 +6,7 @@ import {
   clusterByOrientation,
   ClusterResult,
 } from './dicom.service';
+import { toPatientImageDicomMetadata } from './dicom.metadata';
 import { PatientImagesCluster } from '../db/models/PatientImagesCluster.model';
 import {
   PatientImage,
@@ -129,9 +130,12 @@ const persistClusters = async (
           studyDate: studyDate ? studyDate.toISOString() : null,
           notes: '',
         },
-        files.map(({ file }) => ({
+        files.map(({ file, metadata, fileInfo, positionScalar }) => ({
           file,
-          row: { details: { geometry, outliers, normal } },
+          row: {
+            details: { geometry, outliers, normal },
+            ...toPatientImageDicomMetadata(metadata, fileInfo, positionScalar),
+          },
         }))
       );
     }
@@ -140,13 +144,15 @@ const persistClusters = async (
     if (broken.length) {
       await importGroup(
         { name: brokenImageClusterName, cluster: -1, patientId, notes: '' },
-        broken.map(({ file, reason }) => ({
+        broken.map(({ file, reason, metadata, fileInfo }) => ({
           file,
           row: {
             details: null,
             notes: reason,
             isBrocken: true,
             status: PatientImageStatus.BROKEN,
+            // Not part of a cluster: no position along a slice normal.
+            ...toPatientImageDicomMetadata(metadata, fileInfo, null),
           },
         }))
       );

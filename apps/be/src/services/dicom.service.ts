@@ -1,5 +1,14 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import dicomParser from 'dicom-parser';
+import { readDicomMetadata, type ParsedDicomMetadata } from './dicom.metadata';
+
+/** The file as stored (it is placed byte-for-byte into the uploads). */
+export interface DicomFileInfo {
+  /** Lowercase hex SHA-256 of the file bytes. */
+  sha256: string;
+  size: number;
+}
 
 interface SliceMeta {
   file: string;
@@ -13,9 +22,11 @@ interface SliceMeta {
   reason?: string;
   seriesDescription?: string;
   studyDate?: Date;
+  metadata: ParsedDicomMetadata;
+  fileInfo: DicomFileInfo;
 }
 
-interface ClusterSlice {
+export interface ClusterSlice {
   file: string;
   sopInstanceUID: string;
   positionScalar: number;
@@ -24,6 +35,16 @@ interface ClusterSlice {
   rows: number;
   cols: number;
   pixelSpacing?: [number, number];
+  metadata: ParsedDicomMetadata;
+  fileInfo: DicomFileInfo;
+}
+
+/** A DICOM image whose pixel data is missing or truncated. */
+export interface BrokenImage {
+  file: string;
+  reason: string;
+  metadata: ParsedDicomMetadata;
+  fileInfo: DicomFileInfo;
 }
 
 export interface Cluster {
@@ -42,7 +63,7 @@ export interface Cluster {
 
 export interface ClusterResult {
   clusters: Cluster[];
-  broken: { file: string; reason: string }[];
+  broken: BrokenImage[];
   /** Files that are not usable DICOM images (unrelated files, non-image objects). */
   skipped: { file: string; reason: string }[];
 }
@@ -89,12 +110,23 @@ async function parseDicom(filePath: string): Promise<ParseResult> {
   // Asynchronous read keeps the event loop responsive while large studies
   // are processed; a Buffer already is a Uint8Array (no copy needed).
   const byteArray = await readFile(filePath);
+  // Hashed from the bytes already in memory for parsing: the stored file is
+  // a hard link or byte-for-byte copy of this file.
+  const fileInfo: DicomFileInfo = {
+    sha256: createHash('sha256').update(byteArray).digest('hex'),
+    size: byteArray.length,
+  };
 
   // The "DICM" marker only selects the parsing strategy; files without it are
   // still accepted when they parse as a usable raw DICOM dataset.
   if (hasPart10Marker(byteArray)) {
     try {
-      const meta = readSliceMeta(filePath, dicomParser.parseDicom(byteArray));
+      const meta = readSliceMeta(
+        filePath,
+        dicomParser.parseDicom(byteArray),
+        fileInfo,
+        true
+      );
       return meta ? { meta } : { meta: null, reason: 'not_an_image' };
     } catch {
       return { meta: null, reason: 'dicom_parse_failed' };
@@ -104,7 +136,9 @@ async function parseDicom(filePath: string): Promise<ParseResult> {
     try {
       const meta = readSliceMeta(
         filePath,
-        dicomParser.parseDicom(byteArray, { TransferSyntaxUID })
+        dicomParser.parseDicom(byteArray, { TransferSyntaxUID }),
+        fileInfo,
+        false
       );
       if (meta) return { meta };
     } catch {
@@ -114,9 +148,16 @@ async function parseDicom(filePath: string): Promise<ParseResult> {
   return { meta: null, reason: 'not_dicom' };
 }
 
+/**
+ * Files without SOPInstanceUID, a complete ImagePositionPatient /
+ * ImageOrientationPatient, Rows or Columns are not treated as images
+ * (`null`: skipped as `not_an_image`); all other metadata is optional.
+ */
 function readSliceMeta(
   filePath: string,
-  dataSet: dicomParser.DataSet
+  dataSet: dicomParser.DataSet,
+  fileInfo: DicomFileInfo,
+  hasFileMeta: boolean
 ): SliceMeta | null {
   const getStr = (tag: string) => dataSet.string(tag);
   const getFloats = (tag: string): number[] | undefined => {
@@ -195,6 +236,8 @@ function readSliceMeta(
     reason,
     seriesDescription,
     studyDate: parseDicomDateTime(studyDate, studyTime),
+    metadata: readDicomMetadata(dataSet, { hasFileMeta }),
+    fileInfo,
   };
 }
 
@@ -217,7 +260,7 @@ export async function clusterByOrientation(
   } = opts || {};
 
   const metas: SliceMeta[] = [];
-  const broken: { file: string; reason: string }[] = [];
+  const broken: BrokenImage[] = [];
   const skipped: { file: string; reason: string }[] = [];
 
   for (const f of files) {
@@ -229,7 +272,12 @@ export async function clusterByOrientation(
     }
     const { meta } = parsed;
     if (!meta.validPixelData) {
-      broken.push({ file: f, reason: meta.reason || 'pixeldata_invalid' });
+      broken.push({
+        file: f,
+        reason: meta.reason || 'pixeldata_invalid',
+        metadata: meta.metadata,
+        fileInfo: meta.fileInfo,
+      });
       continue;
     }
     metas.push(meta);
@@ -305,6 +353,8 @@ export async function clusterByOrientation(
           rows: m.rows,
           cols: m.cols,
           pixelSpacing: m.pixelSpacing,
+          metadata: m.metadata,
+          fileInfo: m.fileInfo,
         });
         assigned = true;
         break;
@@ -328,6 +378,8 @@ export async function clusterByOrientation(
             rows: m.rows,
             cols: m.cols,
             pixelSpacing: m.pixelSpacing,
+            metadata: m.metadata,
+            fileInfo: m.fileInfo,
           },
         ],
         geometry: {

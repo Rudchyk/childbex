@@ -9,6 +9,7 @@
 import { QueryTypes, type Sequelize } from 'sequelize';
 import type * as MigratorModule from './migrator';
 import type { Migration } from './migrations';
+import type * as PatientImageModel from './models/PatientImage.model';
 
 jest.mock('../services/logger.service', () => ({
   logger: {
@@ -52,6 +53,8 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
   let sequelize: Sequelize;
   let migrator: typeof MigratorModule;
   let migrations: Migration[];
+  let baselineMigration: Migration;
+  let PatientImage: typeof PatientImageModel.PatientImage;
   /** The application models, in the order their tables depend on each other. */
   let models: { sync(options?: { alter?: boolean }): Promise<unknown> }[];
 
@@ -93,10 +96,12 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
     ({ sequelize } = require('./sequelize'));
     migrator = require('./migrator');
     ({ migrations } = require('./migrations'));
+    ({ baselineMigration } = require('./migrations/202609280000-baseline-schema'));
+    ({ PatientImage } = require('./models/PatientImage.model'));
     models = [
       require('./models/Patient.model').Patient,
       require('./models/PatientImagesCluster.model').PatientImagesCluster,
-      require('./models/PatientImage.model').PatientImage,
+      PatientImage,
       require('./models/PatientImageReviewVote.model').PatientImageReviewVote,
     ];
   });
@@ -146,10 +151,8 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
     const status = await migrator.getMigrationStatus(sequelize);
     expect(status.pending).toEqual([]);
     await expect(migrator.assertSchemaUpToDate(sequelize)).resolves.toBeTruthy();
-    expect(await migrator.checkBaseline(sequelize)).toEqual({
-      errors: [],
-      warnings: [],
-    });
+    // Later migrations add columns (reported as warnings), never errors.
+    expect((await migrator.checkBaseline(sequelize)).errors).toEqual([]);
     // Idempotent: nothing left to apply.
     expect(await migrator.migrateUp(sequelize)).toEqual([]);
   });
@@ -197,15 +200,16 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
   });
 
   it('refuses to revert the baseline and keeps schema, data and its record', async () => {
-    await migrator.migrateUp(sequelize);
+    const baselineOnly = [baselineMigration];
+    await migrator.migrateUp(sequelize, baselineOnly);
     await sequelize.query(
       `INSERT INTO patients (id, name, slug, "creatorId", "creatorName", "createdAt", "updatedAt")
        VALUES ('11111111-1111-4111-8111-111111111111', 'Synthetic', 'synthetic', 'u', 'U', now(), now())`
     );
 
-    await expect(migrator.migrateDown(sequelize)).rejects.toThrow(
-      'cannot be reverted'
-    );
+    await expect(
+      migrator.migrateDown(sequelize, baselineOnly)
+    ).rejects.toThrow('cannot be reverted');
 
     expect(await tableExists('patients')).toBe(true);
     const [count] = await sequelize.query<{ count: string }>(
@@ -213,14 +217,19 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
       { type: QueryTypes.SELECT }
     );
     expect(Number(count.count)).toBe(1);
-    expect((await migrator.getMigrationStatus(sequelize)).executed).toEqual(
-      migrations.map(({ name }) => name)
-    );
+    expect(
+      (await migrator.getMigrationStatus(sequelize, baselineOnly)).executed
+    ).toEqual([baselineMigration.name]);
   });
 
-  describe('existing database created by model sync (before migrations)', () => {
+  describe('existing database (schema created before migrations)', () => {
     beforeEach(async () => {
-      await syncModels();
+      // Exactly the schema the old startup sync created, without any record
+      // in migrations_meta (verified equal to it when the baseline was added).
+      await baselineMigration.up({
+        sequelize,
+        queryInterface: sequelize.getQueryInterface(),
+      });
       await sequelize.query(
         `INSERT INTO patients (id, name, slug, "creatorId", "creatorName", "createdAt", "updatedAt")
          VALUES ('11111111-1111-4111-8111-111111111111', 'Synthetic', 'synthetic', 'u', 'U', now(), now())`
@@ -268,11 +277,13 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
 
       expect(errors).toEqual([]);
       // Each alter run adds another copy of the unique constraint on source.
-      expect(warnings).toEqual([
+      // (The current models also add the columns of later migrations, which
+      // are reported as unexpected columns.)
+      expect(warnings).toContainEqual(
         expect.stringMatching(
           /^4 duplicate unique indexes on patients_images\(source\): /
-        ),
-      ]);
+        )
+      );
     });
 
     it('refuses the baseline for a schema that does not match, recording nothing', async () => {
@@ -285,6 +296,188 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
         'missing column patients.creatorName'
       );
       expect(await tableExists(migrator.migrationsTableName)).toBe(false);
+    });
+  });
+
+  describe('patient image DICOM metadata migration', () => {
+    const metadataMigration = '202609281200-patient-image-dicom-metadata';
+    const PATIENT_ID = '11111111-1111-4111-8111-111111111111';
+    const CLUSTER_ID = '22222222-2222-4222-8222-222222222222';
+    const IMAGE_ID = '33333333-3333-4333-8333-333333333333';
+
+    /** Column -> Postgres udt_name, as the migration adds them. */
+    const expectedColumns: Record<string, string> = {
+      studyInstanceUid: 'varchar',
+      seriesInstanceUid: 'varchar',
+      sopInstanceUid: 'varchar',
+      sopClassUid: 'varchar',
+      modality: 'varchar',
+      imageType: '_text',
+      seriesNumber: 'int4',
+      instanceNumber: 'int4',
+      frameOfReferenceUid: 'varchar',
+      seriesDescription: 'text',
+      convolutionKernel: 'text',
+      imagePositionPatient: '_float8',
+      imageOrientationPatient: '_float8',
+      slicePosition: 'float8',
+      rows: 'int4',
+      columns: 'int4',
+      pixelSpacing: '_float8',
+      sliceThickness: 'float8',
+      rescaleSlope: 'float8',
+      rescaleIntercept: 'float8',
+      photometricInterpretation: 'varchar',
+      bitsStored: 'int2',
+      pixelRepresentation: 'int2',
+      numberOfFrames: 'int4',
+      transferSyntaxUid: 'varchar',
+      fileSha256: 'bpchar',
+      fileSize: 'int8',
+    };
+
+    const insertPatientAndCluster = () =>
+      sequelize.query(
+        `INSERT INTO patients (id, name, slug, "creatorId", "creatorName", "createdAt", "updatedAt")
+         VALUES ('${PATIENT_ID}', 'Synthetic', 'synthetic', 'u', 'U', now(), now());
+         INSERT INTO patient_images_clusters (id, name, cluster, "patientId", "createdAt", "updatedAt")
+         VALUES ('${CLUSTER_ID}', 'SYNTHETIC', 0, '${PATIENT_ID}', now(), now());`
+      );
+
+    it('adds nullable metadata columns and keeps existing rows unchanged', async () => {
+      // An existing database with an image imported before this migration.
+      await baselineMigration.up({
+        sequelize,
+        queryInterface: sequelize.getQueryInterface(),
+      });
+      await insertPatientAndCluster();
+      await sequelize.query(
+        `INSERT INTO patients_images (id, source, "clusterId", "createdAt", "updatedAt")
+         VALUES ('${IMAGE_ID}', '/uploads/p/c/IM1', '${CLUSTER_ID}', now(), now())`
+      );
+      await migrator.applyBaseline(sequelize);
+
+      const applied = await migrator.migrateUp(sequelize);
+
+      expect(applied.map(({ name }) => name)).toEqual([metadataMigration]);
+      const { columns } = await migrator.readActualSchema(sequelize);
+      for (const [column, type] of Object.entries(expectedColumns)) {
+        expect([column, columns.patients_images[column]]).toEqual([
+          column,
+          { type, nullable: true },
+        ]);
+      }
+      const [row] = await sequelize.query<Record<string, unknown>>(
+        `SELECT * FROM patients_images WHERE id = '${IMAGE_ID}'`,
+        { type: QueryTypes.SELECT }
+      );
+      expect(row.source).toBe('/uploads/p/c/IM1');
+      for (const column of Object.keys(expectedColumns)) {
+        expect([column, row[column]]).toEqual([column, null]);
+      }
+    });
+
+    it('stores typed arrays, doubles and a bigint file size through the model', async () => {
+      await migrator.migrateUp(sequelize);
+      await insertPatientAndCluster();
+
+      await PatientImage.create({
+        clusterId: CLUSTER_ID,
+        source: '/uploads/p/c/IM2',
+        details: null,
+        notes: undefined,
+        sopInstanceUid: '2.25.1',
+        imageType: ['ORIGINAL', 'PRIMARY', 'AXIAL'],
+        imagePositionPatient: [-125.5, -130.25, 42.75],
+        imageOrientationPatient: [1, 0, 0, 0, 1, 0],
+        pixelSpacing: [0.703125, 0.703125],
+        slicePosition: 42.75,
+        rescaleSlope: 1,
+        rescaleIntercept: -1024,
+        bitsStored: 12,
+        pixelRepresentation: 1,
+        fileSha256: 'a'.repeat(64),
+        fileSize: 3_000_000_000,
+      });
+
+      const stored = await PatientImage.findOne({
+        where: { source: '/uploads/p/c/IM2' },
+      });
+      expect(stored?.toJSON()).toMatchObject({
+        sopInstanceUid: '2.25.1',
+        imageType: ['ORIGINAL', 'PRIMARY', 'AXIAL'],
+        imagePositionPatient: [-125.5, -130.25, 42.75],
+        imageOrientationPatient: [1, 0, 0, 0, 1, 0],
+        pixelSpacing: [0.703125, 0.703125],
+        slicePosition: 42.75,
+        rescaleSlope: 1,
+        rescaleIntercept: -1024,
+        bitsStored: 12,
+        pixelRepresentation: 1,
+        fileSha256: 'a'.repeat(64),
+        // int8 is returned as a string by the pg driver.
+        fileSize: '3000000000',
+        studyInstanceUid: null,
+      });
+    });
+
+    it.each([
+      [
+        'an IPP without 3 values',
+        `"imagePositionPatient" = '{1,2}'`,
+        'patients_images_ipp_length',
+      ],
+      [
+        'an IOP without 6 values',
+        `"imageOrientationPatient" = '{1,0,0}'`,
+        'patients_images_iop_length',
+      ],
+      [
+        'a pixel spacing without 2 values',
+        `"pixelSpacing" = '{0.5}'`,
+        'patients_images_pixel_spacing_length',
+      ],
+      [
+        'an upper-case SHA-256',
+        `"fileSha256" = '${'A'.repeat(64)}'`,
+        'patients_images_file_sha256_hex',
+      ],
+      [
+        'a short SHA-256',
+        `"fileSha256" = 'abc'`,
+        'patients_images_file_sha256_hex',
+      ],
+    ])('rejects %s', async (_, assignment, constraint) => {
+      await migrator.migrateUp(sequelize);
+      await insertPatientAndCluster();
+      await sequelize.query(
+        `INSERT INTO patients_images (id, source, "clusterId", "createdAt", "updatedAt")
+         VALUES ('${IMAGE_ID}', '/uploads/p/c/IM1', '${CLUSTER_ID}', now(), now())`
+      );
+
+      // check_violation; the message is localized by the server.
+      await expect(
+        sequelize.query(`UPDATE patients_images SET ${assignment}`)
+      ).rejects.toMatchObject({ parent: { code: '23514', constraint } });
+    });
+
+    it('can be rolled back (and applied again)', async () => {
+      await migrator.migrateUp(sequelize);
+
+      const reverted = await migrator.migrateDown(sequelize);
+
+      expect(reverted.map(({ name }) => name)).toEqual([metadataMigration]);
+      const { columns } = await migrator.readActualSchema(sequelize);
+      for (const column of Object.keys(expectedColumns)) {
+        expect(columns.patients_images).not.toHaveProperty(column);
+      }
+      expect(await migrator.checkBaseline(sequelize)).toEqual({
+        errors: [],
+        warnings: [],
+      });
+      expect(
+        (await migrator.migrateUp(sequelize)).map(({ name }) => name)
+      ).toEqual([metadataMigration]);
     });
   });
 });

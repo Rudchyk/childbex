@@ -21,15 +21,20 @@ import { access, unlink } from 'node:fs/promises';
 import { logger } from '../../services/logger.service';
 import path from 'path';
 import { uploadRoot } from '../../services/patients.service';
+import type { PatientImageDicomMetadata } from '../../services/dicom.metadata';
+
+/** The API shape plus the backend-internal DICOM metadata. */
+type PatientImageAttributes = IPatientImage & PatientImageDicomMetadata;
 
 export type PatientImageCreationAttributes = Pick<
   IPatientImage,
   'details' | 'clusterId' | 'notes' | 'source'
->;
+> &
+  Partial<PatientImageDicomMetadata>;
 
 export class PatientImage
-  extends Model<IPatientImage, PatientImageCreationAttributes>
-  implements IPatientImage
+  extends Model<PatientImageAttributes, PatientImageCreationAttributes>
+  implements PatientImageAttributes
 {
   declare id: IPatientImage['id'];
   declare source: IPatientImage['source'];
@@ -47,6 +52,37 @@ export class PatientImage
   declare normalVotes: IPatientImage['normalVotes'];
   declare abnormalVotes: IPatientImage['abnormalVotes'];
   declare uncertainVotes: IPatientImage['uncertainVotes'];
+
+  // DICOM metadata (backend-internal, null for images imported before it
+  // was recorded):
+  declare studyInstanceUid: PatientImageDicomMetadata['studyInstanceUid'];
+  declare seriesInstanceUid: PatientImageDicomMetadata['seriesInstanceUid'];
+  declare sopInstanceUid: PatientImageDicomMetadata['sopInstanceUid'];
+  declare sopClassUid: PatientImageDicomMetadata['sopClassUid'];
+  declare modality: PatientImageDicomMetadata['modality'];
+  declare imageType: PatientImageDicomMetadata['imageType'];
+  declare seriesNumber: PatientImageDicomMetadata['seriesNumber'];
+  declare instanceNumber: PatientImageDicomMetadata['instanceNumber'];
+  declare frameOfReferenceUid: PatientImageDicomMetadata['frameOfReferenceUid'];
+  declare seriesDescription: PatientImageDicomMetadata['seriesDescription'];
+  declare convolutionKernel: PatientImageDicomMetadata['convolutionKernel'];
+  declare imagePositionPatient: PatientImageDicomMetadata['imagePositionPatient'];
+  declare imageOrientationPatient: PatientImageDicomMetadata['imageOrientationPatient'];
+  declare slicePosition: PatientImageDicomMetadata['slicePosition'];
+  declare rows: PatientImageDicomMetadata['rows'];
+  declare columns: PatientImageDicomMetadata['columns'];
+  declare pixelSpacing: PatientImageDicomMetadata['pixelSpacing'];
+  declare sliceThickness: PatientImageDicomMetadata['sliceThickness'];
+  declare rescaleSlope: PatientImageDicomMetadata['rescaleSlope'];
+  declare rescaleIntercept: PatientImageDicomMetadata['rescaleIntercept'];
+  declare photometricInterpretation: PatientImageDicomMetadata['photometricInterpretation'];
+  declare bitsStored: PatientImageDicomMetadata['bitsStored'];
+  declare pixelRepresentation: PatientImageDicomMetadata['pixelRepresentation'];
+  declare numberOfFrames: PatientImageDicomMetadata['numberOfFrames'];
+  declare transferSyntaxUid: PatientImageDicomMetadata['transferSyntaxUid'];
+  declare fileSha256: PatientImageDicomMetadata['fileSha256'];
+  /** BIGINT: read back as a string by the pg driver. */
+  declare fileSize: PatientImageDicomMetadata['fileSize'];
 
   // Sequelize‑generated:
   declare readonly createdAt: IPatientImage['createdAt'];
@@ -217,6 +253,40 @@ PatientImage.init(
       allowNull: false,
       defaultValue: 0,
     },
+    // DICOM metadata, see migration 202609281200-patient-image-dicom-metadata.
+    studyInstanceUid: { type: DataTypes.STRING(64), allowNull: true },
+    seriesInstanceUid: { type: DataTypes.STRING(64), allowNull: true },
+    sopInstanceUid: { type: DataTypes.STRING(64), allowNull: true },
+    sopClassUid: { type: DataTypes.STRING(64), allowNull: true },
+    modality: { type: DataTypes.STRING(16), allowNull: true },
+    imageType: { type: DataTypes.ARRAY(DataTypes.TEXT), allowNull: true },
+    seriesNumber: { type: DataTypes.INTEGER, allowNull: true },
+    instanceNumber: { type: DataTypes.INTEGER, allowNull: true },
+    frameOfReferenceUid: { type: DataTypes.STRING(64), allowNull: true },
+    seriesDescription: { type: DataTypes.TEXT, allowNull: true },
+    convolutionKernel: { type: DataTypes.TEXT, allowNull: true },
+    imagePositionPatient: {
+      type: DataTypes.ARRAY(DataTypes.DOUBLE),
+      allowNull: true,
+    },
+    imageOrientationPatient: {
+      type: DataTypes.ARRAY(DataTypes.DOUBLE),
+      allowNull: true,
+    },
+    slicePosition: { type: DataTypes.DOUBLE, allowNull: true },
+    rows: { type: DataTypes.INTEGER, allowNull: true },
+    columns: { type: DataTypes.INTEGER, allowNull: true },
+    pixelSpacing: { type: DataTypes.ARRAY(DataTypes.DOUBLE), allowNull: true },
+    sliceThickness: { type: DataTypes.DOUBLE, allowNull: true },
+    rescaleSlope: { type: DataTypes.DOUBLE, allowNull: true },
+    rescaleIntercept: { type: DataTypes.DOUBLE, allowNull: true },
+    photometricInterpretation: { type: DataTypes.STRING(16), allowNull: true },
+    bitsStored: { type: DataTypes.SMALLINT, allowNull: true },
+    pixelRepresentation: { type: DataTypes.SMALLINT, allowNull: true },
+    numberOfFrames: { type: DataTypes.INTEGER, allowNull: true },
+    transferSyntaxUid: { type: DataTypes.STRING(64), allowNull: true },
+    fileSha256: { type: DataTypes.CHAR(64), allowNull: true },
+    fileSize: { type: DataTypes.BIGINT, allowNull: true },
     ...timestampFields,
   },
   {
