@@ -29,12 +29,9 @@ import {
 } from './archive/archive.service';
 import { withPhase } from './diagnostics/event-loop.diagnostics';
 
-const { ARCHIVES_ROOT = './archives', UPLOAD_ROOT = './uploads' } = process.env;
+import { archivesRoot, uploadRoot } from './storage-roots';
 
-export const uploadRoot = path.resolve(UPLOAD_ROOT);
-
-/** Private storage for original uploaded archives (never served statically). */
-export const archivesRoot = path.resolve(ARCHIVES_ROOT);
+export { archivesRoot, uploadRoot };
 
 type PatientImageRow = PatientImageCreationAttributes &
   Partial<Pick<IPatientImage, 'isBrocken' | 'status'>>;

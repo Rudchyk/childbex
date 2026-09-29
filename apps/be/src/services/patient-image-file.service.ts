@@ -1,5 +1,4 @@
-import { open, realpath, type FileHandle } from 'node:fs/promises';
-import path from 'node:path';
+import { open, type FileHandle } from 'node:fs/promises';
 import type { Readable } from 'node:stream';
 // Imported before the models: models and patients.service import each other,
 // and this order initializes them correctly when this module is loaded first.
@@ -7,37 +6,9 @@ import { uploadRoot } from './patients.service';
 import { Patient } from '../db/models/Patient.model';
 import { PatientImage } from '../db/models/PatientImage.model';
 import { PatientImagesCluster } from '../db/models/PatientImagesCluster.model';
+import { resolveStoredFile, type StoredFileProblem } from './stored-file';
 
-/**
- * Prefix of `PatientImage.source`. It is a stored location relative to the
- * upload root, not a served URL: files are only served by the authenticated
- * patient image file API route.
- */
-const sourcePrefix = '/uploads/';
-
-const isInside = (root: string, target: string) => {
-  const relative = path.relative(root, target);
-  return (
-    !!relative &&
-    !path.isAbsolute(relative) &&
-    relative.split(path.sep)[0] !== '..'
-  );
-};
-
-/**
- * Maps a stored `source` to an absolute path inside `root`, or `null` when it
- * would point outside of it (lexical check; symlinks are checked on open).
- */
-export const resolveUploadFilePath = (
-  source: string,
-  root: string = uploadRoot
-): string | null => {
-  if (!source.startsWith(sourcePrefix)) return null;
-  const relative = source.slice(sourcePrefix.length);
-  if (!relative || relative.includes('\0')) return null;
-  const resolved = path.resolve(root, relative);
-  return isInside(root, resolved) ? resolved : null;
-};
+export { resolveUploadFilePath } from './stored-file';
 
 /**
  * Returns the stored `source` of an image that belongs to the patient, or
@@ -102,10 +73,7 @@ export const toWebStream = (source: Readable): ReadableStream<Uint8Array> => {
 
 export type OpenUploadFileResult =
   | { ok: true; stream: ReadableStream<Uint8Array>; size: number }
-  | { ok: false; reason: 'outside_upload_root' | 'missing' | 'not_a_file' };
-
-const isMissingError = (error: unknown) =>
-  ['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException)?.code ?? '');
+  | { ok: false; reason: StoredFileProblem };
 
 /**
  * Opens a stored image file for streaming. The path comes only from the DB
@@ -116,21 +84,17 @@ export const openUploadFile = async (
   source: string,
   root: string = uploadRoot
 ): Promise<OpenUploadFileResult> => {
-  const candidate = resolveUploadFilePath(source, root);
-  if (!candidate) return { ok: false, reason: 'outside_upload_root' };
+  const resolved = await resolveStoredFile(source, root);
+  if (!resolved.ok) return resolved;
 
   let handle: FileHandle;
   try {
-    const [realRoot, realFile] = await Promise.all([
-      realpath(root),
-      realpath(candidate),
-    ]);
-    if (!isInside(realRoot, realFile)) {
-      return { ok: false, reason: 'outside_upload_root' };
-    }
-    handle = await open(realFile, 'r');
+    handle = await open(resolved.realPath, 'r');
   } catch (error) {
-    if (isMissingError(error)) return { ok: false, reason: 'missing' };
+    // Removed after it was resolved.
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      return { ok: false, reason: 'missing' };
+    }
     throw error;
   }
 

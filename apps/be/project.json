@@ -147,6 +147,20 @@
       "options": {
         "command": "node dist/apps/be/migrate.js baseline --apply"
       }
+    },
+    "backfill-dicom-metadata": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js backfill dicom-metadata --dry-run"
+      }
+    },
+    "backfill-dicom-metadata-apply": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js backfill dicom-metadata --apply"
+      }
     }
   }
 }

@@ -35,8 +35,8 @@ slice normal, the current sort key; `null` for broken images).
   free-text values (SeriesDescription) are never logged.
 - A missing or malformed value is stored as `NULL`; nothing is replaced by a
   default (e.g. no RescaleSlope 1 / Intercept 0).
-- Images imported before this migration have `NULL` metadata until a
-  backfill reads it from the stored files.
+- Images imported before this migration have `NULL` metadata until the
+  backfill below reads it from the stored files.
 - No indexes or unique constraints yet; they come with Study/Series.
 - Not stored per image: ContrastBolusAgent (free text; for the future Series
   model), BitsAllocated, HighBit, SamplesPerPixel, window values.
@@ -61,6 +61,66 @@ Current import behavior (unchanged):
   `transferSyntaxUid`).
 - A multi-frame image is one `PatientImage` (frames are not expanded).
 
+## Backfilling DICOM metadata of existing images
+
+`node migrate.js backfill dicom-metadata` fills the metadata columns of
+images imported before migration `202609281200-patient-image-dicom-metadata`
+by reading their stored files with the same parser as the import. It is a
+maintenance command: never run on startup, **dry-run unless `--apply`**.
+
+| Option | Meaning |
+| --- | --- |
+| `--dry-run` | default: read and report, write nothing |
+| `--apply` | write the changes |
+| `--batch-size <1-1000>` | rows per batch (default 200) |
+| `--report <file.json>` | also write a JSON report (not inside the upload/archive storage; never overwrites a file) |
+| `--include-trashed` | also fill images of patients in the trash (they are not restored) |
+| `--rescan` | re-read rows that already have a `fileSha256` (full audit) |
+
+Environment: the backend's `DB_*` and `UPLOAD_ROOT`, plus
+`REPORT_HMAC_KEY` (at least 32 characters, secret): the key for the group
+identifiers in the report. Keep it stable to compare reports of different
+runs. Set it in the existing ChildBEx secret environment configuration,
+like the other secrets: in production `/var/www/childbex/app/.env` is a
+symlink to the protected secrets location, so never create or store a
+separate secret file inside a release directory.
+
+Behavior:
+
+- Rows needing a backfill: `fileSha256 IS NULL` (all rows with `--rescan`).
+  Rows are read in batches by id (keyset), so none is skipped or repeated.
+- The stored path comes only from `source`; it must resolve (also through
+  symlinks) to a regular file inside `UPLOAD_ROOT`.
+- Files are read one at a time, before a batch's transaction is opened.
+- Only NULL columns are filled; `updatedAt`, status, review data, cluster and
+  `details` are not changed. `slicePosition` = IPP · `details.normal`, as in
+  the import (`NULL` for broken images).
+- **A row with any conflict** (a stored value that differs from its file)
+  **gets no update at all** (`metadata_conflict`, field names only): the row
+  and the file may no longer describe the same DICOM instance.
+- A row whose metadata changed while the run was reading files is not
+  updated either (`changed_during_run`).
+- Per-row results: `would_update` / `updated`, `already_complete`,
+  `metadata_conflict`, `changed_during_run`, `missing_file`, `unsafe_path`,
+  `read_failed`, `parse_failed`, `skipped_trashed_patient`; flags
+  `missing_study_uid`, `missing_series_uid`, `missing_sop_uid`,
+  `invalid_uid:<field>`, `no_slice_position`.
+- Groups over all images (nothing is merged): duplicate SOP Instance UIDs
+  (with or without different files), the same SOP Instance UID / Study UID /
+  file under different patients, a Series UID under different studies,
+  duplicate file hashes, rows sharing one stored file (hard links).
+- Output contains image / patient ids, codes and counters only: no paths,
+  file names, free text, UIDs or hashes (groups use `k-<HMAC>` keys).
+
+Production run:
+
+1. Back up the database (`pg_dump -Fc ...`).
+2. `node migrate.js backfill dicom-metadata --report ~/backfill-dry-run.json`
+   and review the summary, conflicts and groups.
+3. `node migrate.js backfill dicom-metadata --apply --report ~/backfill-apply.json`
+4. Run the dry-run again: nothing should be left to update except rows with
+   problems listed in the report.
+
 ## Commands
 
 The CLI is bundled as `migrate.js` next to `main.js` and uses the same
@@ -74,6 +134,8 @@ directory, and `apps/be/.env.local` when run through Nx).
 | `npm run be:migrate:down`           | `node migrate.js down`            | revert **only the latest** migration                      |
 | `npm run be:migrate:baseline:check` | `node migrate.js baseline --check` | compare an existing schema with the baseline (read-only) |
 | `npm run be:migrate:baseline:apply` | `node migrate.js baseline --apply` | record the baseline for an existing schema               |
+| `npm run be:backfill:dicom-metadata` | `node migrate.js backfill dicom-metadata` | metadata backfill, dry-run (see above)         |
+| `npm run be:backfill:dicom-metadata:apply` | `node migrate.js backfill dicom-metadata --apply` | metadata backfill, write              |
 
 The `npm run` commands build the backend first. To target another database
 than the one in `apps/be/.env.local`, set the variable in the shell (it takes

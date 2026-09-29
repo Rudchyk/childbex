@@ -10,7 +10,7 @@ export interface DicomFileInfo {
   size: number;
 }
 
-interface SliceMeta {
+export interface SliceMeta {
   file: string;
   sopInstanceUID: string;
   normal: [number, number, number];
@@ -104,9 +104,24 @@ const hasPart10Marker = (bytes: Uint8Array) =>
   bytes[130] === 0x43 && // C
   bytes[131] === 0x4d; // M
 
-type ParseResult = { meta: SliceMeta } | { meta: null; reason: string };
+export type DicomFileParseResult =
+  | { meta: SliceMeta }
+  | { meta: null; reason: string };
 
-async function parseDicom(filePath: string): Promise<ParseResult> {
+/**
+ * Position of a slice along a slice normal (ImagePositionPatient projected
+ * on it): the sort key within a cluster, stored as `slicePosition`.
+ */
+export const positionAlongNormal = (
+  position: readonly number[],
+  normal: readonly number[]
+) =>
+  position[0] * normal[0] + position[1] * normal[1] + position[2] * normal[2];
+
+/** Reads and parses one file (the import and the metadata backfill). */
+export async function parseDicomFile(
+  filePath: string
+): Promise<DicomFileParseResult> {
   // Asynchronous read keeps the event loop responsive while large studies
   // are processed; a Buffer already is a Uint8Array (no copy needed).
   const byteArray = await readFile(filePath);
@@ -292,7 +307,7 @@ export async function clusterByOrientation(
   const skipped: { file: string; reason: string }[] = [];
 
   for (const f of files) {
-    const parsed = await parseDicom(f);
+    const parsed = await parseDicomFile(f);
     if (!parsed.meta) {
       // Unrelated or non-image files are skipped, not reported as broken images.
       skipped.push({ file: f, reason: parsed.reason });
@@ -424,10 +439,7 @@ export async function clusterByOrientation(
     cl.files.forEach((f) => {
       // Нам треба знайти position оригінального SliceMeta
       const meta = metas.find((m) => m.file === f.file)!;
-      f.positionScalar =
-        meta.position[0] * cl.normal[0] +
-        meta.position[1] * cl.normal[1] +
-        meta.position[2] * cl.normal[2];
+      f.positionScalar = positionAlongNormal(meta.position, cl.normal);
     });
     // Відсортувати
     cl.files.sort((a, b) => a.positionScalar - b.positionScalar);

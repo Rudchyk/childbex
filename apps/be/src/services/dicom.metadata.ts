@@ -82,6 +82,11 @@ export type DataSetImageMetadata = Omit<
  */
 export interface ParsedDicomMetadata {
   image: DataSetImageMetadata;
+  /**
+   * Fields whose tag is present with a value that could not be read (e.g. a
+   * UID with letters); they are `null` in `image`, like missing ones.
+   */
+  malformed: (keyof DataSetImageMetadata)[];
   fileOnly: {
     /** Free text; kept for the future Series model. Never log it. */
     contrastBolusAgent: string | null;
@@ -153,35 +158,64 @@ export const readDicomMetadata = (
   { hasFileMeta }: { hasFileMeta: boolean }
 ): ParsedDicomMetadata => {
   const r = readers(dataSet);
+  const malformed: ParsedDicomMetadata['malformed'] = [];
+  /** Reads one field, noting a present but unreadable value. */
+  const field = <T>(
+    name: keyof DataSetImageMetadata,
+    tag: string,
+    read: (tag: string) => T | null
+  ): T | null => {
+    const value = read(tag);
+    if (value === null && r.text(tag) !== null) malformed.push(name);
+    return value;
+  };
+
+  const image: DataSetImageMetadata = {
+    studyInstanceUid: field('studyInstanceUid', 'x0020000d', r.uid),
+    seriesInstanceUid: field('seriesInstanceUid', 'x0020000e', r.uid),
+    sopInstanceUid: field('sopInstanceUid', 'x00080018', r.uid),
+    sopClassUid: field('sopClassUid', 'x00080016', r.uid),
+    modality: field('modality', 'x00080060', r.code),
+    imageType: field('imageType', 'x00080008', r.codes),
+    seriesNumber: field('seriesNumber', 'x00200011', r.integer),
+    instanceNumber: field('instanceNumber', 'x00200013', r.integer),
+    frameOfReferenceUid: field('frameOfReferenceUid', 'x00200052', r.uid),
+    seriesDescription: field('seriesDescription', 'x0008103e', r.text),
+    convolutionKernel: field('convolutionKernel', 'x00181210', r.text),
+    imagePositionPatient: field('imagePositionPatient', 'x00200032', (tag) =>
+      r.decimals(tag, 3)
+    ),
+    imageOrientationPatient: field(
+      'imageOrientationPatient',
+      'x00200037',
+      (tag) => r.decimals(tag, 6)
+    ),
+    rows: field('rows', 'x00280010', r.ushort),
+    columns: field('columns', 'x00280011', r.ushort),
+    pixelSpacing: field('pixelSpacing', 'x00280030', (tag) =>
+      r.decimals(tag, 2)
+    ),
+    sliceThickness: field('sliceThickness', 'x00180050', r.decimal),
+    rescaleSlope: field('rescaleSlope', 'x00281053', r.decimal),
+    rescaleIntercept: field('rescaleIntercept', 'x00281052', r.decimal),
+    photometricInterpretation: field(
+      'photometricInterpretation',
+      'x00280004',
+      r.code
+    ),
+    bitsStored: field('bitsStored', 'x00280101', r.ushort),
+    pixelRepresentation: field('pixelRepresentation', 'x00280103', r.ushort),
+    numberOfFrames: field('numberOfFrames', 'x00280008', r.integer),
+    // Without a file meta header the transfer syntax is not recorded in
+    // the file; the one the parser succeeded with is only a guess.
+    transferSyntaxUid: hasFileMeta
+      ? field('transferSyntaxUid', 'x00020010', r.uid)
+      : null,
+  };
+
   return {
-    image: {
-      studyInstanceUid: r.uid('x0020000d'),
-      seriesInstanceUid: r.uid('x0020000e'),
-      sopInstanceUid: r.uid('x00080018'),
-      sopClassUid: r.uid('x00080016'),
-      modality: r.code('x00080060'),
-      imageType: r.codes('x00080008'),
-      seriesNumber: r.integer('x00200011'),
-      instanceNumber: r.integer('x00200013'),
-      frameOfReferenceUid: r.uid('x00200052'),
-      seriesDescription: r.text('x0008103e'),
-      convolutionKernel: r.text('x00181210'),
-      imagePositionPatient: r.decimals('x00200032', 3),
-      imageOrientationPatient: r.decimals('x00200037', 6),
-      rows: r.ushort('x00280010'),
-      columns: r.ushort('x00280011'),
-      pixelSpacing: r.decimals('x00280030', 2),
-      sliceThickness: r.decimal('x00180050'),
-      rescaleSlope: r.decimal('x00281053'),
-      rescaleIntercept: r.decimal('x00281052'),
-      photometricInterpretation: r.code('x00280004'),
-      bitsStored: r.ushort('x00280101'),
-      pixelRepresentation: r.ushort('x00280103'),
-      numberOfFrames: r.integer('x00280008'),
-      // Without a file meta header the transfer syntax is not recorded in
-      // the file; the one the parser succeeded with is only a guess.
-      transferSyntaxUid: hasFileMeta ? r.uid('x00020010') : null,
-    },
+    image,
+    malformed,
     fileOnly: {
       contrastBolusAgent: r.text('x00180010'),
       bitsAllocated: r.ushort('x00280100'),

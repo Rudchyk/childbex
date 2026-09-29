@@ -6,6 +6,9 @@
  *   node migrate.js down                revert the latest migration
  *   node migrate.js baseline --check    compare an existing schema (read-only)
  *   node migrate.js baseline --apply    mark an existing schema as migrated
+ *   node migrate.js backfill dicom-metadata [--apply] [...]
+ *                                       fill image metadata from stored files
+ *                                       (dry-run unless --apply)
  *
  * Uses the same environment (DB_*) as the backend. See db/README.md.
  */
@@ -20,9 +23,11 @@ import {
   migrationsTableName,
   type SchemaComparison,
 } from './db/migrator';
+import { backfillUsage, runBackfillCli } from './db/backfill/dicom-metadata.cli';
 
 const usage =
-  'Usage: node migrate.js <up | status | down | baseline --check | baseline --apply>';
+  'Usage: node migrate.js <up | status | down | baseline --check | baseline --apply' +
+  ' | backfill dicom-metadata [options]>';
 
 const printComparison = ({ errors, warnings }: SchemaComparison) => {
   for (const error of errors) console.error(`ERROR    ${error}`);
@@ -32,8 +37,19 @@ const printComparison = ({ errors, warnings }: SchemaComparison) => {
   );
 };
 
-const run = async (command?: string, flag?: string): Promise<number> => {
+const run = async (
+  command?: string,
+  flag?: string,
+  ...rest: string[]
+): Promise<number> => {
   switch (command) {
+    case 'backfill': {
+      if (flag !== 'dicom-metadata') {
+        console.error(backfillUsage);
+        return 2;
+      }
+      return runBackfillCli(sequelize, rest);
+    }
     case 'up': {
       const applied = await migrateUp(sequelize);
       if (!applied.length) console.info('No pending migrations.');
@@ -82,9 +98,9 @@ const run = async (command?: string, flag?: string): Promise<number> => {
   }
 };
 
-const [command, flag] = process.argv.slice(2);
+const [command, flag, ...rest] = process.argv.slice(2);
 
-run(command, flag)
+run(command, flag, ...rest)
   .then((code) => {
     process.exitCode = code;
   })
