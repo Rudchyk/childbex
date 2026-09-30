@@ -112,9 +112,13 @@ const addTo = <K, V>(map: Map<K, Set<V>>, key: K, value: V) => {
 
 const byString = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-const checkPreconditions = async (
+/**
+ * Checks shared by the maintenance commands that read stored files: report
+ * key, upload root, database reachable and fully migrated.
+ */
+export const checkPreconditions = async (
   sequelize: Sequelize,
-  options: StudySeriesBackfillOptions
+  options: { hmacKey: string; uploadRoot: string }
 ) => {
   if (options.hmacKey.length < MIN_HMAC_KEY_LENGTH) {
     throw new BackfillPreconditionError(

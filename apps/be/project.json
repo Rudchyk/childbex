@@ -175,6 +175,20 @@
       "options": {
         "command": "node dist/apps/be/migrate.js backfill study-series --apply"
       }
+    },
+    "cleanup-duplicate-sop": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js cleanup duplicate-sop --dry-run"
+      }
+    },
+    "cleanup-duplicate-sop-apply": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js cleanup duplicate-sop --apply"
+      }
     }
   }
 }

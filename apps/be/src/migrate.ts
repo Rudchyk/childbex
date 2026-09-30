@@ -12,6 +12,9 @@
  *   node migrate.js backfill study-series [--apply] [...]
  *                                       link images to Study / Series
  *                                       (dry-run unless --apply)
+ *   node migrate.js cleanup duplicate-sop [--apply] [--group k-...] [...]
+ *                                       audit / clean legacy duplicate SOP
+ *                                       instances (dry-run unless --apply)
  *
  * Uses the same environment (DB_*) as the backend. See db/README.md.
  */
@@ -31,10 +34,15 @@ import {
   runStudySeriesCli,
   studySeriesUsage,
 } from './db/backfill/study-series.cli';
+import {
+  duplicateSopUsage,
+  runDuplicateSopCli,
+} from './db/cleanup/duplicate-sop.cli';
 
 const usage =
   'Usage: node migrate.js <up | status | down | baseline --check | baseline --apply' +
-  ' | backfill dicom-metadata [options] | backfill study-series [options]>';
+  ' | backfill dicom-metadata [options] | backfill study-series [options]' +
+  ' | cleanup duplicate-sop [options]>';
 
 const printComparison = ({ errors, warnings }: SchemaComparison) => {
   for (const error of errors) console.error(`ERROR    ${error}`);
@@ -50,6 +58,11 @@ const run = async (
   ...rest: string[]
 ): Promise<number> => {
   switch (command) {
+    case 'cleanup': {
+      if (flag === 'duplicate-sop') return runDuplicateSopCli(sequelize, rest);
+      console.error(duplicateSopUsage);
+      return 2;
+    }
     case 'backfill': {
       if (flag === 'dicom-metadata') return runBackfillCli(sequelize, rest);
       if (flag === 'study-series') return runStudySeriesCli(sequelize, rest);

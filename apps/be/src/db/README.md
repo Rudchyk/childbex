@@ -184,6 +184,54 @@ Images imported before migration `202609281200-patient-image-dicom-metadata`
 have no SOP UID until `backfill dicom-metadata` fills it: run it right after
 deploying, otherwise a re-upload of such an instance is not recognized.
 
+### Legacy duplicate SOP instances: `cleanup duplicate-sop`
+
+`node migrate.js cleanup duplicate-sop` audits rows sharing one non-null SOP
+Instance UID (groups of 2+, all patients including trashed ones) and cleans
+only unambiguous ones. Dry-run unless `--apply`; never run on startup.
+Options: `--apply`, `--dry-run`, `--report <file.json>` (same rules as above),
+`--group k-<16 hex>` (a group key from a report: a selector only, the group
+is still fully revalidated). Needs `REPORT_HMAC_KEY` and `UPLOAD_ROOT`. Group
+keys equal the SOP keys of the `backfill dicom-metadata` report.
+
+Classification, first match wins:
+
+| # | Class | When | Cleaned |
+| - | --- | --- | --- |
+| 1 | `OWNER_CONFLICT` | rows of different patients | never |
+| 2 | `STUDY_SERIES_CONFLICT` | different Study / Series UID, or different set `seriesId` | never |
+| 3 | `UNVERIFIED` | a row without `fileSha256` | never |
+| 4 | `CONTENT_CONFLICT` | different `fileSha256` | never |
+| 5 | `METADATA_CONFLICT` | same hash, different stored DICOM metadata (`slicePosition` excepted) | never |
+| 6 | `FILE_PROBLEM` | a file missing, outside the storage, not a regular file, unreadable, or its SHA-256 differs from `fileSha256` | never |
+| 7 | `REVIEW_CONFLICT` | review data on two or more rows | never |
+| 8 | `SAFE_IDENTICAL` | otherwise (different clusters are fine) | yes |
+
+Review data on a row: votes, vote counters, an admin resolution (id, name,
+comment, date), a status other than `not_reviewed` / `broken`, or notes (not
+the technical notes of a broken image). Nothing is merged.
+
+For `SAFE_IDENTICAL`: the canonical row is the reviewed row if any, else the
+oldest (`createdAt`), else the smallest id. It is kept exactly as it is
+(cluster, review data, votes, metadata); the other rows (all without review
+data) are deleted with raw SQL (no model hooks). Emptied clusters are only
+reported (`emptyClusters`).
+
+Apply, per group: one transaction under the import advisory lock (imports
+wait, and the cleanup waits for a running import), rows locked `FOR UPDATE`
+(also blocks new votes on them), then rows, review data, classification and
+file hashes are read again. Any difference from the scan
+(`changed_during_run`) or an error (`failed`) rolls the group back
+unchanged. Files are deleted after the commit, only if their stored path has
+no symlink/junction and is not the canonical file: a hard link to the
+canonical file only loses this name (`hardlink_name_removed`), otherwise
+`file_removed` / `file_kept`. A failed file deletion leaves an extra file,
+reported as `file_delete_failed` for manual removal; never a row without its
+image.
+
+Once a real database reports `duplicateGroups: 0`, a later migration can add
+`UNIQUE ("sopInstanceUid")`.
+
 ### Linking existing images: `backfill study-series`
 
 `node migrate.js backfill study-series` links images imported before the
@@ -233,6 +281,8 @@ directory, and `apps/be/.env.local` when run through Nx).
 | `npm run be:backfill:dicom-metadata:apply` | `node migrate.js backfill dicom-metadata --apply` | metadata backfill, write              |
 | `npm run be:backfill:study-series` | `node migrate.js backfill study-series` | Study/Series linking, dry-run                       |
 | `npm run be:backfill:study-series:apply` | `node migrate.js backfill study-series --apply` | Study/Series linking, write             |
+| `npm run be:cleanup:duplicate-sop` | `node migrate.js cleanup duplicate-sop` | duplicate SOP audit, dry-run                        |
+| `npm run be:cleanup:duplicate-sop:apply` | `node migrate.js cleanup duplicate-sop --apply` | clean SAFE_IDENTICAL duplicate groups   |
 
 The `npm run` commands build the backend first. To target another database
 than the one in `apps/be/.env.local`, set the variable in the shell (it takes

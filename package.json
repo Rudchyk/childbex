@@ -33,6 +33,8 @@
     "be:backfill:dicom-metadata:apply": "nx run be:backfill-dicom-metadata-apply --skip-nx-cache",
     "be:backfill:study-series": "nx run be:backfill-study-series --skip-nx-cache",
     "be:backfill:study-series:apply": "nx run be:backfill-study-series-apply --skip-nx-cache",
+    "be:cleanup:duplicate-sop": "nx run be:cleanup-duplicate-sop --skip-nx-cache",
+    "be:cleanup:duplicate-sop:apply": "nx run be:cleanup-duplicate-sop-apply --skip-nx-cache",
     "start": "nx run-many -t serve --projects=be,gui --parallel",
     "build": "nx run-many -t build --projects=be,gui --parallel --skip-nx-cache && npm run be:pjson",
     "pjson": "node scripts/create-package-json.js",
