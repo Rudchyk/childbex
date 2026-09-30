@@ -24,7 +24,39 @@ import {
   positionAlongNormal,
 } from '../../services/dicom.service';
 import { resolveStoredFile } from '../../services/stored-file';
-import { assertSchemaUpToDate } from '../migrator';
+import { assertMigratedThrough } from '../migrator';
+import { acquireImportLock } from '../../services/instance-dedup.service';
+
+const hasUniqueSopIndex = async (sequelize: Sequelize) => {
+  const [row] = await sequelize.query<{ enforced: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_indexes
+       WHERE schemaname = current_schema()
+         AND indexname = 'patients_images_sop_instance_uid_unique'
+     ) AS enforced`,
+    { type: QueryTypes.SELECT }
+  );
+  return !!row?.enforced;
+};
+
+/** Whether another image already stores this SOP Instance UID. */
+const sopStoredElsewhere = async (
+  sequelize: Sequelize,
+  sopInstanceUid: string,
+  imageId: string,
+  transaction?: unknown
+) =>
+  (
+    await sequelize.query(
+      `SELECT 1 FROM patients_images
+       WHERE "sopInstanceUid" = $1 AND id <> $2::uuid LIMIT 1`,
+      {
+        bind: [sopInstanceUid, imageId],
+        type: QueryTypes.SELECT,
+        transaction: transaction as never,
+      }
+    )
+  ).length > 0;
 
 type MetadataAttribute = (typeof patientImageDicomMetadataAttributes)[number];
 
@@ -99,6 +131,11 @@ export type BackfillRowResult =
   | 'already_complete'
   | 'metadata_conflict'
   | 'changed_during_run'
+  /**
+   * The SOP Instance UID to fill is already stored on another image (a
+   * legacy duplicate; SOP Instance UIDs are unique): no update at all.
+   */
+  | 'sop_instance_already_stored'
   | 'missing_file'
   | 'unsafe_path'
   /** Other I/O error (e.g. permissions); only this row is affected. */
@@ -343,8 +380,12 @@ const checkPreconditions = async (
     );
   }
   await sequelize.authenticate();
-  // Also guarantees that the metadata columns exist.
-  await assertSchemaUpToDate(sequelize);
+  // The metadata columns must exist; later migrations (e.g. the unique SOP
+  // index, which needs this backfill first) may still be pending.
+  await assertMigratedThrough(
+    sequelize,
+    '202609281200-patient-image-dicom-metadata'
+  );
 };
 
 const readSlicePosition = (
@@ -419,6 +460,15 @@ export const runDicomMetadataBackfill = async (
   const rows: BackfillRowReport[] = [];
   /** Values read from files (for the groups), by image id. */
   const scanned = new Map<string, GroupEntry>();
+  /**
+   * Only with the unique SOP index (202609301800) a SOP UID stored on another
+   * image cannot be filled in (`sop_instance_already_stored`). Before it,
+   * legacy duplicates are filled so that `cleanup duplicate-sop` sees them;
+   * refusing then would hide them behind a NULL SOP UID.
+   */
+  const uniqueSopEnforced = await hasUniqueSopIndex(sequelize);
+  /** SOP UIDs this run fills (or would fill), to keep them unique. */
+  const claimedSops = new Set<string>();
   let lastId = '00000000-0000-0000-0000-000000000000';
   let batchNumber = 0;
 
@@ -439,6 +489,16 @@ export const runDicomMetadataBackfill = async (
     batchNumber += 1;
 
     const pending: PendingUpdate[] = [];
+    const markSopAlreadyStored = (
+      row: ScannedRow,
+      report: BackfillRowReport
+    ) => {
+      report.result = 'sop_instance_already_stored';
+      report.filled = [];
+      // The row keeps its stored (NULL) SOP UID.
+      const entry = scanned.get(row.id);
+      if (entry) entry.sopInstanceUid = row.sopInstanceUid as string | null;
+    };
     // Sequential file reads, outside any transaction.
     for (const row of batch) {
       const report: BackfillRowReport = {
@@ -521,13 +581,36 @@ export const runDicomMetadataBackfill = async (
       }
       report.filled = Object.keys(fill) as MetadataAttribute[];
       if (!report.filled.length) continue;
+      // A SOP UID stored on another image (or claimed earlier in this run)
+      // cannot be filled in again: leave the whole row unchanged.
+      const sop = uniqueSopEnforced ? fill.sopInstanceUid : undefined;
+      if (
+        sop &&
+        (claimedSops.has(sop) ||
+          (await sopStoredElsewhere(sequelize, sop, row.id)))
+      ) {
+        markSopAlreadyStored(row, report);
+        continue;
+      }
+      if (sop) claimedSops.add(sop);
       report.result = 'would_update';
       pending.push({ row, report, fill });
     }
 
     if (options.apply && pending.length) {
       await sequelize.transaction(async (transaction) => {
+        // Same lock as the import: no import can store one of these SOP
+        // UIDs between the check and the write.
+        await acquireImportLock(sequelize, transaction);
         for (const update of pending) {
+          const sop = uniqueSopEnforced ? update.fill.sopInstanceUid : undefined;
+          if (
+            sop &&
+            (await sopStoredElsewhere(sequelize, sop, update.row.id, transaction))
+          ) {
+            markSopAlreadyStored(update.row, update.report);
+            continue;
+          }
           const written = await writeRow(sequelize, update, transaction);
           update.report.result = written ? 'updated' : 'changed_during_run';
           if (!written) update.report.filled = [];
@@ -564,6 +647,7 @@ export const runDicomMetadataBackfill = async (
     alreadyComplete: count('already_complete'),
     metadataConflict: count('metadata_conflict'),
     changedDuringRun: count('changed_during_run'),
+    sopInstanceAlreadyStored: count('sop_instance_already_stored'),
     missingFile: count('missing_file'),
     unsafePath: count('unsafe_path'),
     readFailed: count('read_failed'),

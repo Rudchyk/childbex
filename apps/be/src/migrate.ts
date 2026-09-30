@@ -2,6 +2,7 @@
  * Database migration CLI (bundled as `migrate.js` next to `main.js`):
  *
  *   node migrate.js up                  apply all pending migrations
+ *   node migrate.js up --to <name>      apply pending migrations up to <name>
  *   node migrate.js status              list applied / pending migrations
  *   node migrate.js down                revert the latest migration
  *   node migrate.js baseline --check    compare an existing schema (read-only)
@@ -40,7 +41,7 @@ import {
 } from './db/cleanup/duplicate-sop.cli';
 
 const usage =
-  'Usage: node migrate.js <up | status | down | baseline --check | baseline --apply' +
+  'Usage: node migrate.js <up [--to <migration>] | status | down | baseline --check | baseline --apply' +
   ' | backfill dicom-metadata [options] | backfill study-series [options]' +
   ' | cleanup duplicate-sop [options]>';
 
@@ -70,7 +71,15 @@ const run = async (
       return 2;
     }
     case 'up': {
-      const applied = await migrateUp(sequelize);
+      // `up --to <name>`: stop after that migration (e.g. to run a backfill
+      // or cleanup a later migration depends on).
+      if (flag !== undefined && (flag !== '--to' || !rest[0] || rest.length > 1)) {
+        console.error(usage);
+        return 2;
+      }
+      const applied = await migrateUp(sequelize, undefined, {
+        to: flag === '--to' ? rest[0] : undefined,
+      });
       if (!applied.length) console.info('No pending migrations.');
       for (const { name } of applied) console.info(`applied   ${name}`);
       return 0;

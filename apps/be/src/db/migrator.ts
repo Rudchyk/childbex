@@ -136,10 +136,40 @@ export const assertSchemaUpToDate = async (
  * Applies all pending migrations. Refuses to run the baseline over an
  * existing, not yet baselined schema (that must be checked, not recreated).
  */
-export const migrateUp = async (
+/**
+ * For maintenance commands: the migrations up to and including `name` (what
+ * the command needs) must be applied; later ones may still be pending (e.g.
+ * a constraint that needs the command to run first).
+ */
+export const assertMigratedThrough = async (
   sequelize: Sequelize,
+  name: string,
   migrations: Migration[] = registeredMigrations
 ) => {
+  const index = migrations.findIndex((migration) => migration.name === name);
+  if (index < 0) throw new Error(`Unknown migration "${name}".`);
+  const status = await getMigrationStatus(sequelize, migrations);
+  const applied = new Set(status.executed);
+  const missing = migrations
+    .slice(0, index + 1)
+    .map((migration) => migration.name)
+    .filter((migrationName) => !applied.has(migrationName));
+  if (!status.initialized || missing.length) {
+    throw new SchemaNotReadyError(
+      `Pending database migrations: ${missing.join(', ')} (required by this ` +
+        `command). Run \`node migrate.js up --to ${name}\` first.`
+    );
+  }
+};
+
+export const migrateUp = async (
+  sequelize: Sequelize,
+  migrations: Migration[] = registeredMigrations,
+  { to }: { to?: string } = {}
+) => {
+  if (to && !migrations.some(({ name }) => name === to)) {
+    throw new Error(`Unknown migration "${to}".`);
+  }
   const executed = await readExecutedMigrations(sequelize);
   if (!executed?.length && (await hasExistingApplicationSchema(sequelize))) {
     throw new SchemaNotReadyError(
@@ -148,7 +178,9 @@ export const migrateUp = async (
         '(see apps/be/src/db/README.md).'
     );
   }
-  return createMigrator(sequelize, migrations).up();
+  // Already there: nothing to apply up to it.
+  if (to && executed?.includes(to)) return [];
+  return createMigrator(sequelize, migrations).up(to ? { to } : {});
 };
 
 /** Reverts only the latest applied migration. */

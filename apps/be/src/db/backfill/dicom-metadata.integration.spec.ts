@@ -92,7 +92,11 @@ describeWithDatabase('DICOM metadata backfill (PostgreSQL)', () => {
     await sequelize.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     await rm(uploadRoot, { recursive: true, force: true });
     await mkdir(uploadRoot, { recursive: true });
-    await migrator.migrateUp(sequelize);
+    // A database before the unique SOP index: the backfill runs first there
+    // (legacy duplicates possible). With the index: sop-unique spec.
+    await migrator.migrateUp(sequelize, undefined, {
+      to: '202609301200-patient-image-instance-indexes',
+    });
   });
 
   afterAll(async () => {

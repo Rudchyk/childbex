@@ -361,7 +361,12 @@ export const runDuplicateSopCleanup = async (
   options: DuplicateSopCleanupOptions
 ): Promise<DuplicateSopReport> => {
   const startedAt = new Date().toISOString();
-  await checkPreconditions(sequelize, options);
+  // Runs before the unique SOP index (it resolves what blocks it).
+  await checkPreconditions(
+    sequelize,
+    options,
+    '202609301200-patient-image-instance-indexes'
+  );
   const progress = options.onProgress ?? (() => undefined);
   const removeFile = options.removeFile ?? unlink;
 

@@ -229,8 +229,61 @@ canonical file only loses this name (`hardlink_name_removed`), otherwise
 reported as `file_delete_failed` for manual removal; never a row without its
 image.
 
-Once a real database reports `duplicateGroups: 0`, a later migration can add
-`UNIQUE ("sopInstanceUid")`.
+### Unique SOP Instance UID
+
+Migration `202609301800-patient-image-sop-unique` replaces the non-unique
+`patients_images_sop_instance_uid` with the UNIQUE index
+`patients_images_sop_instance_uid_unique` (NULLs remain allowed: images
+without a SOP UID stay supported). It locks `patients_images` against writes
+(`SHARE`), counts duplicate non-null SOP UIDs and, if there are any, fails
+without changes, naming only their number, e.g.:
+
+```
+Cannot enforce a unique SOP Instance UID: 2 duplicate group(s) exist. Run
+`node migrate.js cleanup duplicate-sop` (dry-run, resolve conflict groups
+manually, then --apply) until it reports duplicateGroups: 0, then run the
+migrations again.
+```
+
+Conflict groups are never deleted automatically; they must be resolved by
+hand. Rolling the migration back restores the non-unique index (no data is
+touched).
+
+The import keeps its own deduplication (under the import lock), so users get
+`alreadyImported` or the explicit `SOP_INSTANCE_*` conflicts, never a database
+error; the index is the last line of defense. With the index in place,
+`backfill dicom-metadata` does not fill a SOP UID already stored on another
+image (`sop_instance_already_stored`, no update of that row); before it, it
+fills legacy duplicates so that `cleanup duplicate-sop` can find them.
+
+Maintenance commands only need the migrations they depend on (`backfill
+dicom-metadata`: 202609281200, `backfill study-series`: 202609291200,
+`cleanup duplicate-sop`: 202609301200); later ones may be pending. The backend
+itself starts only when all migrations are applied.
+
+### Production order for the unique SOP index
+
+`node migrate.js up` applies every pending migration, so stop before the
+unique index with `--to` until the data is clean (otherwise legacy rows
+without a SOP UID yet would pass the check unseen):
+
+1. Back up the database (`pg_dump -Fc ...`).
+2. Deploy the code (PR3, PR4, PR4.1, PR4.2, PR4.3) without restarting, then
+   `node migrate.js up --to 202609301200-patient-image-instance-indexes`.
+3. `node migrate.js backfill dicom-metadata --report ~/backfill-dry-run.json`,
+   review, then `--apply --report ~/backfill-apply.json`.
+4. `node migrate.js backfill study-series --report ~/study-series-dry-run.json`,
+   review, then `--apply --report ~/study-series-apply.json`.
+5. `node migrate.js cleanup duplicate-sop --report ~/dup-sop-dry-run.json`.
+6. Resolve every group that is not `SAFE_IDENTICAL` manually (there is no
+   force option).
+7. `node migrate.js cleanup duplicate-sop --apply --report ~/dup-sop-apply.json`
+   (all safe groups, or one at a time with `--group k-...`).
+8. Repeat the dry-run of step 5.
+9. Verify it reports `duplicateGroups: 0`.
+10. `node migrate.js up` (applies the unique index).
+11. `node migrate.js status` (exit code 0, nothing pending).
+12. Restart the backend and resume normal operation.
 
 ### Linking existing images: `backfill study-series`
 
@@ -273,6 +326,7 @@ directory, and `apps/be/.env.local` when run through Nx).
 | Development (repo root)             | Deployed build (`dist/apps/be`)   | What it does                                              |
 | ----------------------------------- | --------------------------------- | --------------------------------------------------------- |
 | `npm run be:migrate`                | `node migrate.js up`              | apply all pending migrations                              |
+| —                                   | `node migrate.js up --to <name>`  | apply pending migrations up to and including `<name>`     |
 | `npm run be:migrate:status`         | `node migrate.js status`          | applied / pending migrations (exit 1 if not up to date)   |
 | `npm run be:migrate:down`           | `node migrate.js down`            | revert **only the latest** migration                      |
 | `npm run be:migrate:baseline:check` | `node migrate.js baseline --check` | compare an existing schema with the baseline (read-only) |

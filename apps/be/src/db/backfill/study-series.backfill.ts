@@ -27,7 +27,7 @@ import {
   type SeriesFields,
 } from '../../services/dicom-hierarchy.service';
 import { resolveStoredFile } from '../../services/stored-file';
-import { assertSchemaUpToDate } from '../migrator';
+import { assertMigratedThrough } from '../migrator';
 import {
   BackfillPreconditionError,
   MIN_HMAC_KEY_LENGTH,
@@ -114,11 +114,13 @@ const byString = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * Checks shared by the maintenance commands that read stored files: report
- * key, upload root, database reachable and fully migrated.
+ * key, upload root, database reachable and migrated through
+ * `requiredMigration` (later migrations may still be pending).
  */
 export const checkPreconditions = async (
   sequelize: Sequelize,
-  options: { hmacKey: string; uploadRoot: string }
+  options: { hmacKey: string; uploadRoot: string },
+  requiredMigration: string
 ) => {
   if (options.hmacKey.length < MIN_HMAC_KEY_LENGTH) {
     throw new BackfillPreconditionError(
@@ -132,8 +134,7 @@ export const checkPreconditions = async (
     );
   }
   await sequelize.authenticate();
-  // Also guarantees that the studies / series tables exist.
-  await assertSchemaUpToDate(sequelize);
+  await assertMigratedThrough(sequelize, requiredMigration);
 };
 
 /** StudyDate / StudyTime of the study, read from one of its files. */
@@ -153,7 +154,8 @@ export const runStudySeriesBackfill = async (
   options: StudySeriesBackfillOptions
 ): Promise<StudySeriesReport> => {
   const startedAt = new Date().toISOString();
-  await checkPreconditions(sequelize, options);
+  // The studies / series tables must exist.
+  await checkPreconditions(sequelize, options, '202609291200-study-series');
   const progress = options.onProgress ?? (() => undefined);
   const key = (kind: string, value: string) =>
     reportKey(options.hmacKey, kind, value);

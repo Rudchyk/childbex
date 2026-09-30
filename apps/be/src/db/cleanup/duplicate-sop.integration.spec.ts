@@ -90,7 +90,10 @@ describeWithDatabase('duplicate SOP cleanup (PostgreSQL)', () => {
     await sequelize.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     await rm(uploadRoot, { recursive: true, force: true });
     await mkdir(uploadRoot, { recursive: true });
-    await migrator.migrateUp(sequelize);
+    // A database before the unique SOP index (legacy duplicates possible).
+    await migrator.migrateUp(sequelize, undefined, {
+      to: '202609301200-patient-image-instance-indexes',
+    });
     for (const patient of [P1, P2]) {
       await sequelize.query(
         `INSERT INTO patients (id, name, slug, "creatorId", "creatorName", "createdAt", "updatedAt")
