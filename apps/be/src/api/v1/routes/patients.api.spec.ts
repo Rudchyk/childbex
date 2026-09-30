@@ -166,30 +166,19 @@ describe('patient delete', () => {
   });
 });
 
-describe('patient cluster', () => {
-  it('does not expose the backend-internal DICOM metadata of images', async () => {
-    const { PatientImagesCluster } = require('../../../db/models/PatientImagesCluster.model');
-    const { patientImageDicomMetadataAttributes } = require('../../../services/dicom.metadata');
-    const findPatient = jest
-      .spyOn(Patient, 'findOne')
-      .mockResolvedValue({ id: PATIENT } as never);
-    const findCluster = jest
-      .spyOn(PatientImagesCluster, 'findOne')
-      .mockResolvedValue({ toJSON: () => ({ id: 'cluster', images: [] }) });
+describe('removed cluster API', () => {
+  it.each([
+    ['GET', '/patients/slug/synthetic/clusters/cluster/0'],
+    ['PATCH', '/patients/clusters/33333333-3333-4333-8333-333333333333'],
+    ['DELETE', '/patients/clusters/33333333-3333-4333-8333-333333333333'],
+    ['POST', '/patients/clusters/33333333-3333-4333-8333-333333333333/review/finish'],
+  ])('%s %s is 410 Gone with guidance (no guessed Series)', async (method, url) => {
+    const response = await fetch(`${baseUrl}${url}`, { method });
 
-    const response = await fetch(
-      `${baseUrl}/patients/slug/synthetic/clusters/cluster/0`
-    );
-
-    expect(response.status).toBe(200);
-    const [options] = findCluster.mock.calls[0] as [
-      { include: { attributes: { exclude: string[] } }[] },
-    ];
-    expect(options.include[0].attributes.exclude).toEqual([
-      ...patientImageDicomMetadataAttributes,
-      'seriesId',
-    ]);
-    findPatient.mockRestore();
-    findCluster.mockRestore();
+    expect(response.status).toBe(410);
+    const body = await response.json();
+    expect(body).toMatchObject({ code: 'CLUSTERS_REMOVED' });
+    expect(body.message).toContain('/patients/{patientId}/studies');
+    expect(JSON.stringify(body)).not.toMatch(/seriesId":|"location"/i);
   });
 });

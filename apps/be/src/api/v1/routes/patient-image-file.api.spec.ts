@@ -23,7 +23,7 @@ jest.mock('../../../services/logger.service', () => ({ logger: mockLogger }));
 
 const PATIENT = '11111111-1111-4111-8111-111111111111';
 const OTHER_PATIENT = '22222222-2222-4222-8222-222222222222';
-const CLUSTER = '33333333-3333-4333-8333-333333333333';
+const SERIES = '33333333-3333-4333-8333-333333333333';
 const IMAGE = '44444444-4444-4444-8444-444444444444';
 const LARGE_IMAGE = '55555555-5555-4555-8555-555555555555';
 const MISSING_FILE_IMAGE = '66666666-6666-4666-8666-666666666666';
@@ -68,7 +68,7 @@ const fakeKeycloak = {
     },
 };
 
-const source = (name: string) => `/uploads/${PATIENT}/${CLUSTER}/${name}`;
+const source = (name: string) => `/uploads/${PATIENT}/${SERIES}/${name}`;
 
 beforeAll(async () => {
   tmp = await mkdtemp(path.join(os.tmpdir(), 'childbex-image-file-'));
@@ -76,7 +76,7 @@ beforeAll(async () => {
   process.env.UPLOAD_ROOT = uploadRoot;
   process.env.UPLOAD_SESSIONS_DIR = path.join(tmp, 'sessions');
 
-  const folder = path.join(uploadRoot, PATIENT, CLUSTER);
+  const folder = path.join(uploadRoot, PATIENT, SERIES);
   await mkdir(folder, { recursive: true });
   await writeFile(path.join(folder, ORIGINAL_NAME), dicom);
   await writeFile(path.join(folder, 'large.dcm'), largeDicom);
@@ -108,22 +108,18 @@ beforeAll(async () => {
   ];
 
   const { setupAPIRoutes } = require('../api') as typeof ApiModule;
-  const { PatientImage } = require('../../../db/models/PatientImage.model');
+  const { sequelize } = require('../../../db/sequelize');
 
-  // Behaves like the SQL query: the image must belong to a cluster of the
-  // requested patient.
-  findOne = jest.spyOn(PatientImage, 'findOne').mockImplementation((async (
-    options: {
-      where: { id: string };
-      include: { where: { patientId: string } }[];
-    }
+  // Behaves like the SQL query: the image must belong (Series -> Study ->
+  // Patient) to the requested patient.
+  findOne = jest.spyOn(sequelize, 'query').mockImplementation((async (
+    _sql: string,
+    options: { replacements: { patientId: string; imageId: string } }
   ) => {
-    const row = rows.find(
-      ({ id, patientId }) =>
-        id === options.where.id &&
-        patientId === options.include[0].where.patientId
-    );
-    return row ? { id: row.id, source: row.source } : null;
+    const { patientId, imageId } = options.replacements;
+    return rows
+      .filter((row) => row.id === imageId && row.patientId === patientId)
+      .map(({ source }) => ({ source }));
   }) as never);
 
   const app = express();
@@ -196,14 +192,16 @@ describe('GET /patients/:id/images/:imageId/file', () => {
   it('queries the image only through a live patient of the requested id', async () => {
     await (await getFile(PATIENT, IMAGE)).arrayBuffer();
 
-    const [options] = findOne.mock.calls[0];
-    expect(options.where).toEqual({ id: IMAGE });
-    const [cluster] = options.include;
-    expect(cluster.where).toEqual({ patientId: PATIENT });
-    expect(cluster.required).toBe(true);
-    // Paranoid (not `paranoid: false`): trashed patients are not found.
-    expect(cluster.include[0].required).toBe(true);
-    expect(cluster.include[0].paranoid).toBeUndefined();
+    const [sql, options] = findOne.mock.calls[0];
+    expect(options.replacements).toEqual({ patientId: PATIENT, imageId: IMAGE });
+    // Image -> Series -> Study -> Patient; trashed patients are not found.
+    const normalized = String(sql).replace(/\s+/g, ' ');
+    expect(normalized).toContain('JOIN series se ON se.id = i."seriesId"');
+    expect(normalized).toContain('JOIN studies s ON s.id = se."studyId"');
+    expect(normalized).toContain(
+      'JOIN patients p ON p.id = s."patientId" AND p."deletedAt" IS NULL'
+    );
+    expect(normalized).toContain('WHERE i.id = :imageId AND p.id = :patientId');
   });
 
   it('returns 404 for an unknown image', async () => {
@@ -261,7 +259,7 @@ describe('GET /patients/:id/images/:imageId/file', () => {
     '..%2F..%2Foutside.dcm',
     '..',
     'not-a-uuid',
-    encodeURIComponent(`${PATIENT}/${CLUSTER}/${ORIGINAL_NAME}`),
+    encodeURIComponent(`${PATIENT}/${SERIES}/${ORIGINAL_NAME}`),
   ])('does not accept a path as the image id (%s)', async (imageId) => {
     const response = await getFile(PATIENT, imageId);
 

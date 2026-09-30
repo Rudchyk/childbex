@@ -27,11 +27,19 @@ import BiotechIcon from '@mui/icons-material/Biotech';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 
 interface LLMCheckItemsProps {
+  /** The Series context: the server checks every image belongs to it. */
+  patientId: string;
+  seriesId: string;
   items: string[];
   disabled?: boolean;
 }
 
-export const LLMCheckItems: FC<LLMCheckItemsProps> = ({ items, disabled }) => {
+export const LLMCheckItems: FC<LLMCheckItemsProps> = ({
+  patientId,
+  seriesId,
+  items,
+  disabled,
+}) => {
   const [open, toggleOpen] = useToggle(false);
   const [llmServiceCheckItems, { data, isError, isLoading, isSuccess, error }] =
     useLlmServiceCheckItemsMutation();
@@ -56,7 +64,9 @@ export const LLMCheckItems: FC<LLMCheckItemsProps> = ({ items, disabled }) => {
         variant="contained"
         color="primary"
         startIcon={<BiotechIcon />}
-        onClick={() => llmServiceCheckItems(items)}
+        onClick={() =>
+          llmServiceCheckItems({ patientId, seriesId, imageIds: items })
+        }
         loading={isLoading}
       >
         Check

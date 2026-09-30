@@ -6,8 +6,8 @@ import { ReviewState, type PatientSeriesResponse } from '@libs/schemas';
 import { DicomViewer } from '../../components';
 import { apiBaseUrl } from '../../store/apis';
 import { keycloakAuthHeaders } from '../../modules/archiveUpload/httpTransport';
-import { PatientImageReview } from '../PatientImagesClusterPage/PatientImageReview';
-import { LLMCheckItems } from '../PatientPage/LLMCheckItems';
+import { PatientImageReview } from './review/PatientImageReview';
+import { LLMCheckItems } from './LLMCheckItems';
 import { FinishSeriesReview } from './FinishSeriesReview';
 
 interface SeriesImagesProps {
@@ -63,7 +63,11 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
           presentedImageIds={presented.map(({ id }) => id)}
           disabledReason={disabledReason}
         />
-        <LLMCheckItems items={presented.map(({ id }) => id)} />
+        <LLMCheckItems
+          patientId={data.patient.id}
+          seriesId={data.series.id}
+          items={presented.map(({ id }) => id)}
+        />
       </Stack>
       {!matches && (
         <Box

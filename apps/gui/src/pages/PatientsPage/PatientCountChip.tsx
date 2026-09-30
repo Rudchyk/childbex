@@ -2,11 +2,11 @@ import { Chip, CircularProgress } from '@mui/material';
 import { FC } from 'react';
 import { usePatients } from '../../store/slices';
 
-interface PatientClustersChipProps {
+interface PatientCountChipProps {
   value?: number;
 }
 
-export const PatientClustersChip: FC<PatientClustersChipProps> = ({
+export const PatientCountChip: FC<PatientCountChipProps> = ({
   value,
 }) => {
   const { isLoading } = usePatients();

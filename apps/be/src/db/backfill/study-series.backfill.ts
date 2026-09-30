@@ -27,7 +27,8 @@ import {
   type SeriesFields,
 } from '../../services/dicom-hierarchy.service';
 import { resolveStoredFile } from '../../services/stored-file';
-import { assertMigratedThrough } from '../migrator';
+import { assertMigratedThrough, assertNotMigrated } from '../migrator';
+import { CLUSTER_REMOVAL_MIGRATION } from '../migrations/202610010000-drop-patient-image-clusters';
 import {
   BackfillPreconditionError,
   MIN_HMAC_KEY_LENGTH,
@@ -115,7 +116,9 @@ const byString = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /**
  * Checks shared by the maintenance commands that read stored files: report
  * key, upload root, database reachable and migrated through
- * `requiredMigration` (later migrations may still be pending).
+ * `requiredMigration` (later migrations may still be pending). These
+ * commands (`backfill study-series`, `cleanup duplicate-sop`) work on the
+ * legacy clusters and refuse once they were removed.
  */
 export const checkPreconditions = async (
   sequelize: Sequelize,
@@ -135,6 +138,11 @@ export const checkPreconditions = async (
   }
   await sequelize.authenticate();
   await assertMigratedThrough(sequelize, requiredMigration);
+  await assertNotMigrated(
+    sequelize,
+    CLUSTER_REMOVAL_MIGRATION,
+    'every image is linked to a DICOM Series and SOP Instance UIDs are unique (both required before the clusters were removed); the legacy clusters it reads no longer exist.'
+  );
 };
 
 /** StudyDate / StudyTime of the study, read from one of its files. */

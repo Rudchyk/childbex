@@ -22,13 +22,3 @@ export const seriesTitle = ({
   ]
     .filter(Boolean)
     .join(' ');
-
-/**
- * The viewer shows one stack of single-frame slices with one orientation:
- * only such a Series can be viewed and finished as a whole.
- */
-export const isSimpleStackSeries = ({
-  orientationCount,
-  multiFrameImageCount,
-}: Pick<SeriesSummary, 'orientationCount' | 'multiFrameImageCount'>) =>
-  orientationCount <= 1 && multiFrameImageCount === 0;

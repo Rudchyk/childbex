@@ -53,7 +53,8 @@ export type UploadSessionChunkParams = Static<
 export const UploadSessionResultSchema = Type.Object({
   importedImages: Type.Integer(),
   alreadyImported: Type.Integer(),
-  clusters: Type.Integer(),
+  /** DICOM Series in the archive. */
+  series: Type.Integer(),
   brokenImages: Type.Integer(),
   skippedFiles: Type.Integer(),
 });

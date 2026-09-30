@@ -197,6 +197,13 @@
         "command": "node dist/apps/be/migrate.js audit review-state"
       }
     },
+    "audit-cluster-removal": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js audit cluster-removal"
+      }
+    },
     "backfill-review-state": {
       "executor": "nx:run-commands",
       "dependsOn": ["build"],

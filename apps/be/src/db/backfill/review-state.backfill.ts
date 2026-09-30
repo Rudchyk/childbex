@@ -56,7 +56,7 @@ export const legacyResolutionDecisions: readonly LegacyResolutionDecision[] = [
 
 interface ImageRow {
   id: string;
-  clusterId: string;
+  seriesId: string | null;
   status: string;
   adminResolutionId: string | null;
   adminResolutionName: string | null;
@@ -65,7 +65,7 @@ interface ImageRow {
   reviewState: string | null;
 }
 
-const imageColumns = `id, "clusterId", status::text AS status,
+const imageColumns = `id, "seriesId", status::text AS status,
   "adminResolutionId", "adminResolutionName", "resolutionComment",
   "resolvedAt", "reviewState"`;
 
@@ -81,7 +81,7 @@ export const legacyResolutionFields = (row: ImageRow) =>
 
 export interface AmbiguousLegacyResolution {
   imageId: string;
-  clusterId: string;
+  seriesId: string | null;
   legacyFields: string[];
   votes: { normal: number; abnormal: number; uncertain: number };
 }
@@ -91,7 +91,7 @@ const ambiguousEntry = (
   plan: ImageReviewPlan
 ): AmbiguousLegacyResolution => ({
   imageId: row.id,
-  clusterId: row.clusterId,
+  seriesId: row.seriesId,
   legacyFields: legacyResolutionFields(row),
   votes: {
     normal: plan.expected.normalVotes,

@@ -234,8 +234,8 @@ describeWithDatabase('review-state rollout (PostgreSQL)', () => {
       reviewStateRequired: 0,
     });
     expect(report.ambiguous).toEqual([
-      { imageId: id(5), clusterId: CLUSTER, legacyFields: ['status', 'adminResolutionId', 'adminResolutionName', 'resolutionComment', 'resolvedAt'], votes: { normal: 1, abnormal: 0, uncertain: 0 } },
-      { imageId: id(6), clusterId: CLUSTER, legacyFields: ['status', 'adminResolutionName', 'resolvedAt'], votes: { normal: 0, abnormal: 1, uncertain: 0 } },
+      { imageId: id(5), seriesId: null, legacyFields: ['status', 'adminResolutionId', 'adminResolutionName', 'resolutionComment', 'resolvedAt'], votes: { normal: 1, abnormal: 0, uncertain: 0 } },
+      { imageId: id(6), seriesId: null, legacyFields: ['status', 'adminResolutionName', 'resolvedAt'], votes: { normal: 0, abnormal: 1, uncertain: 0 } },
     ]);
   });
 
@@ -404,8 +404,13 @@ describeWithDatabase('review-state rollout (PostgreSQL)', () => {
     expect(await resolutions()).toHaveLength(2);
 
     // (Later migrations follow it.)
-    expect((await migrator.migrateUp(sequelize)).map(({ name }) => name)[0]).toBe(REVIEW_REQUIRED);
-    await expect(migrator.assertSchemaUpToDate(sequelize)).resolves.toBeTruthy();
+    // (Up to the last migration before the cluster removal: these legacy
+    // images have no Series, so that one would refuse.)
+    const applied = await migrator.migrateUp(sequelize, undefined, {
+      to: '202609302100-review-completion-series-scope',
+    });
+    expect(applied.map(({ name }) => name)[0]).toBe(REVIEW_REQUIRED);
+    await expect(migrator.assertMigratedThrough(sequelize, REVIEW_REQUIRED)).resolves.toBeUndefined();
 
     const audit = await backfill.runReviewStateAudit(sequelize);
     expect(audit.summary).toMatchObject({

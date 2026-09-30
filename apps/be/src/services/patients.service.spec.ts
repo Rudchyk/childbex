@@ -17,7 +17,11 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import type * as PatientsService from './patients.service';
-import { buildTar, makeSyntheticDicom } from './archive/__fixtures__/synthetic';
+import {
+  buildTar,
+  makeSyntheticDicom,
+  SYNTHETIC_SERIES_UID,
+} from './archive/__fixtures__/synthetic';
 
 const transaction = { id: 'tx' };
 const mockState = {
@@ -88,15 +92,6 @@ jest.mock('../db/sequelize', () => ({
   },
 }));
 
-jest.mock('../db/models/PatientImagesCluster.model', () => ({
-  PatientImagesCluster: {
-    findOrCreate: jest.fn(async ({ where }: { where: { cluster: number } }) => [
-      { id: `cluster${where.cluster}` },
-      true,
-    ]),
-  },
-}));
-
 jest.mock('../db/models/PatientImage.model', () => ({
   PatientImage: {
     findAll: jest.fn(async () => []),
@@ -114,7 +109,6 @@ let workRoot: string;
 let importPatientArchiveFile: typeof PatientsService.importPatientArchiveFile;
 let models: {
   PatientImage: { bulkCreate: jest.Mock };
-  PatientImagesCluster: { findOrCreate: jest.Mock };
 };
 
 beforeEach(async () => {
@@ -133,10 +127,7 @@ beforeEach(async () => {
 
   ({ importPatientArchiveFile } =
     require('./patients.service') as typeof PatientsService);
-  models = {
-    ...require('../db/models/PatientImage.model'),
-    ...require('../db/models/PatientImagesCluster.model'),
-  } as typeof models;
+  models = require('../db/models/PatientImage.model') as typeof models;
 });
 
 afterEach(async () => {
@@ -166,6 +157,9 @@ const listTree = async (dir: string): Promise<string[]> => {
 };
 
 const UPLOAD_ID = '00000000-0000-4000-8000-00000000abcd';
+/** The (mocked) Series id of the synthetic series. */
+const SERIES_ID = `series-of-${SYNTHETIC_SERIES_UID}`;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Writes a synthetic archive (as assembled by an upload session) to disk. */
 const assembledArchive = async (
@@ -197,17 +191,30 @@ describe('importPatientArchiveFile import rollback', () => {
     expect(result).toEqual({
       importedImages: 2,
       alreadyImported: 0,
-      clusters: 1,
+      series: 1,
       brokenImages: 0,
       skippedFiles: 1,
     });
 
-    expect(await listTree(uploadRoot)).toEqual([
-      'patient-1',
-      'patient-1/cluster0',
-      'patient-1/cluster0/IM000001',
-      'patient-1/cluster0/IM000002',
-    ]);
+    // <patient>/<series>/<image id>.dcm: no archive file name, no DICOM UID.
+    const rows = models.PatientImage.bulkCreate.mock.calls[0][0] as {
+      id: string;
+      source: string;
+      seriesId: string;
+    }[];
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.id).toMatch(UUID);
+      expect(row.seriesId).toBe(SERIES_ID);
+      expect(row.source).toBe(`/uploads/patient-1/${SERIES_ID}/${row.id}.dcm`);
+    }
+    expect(await listTree(uploadRoot)).toEqual(
+      [
+        'patient-1',
+        `patient-1/${SERIES_ID}`,
+        ...rows.map(({ id }) => `patient-1/${SERIES_ID}/${id}.dcm`),
+      ].sort()
+    );
     // The stored original is named after the upload session.
     expect((await readdir(archivesRoot)).sort()).toEqual([
       `${UPLOAD_ID}.json`,
@@ -215,9 +222,6 @@ describe('importPatientArchiveFile import rollback', () => {
     ]);
     expect(await readdir(workRoot)).toEqual([]);
     // Every DB write is bound to the transaction.
-    expect(models.PatientImagesCluster.findOrCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ transaction })
-    );
     expect(models.PatientImage.bulkCreate).toHaveBeenCalledWith(
       expect.any(Array),
       { transaction }
@@ -247,11 +251,11 @@ describe('importPatientArchiveFile import rollback', () => {
   );
 
   it('never removes pre-existing patient files during rollback', async () => {
-    const clusterDir = path.join(uploadRoot, 'patient-1', 'cluster0');
-    await mkdir(clusterDir, { recursive: true });
-    // Same name as an image in the new archive, but not registered in the DB.
-    await writeFile(path.join(clusterDir, 'IM000001'), 'previous import');
-    await writeFile(path.join(clusterDir, 'OTHER'), 'previous import');
+    const seriesDir = path.join(uploadRoot, 'patient-1', SERIES_ID);
+    await mkdir(seriesDir, { recursive: true });
+    // Files of earlier imports in the same series folder.
+    await writeFile(path.join(seriesDir, 'IM000001'), 'previous import');
+    await writeFile(path.join(seriesDir, 'OTHER'), 'previous import');
     mockState.failBulkCreate = true;
 
     await expect(
@@ -260,11 +264,11 @@ describe('importPatientArchiveFile import rollback', () => {
 
     expect(await listTree(uploadRoot)).toEqual([
       'patient-1',
-      'patient-1/cluster0',
-      'patient-1/cluster0/IM000001',
-      'patient-1/cluster0/OTHER',
+      `patient-1/${SERIES_ID}`,
+      `patient-1/${SERIES_ID}/IM000001`,
+      `patient-1/${SERIES_ID}/OTHER`,
     ]);
-    expect(await readFile(path.join(clusterDir, 'IM000001'), 'utf8')).toBe(
+    expect(await readFile(path.join(seriesDir, 'IM000001'), 'utf8')).toBe(
       'previous import'
     );
     expect(await readdir(archivesRoot)).toEqual([]);
@@ -278,7 +282,7 @@ describe('importPatientArchiveFile import rollback', () => {
         ])
       )
     ).rejects.toMatchObject({ code: 'NO_USABLE_DICOM' });
-    expect(models.PatientImagesCluster.findOrCreate).not.toHaveBeenCalled();
+    expect(models.PatientImage.bulkCreate).not.toHaveBeenCalled();
     expect(await listTree(uploadRoot)).toEqual([]);
     expect(await listTree(archivesRoot)).toEqual([]);
     expect(await readdir(workRoot)).toEqual([]);
@@ -324,8 +328,8 @@ describe('importPatientArchiveFile DICOM metadata', () => {
       1, 2, 3,
     ]);
     for (const row of clustered) {
-      const { data } = slices.find(({ name }) =>
-        row.source.endsWith(path.basename(name))
+      const { data } = slices.find(
+        ({ data: bytes }) => sha256(bytes) === row.fileSha256
       ) as (typeof slices)[number];
       expect(row).toMatchObject({
         fileSha256: sha256(data),
@@ -367,8 +371,6 @@ describe('importPatientArchiveFile DICOM metadata', () => {
           name: 'IM1',
           data: makeSyntheticDicom({
             attributes: {
-              StudyInstanceUID: null,
-              SeriesInstanceUID: null,
               RescaleSlope: null,
               RescaleIntercept: null,
               InstanceNumber: null,
@@ -380,8 +382,6 @@ describe('importPatientArchiveFile DICOM metadata', () => {
 
     expect(result).toMatchObject({ importedImages: 1 });
     expect(createdRows()[0]).toMatchObject({
-      studyInstanceUid: null,
-      seriesInstanceUid: null,
       rescaleSlope: null,
       rescaleIntercept: null,
       instanceNumber: null,
@@ -423,17 +423,45 @@ describe('importPatientArchiveFile DICOM metadata', () => {
     }
   });
 
-  it('leaves images without a study or series UID unlinked', async () => {
-    await importPatientArchiveFile(
+  it('skips images without a study or series UID (never stored unlinked)', async () => {
+    const result = await importPatientArchiveFile(
       await assembledArchive('patient-1', [
+        { name: 'IM1', data: makeSyntheticDicom({ instance: 1 }) },
         {
-          name: 'IM1',
-          data: makeSyntheticDicom({ attributes: { StudyInstanceUID: null } }),
+          name: 'IM2',
+          data: makeSyntheticDicom({ instance: 2, attributes: { StudyInstanceUID: null } }),
+        },
+        {
+          name: 'IM3',
+          data: makeSyntheticDicom({
+            instance: 3,
+            attributes: { SeriesInstanceUID: null },
+            pixelDataBytes: 4,
+          }),
         },
       ])
     );
 
-    expect(createdRows()[0].seriesId).toBeNull();
+    expect(result).toMatchObject({ importedImages: 1, brokenImages: 0, skippedFiles: 2 });
+    expect(createdRows().map(({ seriesId }) => seriesId)).toEqual([SERIES_ID]);
+  });
+
+  it('imports an image whose geometry differs from the rest of its series', async () => {
+    const result = await importPatientArchiveFile(
+      await assembledArchive('patient-1', [
+        { name: 'IM1', data: makeSyntheticDicom({ instance: 1, rows: 16, cols: 16 }) },
+        { name: 'IM2', data: makeSyntheticDicom({ instance: 2, rows: 16, cols: 16 }) },
+        // Formerly dropped by the cluster heuristic as a geometry outlier.
+        { name: 'IM3', data: makeSyntheticDicom({ instance: 3, rows: 8, cols: 12 }) },
+      ])
+    );
+
+    expect(result).toMatchObject({ importedImages: 3, series: 1 });
+    expect(
+      createdRows()
+        .map(({ rows, columns }) => `${rows}x${columns}`)
+        .sort()
+    ).toEqual(['16x16', '16x16', '8x12']);
   });
 
   it('rejects the whole archive when a study belongs to another patient', async () => {

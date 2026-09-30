@@ -15,9 +15,15 @@ import { Tags } from '../lib/tags.service';
 import { apiRoutes } from '@libs/constants';
 import { llmService } from '../../../services/llm.service';
 import { getKeycloakSecurity } from '../lib/security.service';
-import { getInternalServerRequestError } from '../lib/helpers';
+import {
+  getInternalServerRequestError,
+  getInvalidRequestError,
+  getNotFoundError,
+  readJsonBody,
+} from '../lib/helpers';
 import { AxiosError } from 'axios';
-import { PatientImage } from '../../../db/models/PatientImage.model';
+import { Value } from '@libs/schemas';
+import { findSeriesImageSources } from '../../../services/hierarchy.service';
 
 const tags = [Tags.LLM_SERVICE];
 
@@ -57,12 +63,23 @@ router.route({
     },
   },
   handler: async (request) => {
+    const body = await readJsonBody(request);
+    if (!Value.Check(LLMServiceCheckItemsRequestBodySchema, body)) {
+      throw getInvalidRequestError();
+    }
+    // Every image must belong to that Series of that patient (Series ->
+    // Study -> Patient); ids supplied by a client are never trusted. The
+    // same 404 whether an id is unknown or someone else's.
+    const sources = await findSeriesImageSources(
+      body.patientId,
+      body.seriesId,
+      body.imageIds
+    );
+    if (!sources) {
+      throw getNotFoundError('images');
+    }
     try {
-      const itemsIds = await request.json();
-      const items = await PatientImage.findAll({
-        where: { id: itemsIds },
-      });
-      const result = await llmService.checkItems(items.map((i) => i.source));
+      const result = await llmService.checkItems(sources);
       return Response.json(result);
     } catch (error) {
       const err = error as AxiosError<any>;

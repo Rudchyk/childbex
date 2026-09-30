@@ -22,6 +22,9 @@ const image = (
     imageOrientationPatient: AXIAL,
     imagePositionPatient: [x, 0, z],
     numberOfFrames: 1,
+    rows: 512,
+    columns: 512,
+    pixelSpacing: [0.7, 0.7],
     ...rest,
   };
 };
@@ -148,10 +151,57 @@ describe('orderSeriesImages', () => {
       image('n', { imageOrientationPatient: null, instanceNumber: 1 }),
     ]);
     expect(stack.orientationCount).toBe(2);
-    expect(isSimpleStack(orderSeriesImages([image('n', { imageOrientationPatient: null })]))).toBe(true);
+    // One orientation group, but the geometry is incomplete: not a stack.
+    const unknown = orderSeriesImages([image('n', { imageOrientationPatient: null })]);
+    expect(unknown).toMatchObject({ orientationCount: 1, geometryCount: 0, geometryIncompleteCount: 1 });
+    expect(isSimpleStack(unknown)).toBe(false);
   });
 
-  it('an empty series is a (trivial) simple stack', () => {
-    expect(orderSeriesImages([])).toEqual({ images: [], orientationCount: 0, multiFrameImageCount: 0 });
+  it('an empty series is not a reviewable stack', () => {
+    const empty = orderSeriesImages([]);
+    expect(empty).toEqual({
+      images: [],
+      orientationCount: 0,
+      multiFrameImageCount: 0,
+      geometryCount: 0,
+      geometryIncompleteCount: 0,
+    });
+    expect(isSimpleStack(empty)).toBe(false);
+  });
+
+  it('counts geometries (rows, columns, pixel spacing to 1e-6): a mixed one is not a stack', () => {
+    const same = orderSeriesImages([
+      image('a', { z: 1 }),
+      image('b', { z: 2, pixelSpacing: [0.7 + 1e-8, 0.7] }),
+    ]);
+    expect(same).toMatchObject({ geometryCount: 1, geometryIncompleteCount: 0 });
+    expect(isSimpleStack(same)).toBe(true);
+    for (const outlier of [{ rows: 256 }, { columns: 256 }, { pixelSpacing: [0.5, 0.5] }]) {
+      const mixed = orderSeriesImages([image('a', { z: 1 }), image('o', { z: 2, ...outlier })]);
+      expect(mixed).toMatchObject({ orientationCount: 1, geometryCount: 2 });
+      expect(isSimpleStack(mixed)).toBe(false);
+    }
+  });
+
+  it.each([
+    ['rows', { rows: null }],
+    ['columns', { columns: null }],
+    ['pixel spacing', { pixelSpacing: null }],
+    ['a one-value pixel spacing', { pixelSpacing: [0.7] }],
+    ['the position', { imagePositionPatient: null }],
+  ])('an image without %s makes the geometry incomplete: not a stack', (_, missing) => {
+    const stack = orderSeriesImages([image('a', { z: 1 }), image('b', { z: 2, ...missing })]);
+    // The known geometry combinations count as one, yet it is not a stack.
+    expect(stack).toMatchObject({ geometryCount: 1, geometryIncompleteCount: 1 });
+    expect(isSimpleStack(stack)).toBe(false);
+  });
+
+  it('broken images do not count for the geometry', () => {
+    const stack = orderSeriesImages([
+      image('a', { z: 1 }),
+      image('broken', { isBroken: true, rows: null, pixelSpacing: null }),
+    ]);
+    expect(stack).toMatchObject({ geometryCount: 1, geometryIncompleteCount: 0 });
+    expect(isSimpleStack(stack)).toBe(true);
   });
 });

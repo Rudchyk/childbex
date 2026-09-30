@@ -55,6 +55,16 @@ export const SeriesSummarySchema = Type.Object({
   orientationCount: Type.Integer(),
   /** Non-broken images with more than one frame. */
   multiFrameImageCount: Type.Integer(),
+  /** Distinct (rows, columns, pixel spacing) among the non-broken images. */
+  geometryCount: Type.Integer(),
+  /** Non-broken images without complete geometry. */
+  geometryIncompleteCount: Type.Integer(),
+  /**
+   * Server-derived: the viewer shows the whole Series (one orientation, one
+   * geometry, complete geometry, no multi-frame image), so it can be viewed
+   * and finished as a whole. The GUI and Finish review use this rule.
+   */
+  reviewable: Type.Boolean(),
 });
 
 export type SeriesSummary = Static<typeof SeriesSummarySchema>;
@@ -92,11 +102,6 @@ export type SeriesImage = Static<typeof SeriesImageSchema>;
 export const PatientStudiesResponseSchema = Type.Object({
   patientId: IDSchema,
   studies: Type.Array(StudySummarySchema),
-  /** Images of the patient not linked to a DICOM Series (not shown). */
-  unassigned: Type.Object({
-    images: Type.Integer(),
-    broken: Type.Integer(),
-  }),
 });
 
 export type PatientStudiesResponse = Static<typeof PatientStudiesResponseSchema>;

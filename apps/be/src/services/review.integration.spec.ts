@@ -41,8 +41,13 @@ if (!databaseUrl) {
 jest.setTimeout(60_000);
 
 const PATIENT = '11111111-1111-4111-8111-111111111111';
-const CLUSTER = '22222222-2222-4222-8222-222222222222';
-const OTHER_CLUSTER = '22222222-2222-4222-8222-222222222223';
+const OTHER_PATIENT = '11111111-1111-4111-8111-111111111112';
+const STUDY = '44444444-4444-4444-8444-444444444441';
+const OTHER_STUDY = '44444444-4444-4444-8444-444444444442';
+const SERIES = '22222222-2222-4222-8222-222222222222';
+const OTHER_SERIES = '22222222-2222-4222-8222-222222222223';
+/** A series of another patient. */
+const FOREIGN_SERIES = '22222222-2222-4222-8222-222222222224';
 const id = (n: number) => `33333333-3333-4333-8333-${String(n).padStart(12, '0')}`;
 const reviewer = (name: string) => ({ id: `sub-${name}`, name: `Reviewer ${name}` });
 const ADMIN = { id: 'sub-admin', name: 'Admin' };
@@ -105,16 +110,25 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
     jest.clearAllMocks();
     await sequelize.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     await migrator.migrateUp(sequelize);
-    await sequelize.query(
-      `INSERT INTO patients (id, name, slug, "creatorId", "creatorName", "createdAt", "updatedAt")
-       VALUES ($1, 'Synthetic', 'synthetic', 'u', 'U', now(), now())`,
-      { bind: [PATIENT] }
-    );
-    for (const [cluster, n] of [[CLUSTER, 0], [OTHER_CLUSTER, 1]] as const) {
+    for (const [patient, slug] of [[PATIENT, 'synthetic'], [OTHER_PATIENT, 'other']]) {
       await sequelize.query(
-        `INSERT INTO patient_images_clusters (id, name, cluster, "patientId", "createdAt", "updatedAt")
-         VALUES ($1, 'SYNTHETIC', $2, $3, now(), now())`,
-        { bind: [cluster, n, PATIENT] }
+        `INSERT INTO patients (id, name, slug, "creatorId", "creatorName", "createdAt", "updatedAt")
+         VALUES ($1, 'Synthetic', $2, 'u', 'U', now(), now())`,
+        { bind: [patient, slug] }
+      );
+    }
+    for (const [study, patient] of [[STUDY, PATIENT], [OTHER_STUDY, OTHER_PATIENT]]) {
+      await sequelize.query(
+        `INSERT INTO studies (id, "patientId", "studyInstanceUid", "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, now(), now())`,
+        { bind: [study, patient, `2.25.4${study.slice(-1)}`] }
+      );
+    }
+    for (const [series, study] of [[SERIES, STUDY], [OTHER_SERIES, STUDY], [FOREIGN_SERIES, OTHER_STUDY]]) {
+      await sequelize.query(
+        `INSERT INTO series (id, "studyId", "seriesInstanceUid", "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, now(), now())`,
+        { bind: [series, study, `2.25.2${series.slice(-1)}`] }
       );
     }
   });
@@ -127,19 +141,39 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
 
   // --- Helpers -----------------------------------------------------------------
 
+  /** An axial slice (complete geometry) of a series, or a broken image. */
   const addImage = async (
     n: number,
-    { cluster = CLUSTER, broken = false } = {}
+    { series = SERIES, broken = false } = {}
   ) => {
     await sequelize.query(
-      `INSERT INTO patients_images (id, source, "clusterId", "isBrocken", status, "createdAt", "updatedAt")
-       VALUES ($1, $2, $3, $4, $5, now(), now())`,
+      `INSERT INTO patients_images (id, source, "seriesId", "isBrocken", status,
+         "imageOrientationPatient", "imagePositionPatient", rows, columns, "pixelSpacing",
+         "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, $5, '{1,0,0,0,1,0}', $6, 4, 4, '{0.5,0.5}', now(), now())`,
       {
-        bind: [id(n), `/uploads/p/c/IM${n}`, cluster, broken, broken ? 'broken' : 'not_reviewed'],
+        bind: [
+          id(n),
+          `/uploads/p/s/IM${n}`,
+          series,
+          broken,
+          broken ? 'broken' : 'not_reviewed',
+          `{0,0,${n}}`,
+        ],
       }
     );
     return id(n);
   };
+  /** The non-broken images of a series (what the viewer presents). */
+  const presentedOf = async (series: string) =>
+    (
+      await rows(
+        `SELECT id FROM patients_images WHERE "seriesId" = $1 AND NOT "isBrocken"`,
+        [series]
+      )
+    ).map(({ id: imageId }) => imageId as string);
+  const finishSeries = async (series = SERIES) =>
+    review.finishSeriesReview(PATIENT, series, reviewer('f'), await presentedOf(series));
 
   const stateOf = async (imageId: string) =>
     (
@@ -381,11 +415,11 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       const voted = await addImage(2);
       const broken = await addImage(3, { broken: true });
       const resolved = await addImage(4);
-      const elsewhere = await addImage(5, { cluster: OTHER_CLUSTER });
+      const elsewhere = await addImage(5, { series: OTHER_SERIES });
       await vote(voted, 'a', Vote.ABNORMAL);
       await review.setResolution(resolved, ADMIN, { label: ReviewResolutionLabel.NORMAL });
 
-      const result = await review.finishClusterReview(CLUSTER, reviewer('f'));
+      const result = await finishSeries();
 
       expect(result).toEqual({
         runId: expect.stringMatching(/^[0-9a-f-]{36}$/),
@@ -395,7 +429,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       });
       expect(
         await rows(
-          `SELECT "patientImageId", "runId", "scopeClusterId", "completedById", "completedByName",
+          `SELECT "patientImageId", "runId", "scopeSeriesId", "legacyScopeClusterId", "completedById", "completedByName",
                   "createdAt" IS NOT NULL AS "hasCreatedAt"
            FROM patient_image_review_completions`
         )
@@ -403,7 +437,9 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         {
           patientImageId: untouched,
           runId: result.runId,
-          scopeClusterId: CLUSTER,
+          scopeSeriesId: SERIES,
+          // Never written by new completions (historical provenance only).
+          legacyScopeClusterId: null,
           completedById: 'sub-f',
           completedByName: 'Reviewer f',
           hasCreatedAt: true,
@@ -430,17 +466,19 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       expect(await rows('SELECT 1 FROM patient_image_review_completions')).toHaveLength(1);
 
       // Nothing left to complete.
-      expect(await review.finishClusterReview(CLUSTER, reviewer('f'))).toMatchObject({
+      expect(await finishSeries()).toMatchObject({
         completed: 0,
         alreadyReviewed: 3,
         skippedBroken: 1,
       });
     });
 
-    it('rejects an unknown cluster', async () => {
-      await expect(
-        review.finishClusterReview('99999999-9999-4999-8999-999999999999', reviewer('f'))
-      ).rejects.toMatchObject({ code: 'CLUSTER_NOT_FOUND', status: 404 });
+    it('rejects an unknown series and a series of another patient alike', async () => {
+      for (const series of ['99999999-9999-4999-8999-999999999999', FOREIGN_SERIES]) {
+        await expect(
+          review.finishSeriesReview(PATIENT, series, reviewer('f'), [])
+        ).rejects.toMatchObject({ code: 'SERIES_NOT_FOUND', status: 404 });
+      }
     });
   });
 
@@ -464,7 +502,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         review.setResolution(image, ADMIN, { label: ReviewResolutionLabel.ABNORMAL })
       ).rejects.toMatchObject(frozen);
       await expect(review.removeResolution(image, ADMIN)).rejects.toMatchObject(frozen);
-      await expect(review.finishClusterReview(CLUSTER, reviewer('f'))).rejects.toMatchObject(frozen);
+      await expect(finishSeries()).rejects.toMatchObject(frozen);
       await expect(review.freezeReview(ADMIN, 'again')).rejects.toMatchObject({
         code: 'REVIEW_ALREADY_FROZEN',
       });
@@ -633,7 +671,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       ).toBe(204);
     });
 
-    it('resolution routes require the admin role; the cluster exposes the review state', async () => {
+    it('resolution routes require the admin role; the series exposes the review state', async () => {
       const image = await addImage(1);
       const path = `/patients/images/${image}/review/resolution`;
       expect((await call('PUT', path, { body: { label: 'ABNORMAL' } })).status).toBe(403);
@@ -644,8 +682,8 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         (await call('PUT', path, { roles: 'dashboard:admin', body: { label: 'ABNORMAL', comment: 'ok' } })).status
       ).toBe(204);
 
-      const cluster = await (await call('GET', '/patients/slug/synthetic/clusters/cluster/0')).json();
-      expect(cluster.images).toEqual([
+      const series = await (await call('GET', `/patients/${PATIENT}/series/${SERIES}`)).json();
+      expect(series.images).toEqual([
         expect.objectContaining({
           id: image,
           reviewState: 'ABNORMAL',
@@ -659,65 +697,57 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
     });
 
     describe('destructive operations under the review freeze', () => {
-      /** Everything a deletion could remove (rows and the cluster's files). */
+      const uploadRoot = () => process.env.UPLOAD_ROOT as string;
+      const seriesFile = (patient = PATIENT, series = SERIES) =>
+        path.join(uploadRoot(), patient, series, 'IM1.dcm');
+      /** Everything a deletion could remove (rows and the stored files). */
       const snapshot = async () => ({
         patients: await rows('SELECT id, "deletedAt" FROM patients ORDER BY id'),
-        clusters: await rows('SELECT id FROM patient_images_clusters ORDER BY id'),
+        studies: await rows('SELECT id FROM studies ORDER BY id'),
+        series: await rows('SELECT id FROM series ORDER BY id'),
         images: await rows('SELECT id, "reviewState", "reviewStateSource" FROM patients_images ORDER BY id'),
         votes: await rows('SELECT id FROM patient_image_review_votes ORDER BY id'),
         voteEvents: await rows('SELECT id FROM patient_image_review_vote_events ORDER BY id'),
         resolutions: await rows('SELECT id, "supersededAt" FROM patient_image_review_resolutions ORDER BY id'),
         completions: await rows('SELECT id FROM patient_image_review_completions ORDER BY id'),
-        clusterFile: existsSync(path.join(uploadRoot(), PATIENT, CLUSTER, 'IM1')),
+        file: existsSync(seriesFile()),
+        otherPatientFile: existsSync(seriesFile(OTHER_PATIENT, FOREIGN_SERIES)),
       });
-      const uploadRoot = () => process.env.UPLOAD_ROOT as string;
+      /** The other patient's data (never touched by deleting PATIENT). */
+      const otherPatient = {
+        patients: [{ id: OTHER_PATIENT, deletedAt: null }],
+        studies: [{ id: OTHER_STUDY }],
+        series: [{ id: FOREIGN_SERIES }],
+        images: [{ id: id(20), reviewState: 'NOT_REVIEWED', reviewStateSource: 'NONE' }],
+      };
 
-      /** Reviewed data in CLUSTER: a vote (+ history), a resolution, a completion, a file. */
-      const reviewedCluster = async () => {
+      /** Reviewed data of PATIENT: a vote (+ history), a resolution, a completion, a file. */
+      const reviewedSeries = async () => {
         const voted = await addImage(1);
         await addImage(2);
         await vote(voted, 'a', Vote.ABNORMAL);
         await review.setResolution(voted, ADMIN, { label: ReviewResolutionLabel.ABNORMAL });
-        await review.finishClusterReview(CLUSTER, reviewer('f'));
-        await mkdir(path.join(uploadRoot(), PATIENT, CLUSTER), { recursive: true });
-        await writeFile(path.join(uploadRoot(), PATIENT, CLUSTER, 'IM1'), 'synthetic');
+        await finishSeries();
+        await addImage(20, { series: FOREIGN_SERIES });
+        for (const [patient, series] of [[PATIENT, SERIES], [OTHER_PATIENT, FOREIGN_SERIES]]) {
+          await mkdir(path.dirname(seriesFile(patient, series)), { recursive: true });
+          await writeFile(seriesFile(patient, series), 'synthetic');
+        }
       };
 
       const expectFrozen = async (response: Response) => {
         expect(response.status).toBe(409);
         expect(await response.json()).toMatchObject({ code: 'REVIEW_FROZEN' });
       };
-
-      it('cluster deletion is refused while frozen (nothing lost) and succeeds after unfreeze', async () => {
-        await reviewedCluster();
-        const before = await snapshot();
-        expect(before).toMatchObject({ clusterFile: true });
-        await review.freezeReview(ADMIN, 'export');
-
-        await expectFrozen(await call('DELETE', `/patients/clusters/${CLUSTER}`));
-        expect(await snapshot()).toEqual(before);
-
-        await review.unfreezeReview(ADMIN);
-        expect((await call('DELETE', `/patients/clusters/${CLUSTER}`)).status).toBe(204);
-        const after = await snapshot();
-        expect(after.clusters).toEqual([{ id: OTHER_CLUSTER }]);
-        expect(after).toMatchObject({
-          images: [],
-          votes: [],
-          voteEvents: [],
-          resolutions: [],
-          completions: [],
-          clusterFile: false,
-        });
-      });
+      const deletePatient = (patient = PATIENT, roles = 'dashboard:admin') =>
+        call('POST', `/patients/${patient}/trash?type=delete`, { roles });
 
       it('permanent patient deletion is refused while frozen (nothing lost) and succeeds after unfreeze', async () => {
-        await reviewedCluster();
+        await reviewedSeries();
         const before = await snapshot();
-        const deletePatient = (roles = 'dashboard:admin') =>
-          call('POST', `/patients/${PATIENT}/trash?type=delete`, { roles });
+        expect(before).toMatchObject({ file: true, otherPatientFile: true });
         // Authorization is unchanged: admin only.
-        expect((await deletePatient('')).status).toBe(403);
+        expect((await deletePatient(PATIENT, '')).status).toBe(403);
         await review.freezeReview(ADMIN, 'export');
 
         await expectFrozen(await deletePatient());
@@ -725,22 +755,40 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
 
         await review.unfreezeReview(ADMIN);
         expect((await deletePatient()).status).toBe(200);
+        // Patient -> Studies -> Series -> images -> review records, and the
+        // patient's files (after the commit); the other patient is intact.
         expect(await snapshot()).toEqual({
-          patients: [],
-          clusters: [],
-          images: [],
+          ...otherPatient,
           votes: [],
           voteEvents: [],
           resolutions: [],
           completions: [],
-          clusterFile: false,
+          file: false,
+          otherPatientFile: true,
         });
       });
 
+      it('a rolled-back patient deletion removes no file', async () => {
+        await reviewedSeries();
+        const before = await snapshot();
+        const { Patient } = require('../db/models/Patient.model');
+        const patient = await Patient.findByPk(PATIENT);
+
+        await expect(
+          review.withReviewFreezeGuard(async (transaction: import('sequelize').Transaction) => {
+            await patient.destroy({ force: true, transaction });
+            throw new Error('fails after the delete');
+          })
+        ).rejects.toThrow('fails after the delete');
+
+        // Rolled back: rows and the file are all still there.
+        expect(await snapshot()).toEqual(before);
+      });
+
       it('moving a patient into or out of the trash is refused while frozen', async () => {
-        await reviewedCluster();
+        await reviewedSeries();
         const trashed = async () =>
-          (await rows('SELECT "deletedAt" IS NOT NULL AS trashed FROM patients'))[0].trashed;
+          (await rows('SELECT "deletedAt" IS NOT NULL AS trashed FROM patients WHERE id = $1', [PATIENT]))[0].trashed;
         await review.freezeReview(ADMIN, 'export');
         await expectFrozen(await call('DELETE', `/patients/${PATIENT}`));
         expect(await trashed()).toBe(false);
@@ -764,23 +812,22 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       });
 
       it('race: a deletion in flight completes before the freeze; after it, deletions are refused', async () => {
-        await reviewedCluster();
-        await addImage(9, { cluster: OTHER_CLUSTER });
+        await reviewedSeries();
         const release = gate();
         const locked = gate();
-        // Holds the images' rows: the deletion (already past the freeze
-        // check, holding the shared lock) waits on them.
+        // Holds the patient's image rows: the deletion (already past the
+        // freeze check, holding the shared lock) waits on them.
         const blocker = sequelize.transaction(async (transaction) => {
           await sequelize.query(
-            `SELECT id FROM patients_images WHERE "clusterId" = $1 FOR UPDATE`,
-            { bind: [CLUSTER], transaction }
+            `SELECT id FROM patients_images WHERE "seriesId" = $1 FOR UPDATE`,
+            { bind: [SERIES], transaction }
           );
           locked.open();
           await release.opened;
         });
         await locked.opened;
 
-        const deleting = call('DELETE', `/patients/clusters/${CLUSTER}`);
+        const deleting = deletePatient();
         expect(await settlesWithin(deleting, 500)).toBe(false);
         const freezing = review.freezeReview(ADMIN, 'export');
         // The freeze waits for the deletion in flight.
@@ -788,19 +835,17 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
 
         release.open();
         await blocker;
-        expect((await deleting).status).toBe(204);
+        expect((await deleting).status).toBe(200);
         await expect(freezing).resolves.toMatchObject({ frozen: true });
-        expect((await snapshot()).clusters).toEqual([{ id: OTHER_CLUSTER }]);
+        expect((await snapshot()).patients).toEqual(otherPatient.patients);
 
-        // After the freeze: refused, the other cluster is intact.
-        await expectFrozen(await call('DELETE', `/patients/clusters/${OTHER_CLUSTER}`));
-        expect((await snapshot()).images).toEqual([
-          { id: id(9), reviewState: 'NOT_REVIEWED', reviewStateSource: 'NONE' },
-        ]);
+        // After the freeze: refused, the other patient is intact.
+        await expectFrozen(await deletePatient(OTHER_PATIENT));
+        expect(await snapshot()).toMatchObject({ ...otherPatient, otherPatientFile: true });
       });
 
       it('race: a deletion waiting behind a freeze in flight is refused once the freeze commits', async () => {
-        await reviewedCluster();
+        await reviewedSeries();
         const before = await snapshot();
         const release = gate();
         const locked = gate();
@@ -819,25 +864,24 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         });
         await locked.opened;
 
-        const deletingCluster = call('DELETE', `/patients/clusters/${CLUSTER}`);
-        const deletingPatient = call('POST', `/patients/${PATIENT}/trash?type=delete`, {
-          roles: 'dashboard:admin',
-        });
-        expect(await settlesWithin(deletingCluster, 500)).toBe(false);
-        expect(await settlesWithin(deletingPatient, 100)).toBe(false);
+        const deletingPatient = deletePatient();
+        const trashingOther = call('DELETE', `/patients/${OTHER_PATIENT}`);
+        expect(await settlesWithin(deletingPatient, 500)).toBe(false);
+        expect(await settlesWithin(trashingOther, 100)).toBe(false);
 
         release.open();
         await freezing;
-        await expectFrozen(await deletingCluster);
         await expectFrozen(await deletingPatient);
-        const after = await snapshot();
-        expect(after).toEqual(before);
+        await expectFrozen(await trashingOther);
+        expect(await snapshot()).toEqual(before);
       });
     });
 
     it('finish review, freeze and unfreeze over HTTP (409 REVIEW_FROZEN)', async () => {
       const image = await addImage(1);
-      const finish = await call('POST', `/patients/clusters/${CLUSTER}/review/finish`);
+      const finish = await call('POST', `/patients/${PATIENT}/series/${SERIES}/review/finish`, {
+        body: { presentedImageIds: [image] },
+      });
       expect(finish.status).toBe(200);
       expect(await finish.json()).toMatchObject({ completed: 1, alreadyReviewed: 0, skippedBroken: 0 });
 

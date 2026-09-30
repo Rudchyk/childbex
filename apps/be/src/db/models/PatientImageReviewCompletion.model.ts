@@ -15,11 +15,11 @@ export interface PatientImageReviewCompletionAttributes {
   /** One "Finish review" action (all images it completed share it). */
   runId: string;
   /**
-   * What was finished: exactly one is set. Completions made before
-   * migration 202609302100 (and by the legacy cluster endpoint) have the
-   * cluster; Series Finish Review sets the series.
+   * What was finished: exactly one is set. Series Finish Review sets
+   * `scopeSeriesId`; `legacyScopeClusterId` is historical provenance of
+   * completions made per (removed) cluster: kept as it was, never written.
    */
-  scopeClusterId: string | null;
+  legacyScopeClusterId: string | null;
   scopeSeriesId: string | null;
   completedById: string;
   completedByName: string;
@@ -36,7 +36,7 @@ export class PatientImageReviewCompletion
   declare id: string;
   declare patientImageId: string;
   declare runId: string;
-  declare scopeClusterId: string | null;
+  declare legacyScopeClusterId: string | null;
   declare scopeSeriesId: string | null;
   declare completedById: string;
   declare completedByName: string;
@@ -44,7 +44,8 @@ export class PatientImageReviewCompletion
 }
 
 // Schema: migrations 202609302010-review-semantics-schema and
-// 202609302100-review-completion-series-scope (CHECK: exactly one scope).
+// 202609302100-review-completion-series-scope (CHECK: exactly one scope),
+// 202610010000-drop-patient-image-clusters (rename to legacyScopeClusterId).
 PatientImageReviewCompletion.init(
   {
     id: {
@@ -60,9 +61,8 @@ PatientImageReviewCompletion.init(
       onDelete: 'CASCADE',
     },
     runId: { type: DataTypes.UUID, allowNull: false },
-    // No foreign keys: provenance only (the images reference their cluster
-    // and series).
-    scopeClusterId: { type: DataTypes.UUID, allowNull: true },
+    // No foreign keys: provenance only.
+    legacyScopeClusterId: { type: DataTypes.UUID, allowNull: true },
     scopeSeriesId: { type: DataTypes.UUID, allowNull: true },
     completedById: { type: DataTypes.STRING, allowNull: false },
     completedByName: { type: DataTypes.STRING, allowNull: false },

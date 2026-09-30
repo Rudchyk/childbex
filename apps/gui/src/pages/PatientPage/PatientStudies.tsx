@@ -21,14 +21,6 @@ import { formatStudyDateTime } from '../hierarchy/hierarchy.utils';
 
 const StudiesList = WithLoader<PatientStudiesResponse>(({ data }) => (
   <Stack spacing={2}>
-    {data.unassigned.images > 0 && (
-      <Alert severity="info">
-        {data.unassigned.images}{' '}
-        {pluralize('image', data.unassigned.images)} (
-        {data.unassigned.broken} broken) not linked to a DICOM series: not
-        shown here. Run the Study/Series linking (backfill study-series).
-      </Alert>
-    )}
     {!data.studies.length && <Alert severity="info">No studies yet.</Alert>}
     <List>
       {data.studies.map((study) => (

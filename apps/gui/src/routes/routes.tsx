@@ -110,12 +110,9 @@ export default createBrowserRouter([
             ...defaultOptions,
           },
           {
-            // Legacy cluster page: still routable (old links), never linked.
-            path: guiRoutes.patientImagesCluster,
-            lazy: () =>
-              import(
-                '../pages/PatientImagesClusterPage/PatientImagesClusterPage'
-              ),
+            // Old bookmarks of the removed cluster page: a notice, no redirect.
+            path: guiRoutes.legacyClusterPage,
+            lazy: () => import('../pages/LegacyClusterPage/LegacyClusterPage'),
             ...defaultOptions,
           },
         ],

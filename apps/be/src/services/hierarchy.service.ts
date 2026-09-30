@@ -21,7 +21,11 @@ import type {
 } from '@libs/schemas';
 import { sequelize } from '../db/sequelize';
 import { PatientImageReviewVote } from '../db/models/PatientImageReviewVote.model';
-import { orderSeriesImages, type StackImage } from './series-stack';
+import {
+  isSimpleStack,
+  orderSeriesImages,
+  type StackImage,
+} from './series-stack';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -82,10 +86,14 @@ export interface StackImageRow {
   imageOrientationPatient: number[] | null;
   imagePositionPatient: number[] | null;
   numberOfFrames: number | null;
+  rows: number | null;
+  columns: number | null;
+  pixelSpacing: number[] | null;
 }
 
 export const stackImageColumns = `id, "isBrocken", "instanceNumber",
-  "imageOrientationPatient", "imagePositionPatient", "numberOfFrames"`;
+  "imageOrientationPatient", "imagePositionPatient", "numberOfFrames",
+  rows, columns, "pixelSpacing"`;
 
 export const toStackImage = <T extends StackImageRow>(
   row: T
@@ -206,30 +214,68 @@ const seriesSummaries = async (
       review: toReviewSummary(row),
       orientationCount: stack.orientationCount,
       multiFrameImageCount: stack.multiFrameImageCount,
+      geometryCount: stack.geometryCount,
+      geometryIncompleteCount: stack.geometryIncompleteCount,
+      // The same rule as Series Finish review (review.service.ts).
+      reviewable: isSimpleStack(stack),
     };
   });
 };
 
 // --- API reads ---------------------------------------------------------------------
 
+/**
+ * Stored file locations of images of a Series of the (active) patient, in
+ * the order of `imageIds`; null when the Series is not the patient's or
+ * any image is not in it (the caller cannot tell which).
+ */
+export const findSeriesImageSources = async (
+  patientId: string,
+  seriesId: string,
+  imageIds: readonly string[]
+): Promise<string[] | null> => {
+  const ids = [...new Set(imageIds)];
+  if (!ids.length || !ids.every((id) => UUID.test(id))) return null;
+  if (!(await findOwnedSeries(patientId, seriesId))) return null;
+  const rows = await sequelize.query<{ id: string; source: string }>(
+    `SELECT id, source FROM patients_images
+     WHERE "seriesId" = :seriesId AND id IN (:ids)`,
+    { replacements: { seriesId, ids }, type: QueryTypes.SELECT }
+  );
+  if (rows.length !== ids.length) return null;
+  const sources = new Map(rows.map(({ id, source }) => [id, source]));
+  return ids.map((id) => sources.get(id) as string);
+};
+
+/** Study and image counts per patient (one grouped query). */
+export const countPatientImages = async (patientIds: readonly string[]) => {
+  const counts = new Map<string, { studyCount: number; imageCount: number }>();
+  if (!patientIds.length) return counts;
+  const rows = await sequelize.query<{
+    patientId: string;
+    studyCount: number;
+    imageCount: number;
+  }>(
+    `SELECT s."patientId", count(DISTINCT s.id)::int AS "studyCount",
+            count(i.id)::int AS "imageCount"
+     FROM studies s
+     LEFT JOIN series se ON se."studyId" = s.id
+     LEFT JOIN patients_images i ON i."seriesId" = se.id
+     WHERE s."patientId" IN (:patientIds)
+     GROUP BY s."patientId"`,
+    { replacements: { patientIds: [...patientIds] }, type: QueryTypes.SELECT }
+  );
+  for (const { patientId, ...row } of rows) counts.set(patientId, row);
+  return counts;
+};
+
 /** Studies of an active patient, or null (unknown or trashed patient). */
 export const getPatientStudies = async (
   patientId: string
 ): Promise<PatientStudiesResponse | null> => {
   if (!(await activePatientExists(patientId))) return null;
-  const [unassigned] = await sequelize.query<{ images: number; broken: number }>(
-    `SELECT count(*)::int AS images,
-            count(*) FILTER (WHERE i."isBrocken")::int AS broken
-     FROM patients_images i
-     JOIN patient_images_clusters c ON c.id = i."clusterId"
-     WHERE i."seriesId" IS NULL AND c."patientId" = :patientId`,
-    { replacements: { patientId }, type: QueryTypes.SELECT }
-  );
-  return {
-    patientId,
-    studies: await studySummaries(patientId),
-    unassigned,
-  };
+  // Every image belongs to a Series (migration 202610010000): none is left out.
+  return { patientId, studies: await studySummaries(patientId) };
 };
 
 /** Series of a Study of the patient, or null (not the patient's study). */

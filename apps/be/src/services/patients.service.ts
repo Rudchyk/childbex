@@ -1,11 +1,8 @@
 import path from 'path';
 import { ImportFileTracker } from './archive/import-file-tracker';
 import { logger } from './logger.service';
-import {
-  brokenImageClusterName,
-  clusterByOrientation,
-  ClusterResult,
-} from './dicom.service';
+import { randomUUID } from 'node:crypto';
+import { parseArchiveFiles, type ParsedArchive } from './dicom.service';
 import {
   toPatientImageDicomMetadata,
   type ParsedDicomMetadata,
@@ -23,7 +20,6 @@ import {
   type IncomingInstance,
   type InstancePlan,
 } from './instance-dedup.service';
-import { PatientImagesCluster } from '../db/models/PatientImagesCluster.model';
 import {
   PatientImage,
   PatientImageCreationAttributes,
@@ -52,8 +48,14 @@ export { archivesRoot, uploadRoot };
 type PatientImageRow = PatientImageCreationAttributes &
   Partial<Pick<IPatientImage, 'isBrocken' | 'status'>>;
 
-const toSource = (patientId: string, clusterId: string, name: string) =>
-  `/uploads/${patientId}/${clusterId}/${name}`;
+/**
+ * Storage location of a new image: database UUIDs only (no original file
+ * name, no DICOM UID). Files imported earlier keep their stored `source`.
+ */
+const toSource = (patientId: string, seriesId: string, imageId: string) =>
+  `/uploads/${patientId}/${seriesId}/${imageId}.dcm`;
+
+const destDir = (patientId: string) => path.join(uploadRoot, patientId);
 
 const toHierarchyImage = ({
   image,
@@ -73,27 +75,26 @@ const toHierarchyImage = ({
 });
 
 /**
- * Creates clusters/images for a parsed study inside one DB transaction and
- * places the image files into the uploads directory. The caller must call
- * `tracker.rollback()` if this throws.
+ * Creates the images of a parsed archive under their DICOM Series inside one
+ * DB transaction and places their files into the uploads directory. The
+ * caller must call `tracker.rollback()` if this throws.
  */
-const persistClusters = async (
+const persistImages = async (
   patientId: string,
-  { clusters, broken }: ClusterResult,
+  { images: validImages, broken }: ParsedArchive,
   tracker: ImportFileTracker
 ) => {
-  const destDir = path.join(uploadRoot, patientId);
   let imported = 0;
   let alreadyImported = 0;
 
   await sequelize.transaction(async (transaction) => {
     // Serializes the persistence phase of all imports: the instance
     // deduplication below and the inserts cannot race another import.
-    // Taken before any Study/Series/cluster/image write.
+    // Taken before any Study/Series/image write.
     await acquireImportLock(sequelize, transaction);
 
-    const images = [...clusters.flatMap(({ files }) => files), ...broken];
-    // Patient -> Study -> Series, in parallel with the clusters (transition).
+    const images = [...validImages, ...broken];
+    // Patient -> Study -> Series.
     const hierarchy = await linkPatientHierarchy(
       sequelize,
       patientId,
@@ -111,11 +112,13 @@ const persistClusters = async (
       // Ids and field names only.
       logger.warn({ patientId, ...warning }, 'DICOM hierarchy values differ');
     }
-    const seriesIdOf = ({ image }: ParsedDicomMetadata) =>
-      (image.studyInstanceUid &&
-        image.seriesInstanceUid &&
-        hierarchy.seriesIds.get(image.seriesInstanceUid)) ||
-      null;
+    /** Every parsed image has Study/Series UIDs, so it has its Series. */
+    const seriesIdOf = ({ image }: ParsedDicomMetadata) => {
+      const seriesId =
+        image.seriesInstanceUid && hierarchy.seriesIds.get(image.seriesInstanceUid);
+      if (!seriesId) throw new Error('An imported image has no DICOM Series.');
+      return seriesId;
+    };
 
     // DICOM instance identity (SOP Instance UID + file hash), decided before
     // any file is placed: a conflict rejects the archive without leftovers.
@@ -151,93 +154,39 @@ const persistClusters = async (
     }
     alreadyImported = plan.alreadyImported.size;
 
-    const importGroup = async (
-      clusterValues: {
-        name: string;
-        cluster: number;
-        patientId: string;
-        notes: string;
-        studyDate?: string | null;
-      },
-      allFiles: {
-        file: string;
-        row: Omit<PatientImageRow, 'source' | 'clusterId'>;
-      }[]
+    const rows: PatientImageRow[] = [];
+    const place = async (
+      file: string,
+      metadata: ParsedDicomMetadata,
+      row: Omit<PatientImageRow, 'id' | 'source' | 'seriesId'>
     ) => {
-      // Instances already stored keep their row (and cluster) unchanged.
-      const files = allFiles.filter(({ file }) => plan.toImport.has(file));
-      if (!files.length) return;
-      const [imageCluster] = await PatientImagesCluster.findOrCreate({
-        where: clusterValues,
-        defaults: clusterValues,
-        transaction,
-      });
-      const folder = path.join(destDir, imageCluster.id);
+      // Instances already stored keep their row unchanged.
+      if (!plan.toImport.has(file)) return;
+      const id = randomUUID();
+      const seriesId = seriesIdOf(metadata);
+      const folder = path.join(destDir(patientId), seriesId);
       await tracker.ensureDir(folder);
-
-      const rows: PatientImageRow[] = [];
-      for (const { file, row } of files) {
-        // The file name is only a storage name (made unique if taken).
-        const name = path.basename(file);
-        const finalName = await tracker.placeFile(file, folder, name);
-        rows.push({
-          ...row,
-          clusterId: imageCluster.id,
-          source: toSource(patientId, imageCluster.id, finalName),
-        });
-      }
-      if (rows.length) {
-        await PatientImage.bulkCreate(rows, { transaction });
-      }
-      imported += rows.length;
+      await tracker.placeNewFile(file, path.join(folder, `${id}.dcm`));
+      rows.push({ ...row, id, seriesId, source: toSource(patientId, seriesId, id) });
     };
-
-    for (const {
-      id,
-      group,
-      files,
-      geometry,
-      outliers,
-      normal,
-      studyDate,
-    } of clusters) {
-      await importGroup(
-        {
-          name: group || String(id),
-          cluster: id,
-          patientId,
-          studyDate: studyDate ? studyDate.toISOString() : null,
-          notes: '',
-        },
-        files.map(({ file, metadata, fileInfo, positionScalar }) => ({
-          file,
-          row: {
-            details: { geometry, outliers, normal },
-            ...toPatientImageDicomMetadata(metadata, fileInfo, positionScalar),
-            seriesId: seriesIdOf(metadata),
-          },
-        }))
-      );
+    for (const { file, metadata, fileInfo, positionScalar } of validImages) {
+      await place(file, metadata, {
+        ...toPatientImageDicomMetadata(metadata, fileInfo, positionScalar),
+      });
     }
-
     // DICOM images whose pixel data is missing/truncated.
-    if (broken.length) {
-      await importGroup(
-        { name: brokenImageClusterName, cluster: -1, patientId, notes: '' },
-        broken.map(({ file, reason, metadata, fileInfo }) => ({
-          file,
-          row: {
-            details: null,
-            notes: reason,
-            isBrocken: true,
-            status: PatientImageStatus.BROKEN,
-            // Not part of a cluster: no position along a slice normal.
-            ...toPatientImageDicomMetadata(metadata, fileInfo, null),
-            seriesId: seriesIdOf(metadata),
-          },
-        }))
-      );
+    for (const { file, reason, metadata, fileInfo } of broken) {
+      await place(file, metadata, {
+        notes: reason,
+        isBrocken: true,
+        status: PatientImageStatus.BROKEN,
+        ...toPatientImageDicomMetadata(metadata, fileInfo, null),
+      });
     }
+    if (rows.length) {
+      await PatientImage.bulkCreate(rows, { transaction });
+    }
+    imported = rows.length;
   });
 
   return { imported, alreadyImported };
@@ -266,7 +215,7 @@ export interface ImportPatientArchiveFileRequest {
  *
  * 1. Validate the archive type and extract it safely with limits into an
  *    isolated temporary workspace.
- * 2. Parse and cluster DICOM images; reject if none are usable.
+ * 2. Parse the DICOM images; reject if none are usable.
  * 3. Store the original archive byte-for-byte in private storage.
  * 4. Create DB rows and place image files in one transaction; on failure,
  *    roll back and remove every file created by this import.
@@ -292,13 +241,15 @@ export const importPatientArchiveFile = async ({
     const candidates = await withPhase('list', () =>
       listCandidateFiles(extractedDir)
     );
-    const result = await withPhase('cluster', () =>
-      clusterByOrientation(candidates)
+    const result = await withPhase('parse', () =>
+      parseArchiveFiles(candidates)
     );
-    const usableImages = result.clusters.reduce(
-      (n, c) => n + c.files.length,
-      0
-    );
+    const usableImages = result.images.length;
+    const seriesCount = new Set(
+      [...result.images, ...result.broken].map(
+        ({ metadata }) => metadata.image.seriesInstanceUid
+      )
+    ).size;
 
     // Counts only: no file names (they may contain patient data).
     const summary = {
@@ -310,7 +261,7 @@ export const importPatientArchiveFile = async ({
       ...extracted.stats,
       candidateFiles: candidates.length,
       usableImages,
-      clusters: result.clusters.length,
+      series: seriesCount,
       brokenImages: result.broken.length,
       skippedFiles: countByReason(result.skipped),
     };
@@ -339,13 +290,13 @@ export const importPatientArchiveFile = async ({
     const tracker = new ImportFileTracker();
     try {
       const counts = await withPhase('persist', () =>
-        persistClusters(patientId, result, tracker)
+        persistImages(patientId, result, tracker)
       );
       logger.info({ ...summary, ...counts }, 'patient archive imported');
       return {
         importedImages: counts.imported,
         alreadyImported: counts.alreadyImported,
-        clusters: result.clusters.length,
+        series: seriesCount,
         brokenImages: result.broken.length,
         skippedFiles: result.skipped.length,
       };

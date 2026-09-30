@@ -24,7 +24,8 @@ import {
   positionAlongNormal,
 } from '../../services/dicom.service';
 import { resolveStoredFile } from '../../services/stored-file';
-import { assertMigratedThrough } from '../migrator';
+import { assertMigratedThrough, assertNotMigrated } from '../migrator';
+import { CLUSTER_REMOVAL_MIGRATION } from '../migrations/202610010000-drop-patient-image-clusters';
 import { acquireImportLock } from '../../services/instance-dedup.service';
 
 const hasUniqueSopIndex = async (sequelize: Sequelize) => {
@@ -385,6 +386,13 @@ const checkPreconditions = async (
   await assertMigratedThrough(
     sequelize,
     '202609281200-patient-image-dicom-metadata'
+  );
+  // Reads the legacy clusters (patient, cluster normal). Once they are
+  // removed every image has verified metadata (the removal requires it).
+  await assertNotMigrated(
+    sequelize,
+    CLUSTER_REMOVAL_MIGRATION,
+    'every image has verified metadata (required before the clusters were removed); the legacy clusters it reads no longer exist.'
   );
 };
 

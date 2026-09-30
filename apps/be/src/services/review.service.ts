@@ -25,7 +25,6 @@ import {
 } from './review-state';
 import { sequelize } from '../db/sequelize';
 import { PatientImage } from '../db/models/PatientImage.model';
-import { PatientImagesCluster } from '../db/models/PatientImagesCluster.model';
 import { PatientImageReviewVote } from '../db/models/PatientImageReviewVote.model';
 import { PatientImageReviewVoteEvent } from '../db/models/PatientImageReviewVoteEvent.model';
 import { PatientImageReviewResolution } from '../db/models/PatientImageReviewResolution.model';
@@ -53,7 +52,6 @@ export type ReviewErrorCode =
   | 'REVIEW_NOT_FROZEN'
   | 'IMAGE_NOT_FOUND'
   | 'VOTE_NOT_FOUND'
-  | 'CLUSTER_NOT_FOUND'
   | 'SERIES_NOT_FOUND'
   | 'SERIES_NOT_FULLY_REVIEWABLE'
   | 'SERIES_CHANGED'
@@ -66,7 +64,6 @@ const errorStatus: Record<ReviewErrorCode, 400 | 404 | 409> = {
   REVIEW_NOT_FROZEN: 409,
   IMAGE_NOT_FOUND: 404,
   VOTE_NOT_FOUND: 404,
-  CLUSTER_NOT_FOUND: 404,
   SERIES_NOT_FOUND: 404,
   SERIES_NOT_FULLY_REVIEWABLE: 409,
   SERIES_CHANGED: 409,
@@ -213,7 +210,7 @@ const acquireReviewFreezeLock = (transaction: Transaction) =>
  * Runs `run` in a transaction under the review-freeze protocol (shared lock,
  * refused with REVIEW_FROZEN while frozen). Used by every review mutation and
  * by operations that remove reviewed images or change which patients are
- * active (cluster / patient deletion, trash, restore): `run` must do all its
+ * active (patient deletion, trash, restore): `run` must do all its
  * database changes in the given transaction.
  */
 export const withReviewFreezeGuard = <T>(
@@ -419,7 +416,7 @@ export const removeResolution = (imageId: string, admin: Reviewer) =>
  */
 const completeUntouchedImages = async (
   images: readonly { id: string; isBrocken: boolean }[],
-  scope: { scopeClusterId: string } | { scopeSeriesId: string },
+  scopeSeriesId: string,
   reviewer: Reviewer,
   transaction: Transaction
 ): Promise<FinishReviewResponse> => {
@@ -447,9 +444,9 @@ const completeUntouchedImages = async (
     toComplete.map((patientImageId) => ({
       patientImageId,
       runId,
-      scopeClusterId: null,
-      scopeSeriesId: null,
-      ...scope,
+      // Never the legacy cluster scope (historical provenance only).
+      legacyScopeClusterId: null,
+      scopeSeriesId,
       completedById: reviewer.id,
       completedByName: reviewer.name,
       createdAt,
@@ -464,38 +461,6 @@ const completeUntouchedImages = async (
     skippedBroken: images.length - reviewable.length,
   };
 };
-
-/**
- * Legacy "Finish review" of a cluster (kept for older clients during the
- * move to Series; the GUI uses `finishSeriesReview`).
- */
-export const finishClusterReview = (
-  clusterId: string,
-  reviewer: Reviewer
-): Promise<FinishReviewResponse> =>
-  reviewMutation(async (transaction) => {
-    const cluster = UUID.test(clusterId)
-      ? await PatientImagesCluster.findByPk(clusterId, {
-          attributes: ['id'],
-          transaction,
-        })
-      : null;
-    if (!cluster) {
-      throw new ReviewError('CLUSTER_NOT_FOUND', 'The cluster does not exist.');
-    }
-    // In id order: two concurrent runs never deadlock on the rows.
-    const images = await sequelize.query<{ id: string; isBrocken: boolean }>(
-      `SELECT id, "isBrocken" FROM patients_images
-       WHERE "clusterId" = :clusterId ORDER BY id FOR UPDATE`,
-      { replacements: { clusterId }, type: QueryTypes.SELECT, transaction }
-    );
-    return completeUntouchedImages(
-      images,
-      { scopeClusterId: clusterId },
-      reviewer,
-      transaction
-    );
-  });
 
 /**
  * "Finish review" of a DICOM Series of the patient. Only for a Series the
@@ -524,8 +489,9 @@ export const finishSeriesReview = (
     if (!isSimpleStack(stack)) {
       throw new ReviewError(
         'SERIES_NOT_FULLY_REVIEWABLE',
-        'The series has several orientations or multi-frame images; the ' +
-          'viewer cannot show it completely, so it cannot be finished as a whole.'
+        'The series has several orientations or geometries, incomplete ' +
+          'geometry or multi-frame images; the viewer cannot show it ' +
+          'completely, so it cannot be finished as a whole.'
       );
     }
     const displayed = new Set(
@@ -543,7 +509,7 @@ export const finishSeriesReview = (
     }
     return completeUntouchedImages(
       rows.map(({ id, isBrocken }) => ({ id, isBrocken })),
-      { scopeSeriesId: seriesId },
+      seriesId,
       reviewer,
       transaction
     );

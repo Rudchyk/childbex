@@ -110,7 +110,6 @@ describeWithDatabase('DICOM instance deduplication (PostgreSQL)', () => {
   const snapshot = async () => ({
     studies: await count('studies'),
     series: await count('series'),
-    clusters: await count('patient_images_clusters'),
     images: await count('patients_images'),
     files: await storedFiles(),
   });
@@ -169,8 +168,11 @@ describeWithDatabase('DICOM instance deduplication (PostgreSQL)', () => {
       { type: QueryTypes.SELECT }
     );
     expect(rows.map(({ sopInstanceUid }) => sopInstanceUid)).toEqual([sopOf(1), sopOf(2)]);
-    // The second file got a free storage name next to the first one.
-    expect(rows.map(({ source }) => path.basename(source)).sort()).toEqual(['IM0', 'IM0_1']);
+    // Stored by image id: the archive file name plays no role.
+    for (const { source } of rows) {
+      expect(path.basename(source)).toMatch(/^[0-9a-f-]{36}\.dcm$/);
+    }
+    expect(new Set(rows.map(({ source }) => source)).size).toBe(2);
   });
 
   it('different file name, same SOP UID and content: one row, no second file', async () => {
@@ -209,14 +211,13 @@ describeWithDatabase('DICOM instance deduplication (PostgreSQL)', () => {
     expect(await count('patient_image_review_votes')).toBe(1);
   });
 
-  it('an instance already stored in another cluster stays there (already imported)', async () => {
+  it('an instance already stored stays where it is when imported again with other series (already imported)', async () => {
     await importFiles(P1, [['B/IM1', { instance: 1 }]]);
-    const [{ clusterId }] = await sequelize.query<{ clusterId: string }>(
-      `SELECT "clusterId" FROM patients_images`,
+    const [stored] = await sequelize.query<{ id: string; source: string }>(
+      `SELECT id, source FROM patients_images`,
       { type: QueryTypes.SELECT }
     );
 
-    // Another series sorts first, so the known instance falls into cluster 1.
     const result = await importFiles(P1, [
       ['A/IM2', { instance: 2, seriesDescription: 'OTHER', attributes: { SeriesInstanceUID: SERIES_B } }],
       ['B/IM1', { instance: 1 }],
@@ -224,7 +225,7 @@ describeWithDatabase('DICOM instance deduplication (PostgreSQL)', () => {
 
     expect(result).toMatchObject({ importedImages: 1, alreadyImported: 1 });
     expect(
-      await count('patients_images', `"sopInstanceUid" = '${sopOf(1)}' AND "clusterId" = '${clusterId}'`)
+      await count('patients_images', `"sopInstanceUid" = '${sopOf(1)}' AND id = '${stored.id}' AND source = '${stored.source}'`)
     ).toBe(1);
     expect(await count('patients_images', `"sopInstanceUid" = '${sopOf(1)}'`)).toBe(1);
   });
@@ -258,7 +259,7 @@ describeWithDatabase('DICOM instance deduplication (PostgreSQL)', () => {
     await importFiles(P1, [['IM1', { instance: 1 }]]);
     // Legacy inconsistency: the stored row claims another SOP UID.
     await sequelize.query(
-      `UPDATE patients_images SET "sopInstanceUid" = '2.25.999', "seriesId" = NULL`
+      `UPDATE patients_images SET "sopInstanceUid" = '2.25.999'`
     );
 
     const result = await importFiles(P1, [['IM1_AGAIN', { instance: 1 }]]);

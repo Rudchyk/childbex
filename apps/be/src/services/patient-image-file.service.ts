@@ -3,44 +3,34 @@ import type { Readable } from 'node:stream';
 // Imported before the models: models and patients.service import each other,
 // and this order initializes them correctly when this module is loaded first.
 import { uploadRoot } from './patients.service';
-import { Patient } from '../db/models/Patient.model';
-import { PatientImage } from '../db/models/PatientImage.model';
-import { PatientImagesCluster } from '../db/models/PatientImagesCluster.model';
+import { QueryTypes } from 'sequelize';
+import { sequelize } from '../db/sequelize';
 import { resolveStoredFile, type StoredFileProblem } from './stored-file';
 
 export { resolveUploadFilePath } from './stored-file';
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
- * Returns the stored `source` of an image that belongs to the patient, or
- * `null`. Images of other patients and of trashed patients (paranoid) are
- * not found.
+ * Returns the stored `source` of an image that belongs to the patient
+ * (image -> Series -> Study -> Patient), or `null`. Images of other
+ * patients, unknown images and images of trashed patients are not found
+ * alike. `source` is only where the file is stored.
  */
 export const findPatientImageSource = async (
   patientId: string,
   imageId: string
 ): Promise<string | null> => {
-  const image = await PatientImage.findOne({
-    where: { id: imageId },
-    attributes: ['id', 'source'],
-    include: [
-      {
-        model: PatientImagesCluster,
-        as: 'cluster',
-        attributes: ['id'],
-        required: true,
-        where: { patientId },
-        include: [
-          {
-            model: Patient,
-            as: 'patient',
-            attributes: ['id'],
-            required: true,
-          },
-        ],
-      },
-    ],
-  });
-  return image?.source ?? null;
+  if (!UUID.test(patientId) || !UUID.test(imageId)) return null;
+  const [row] = await sequelize.query<{ source: string }>(
+    `SELECT i.source FROM patients_images i
+     JOIN series se ON se.id = i."seriesId"
+     JOIN studies s ON s.id = se."studyId"
+     JOIN patients p ON p.id = s."patientId" AND p."deletedAt" IS NULL
+     WHERE i.id = :imageId AND p.id = :patientId`,
+    { replacements: { patientId, imageId }, type: QueryTypes.SELECT }
+  );
+  return row?.source ?? null;
 };
 
 /**

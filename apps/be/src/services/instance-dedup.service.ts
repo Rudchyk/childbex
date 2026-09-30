@@ -1,7 +1,7 @@
 /**
  * DICOM instance identity for the archive import: an image is identified by
  * its SOP Instance UID, and the file SHA-256 tells whether a known UID comes
- * with the same content. File names and clusters are not identity.
+ * with the same content. File names and storage paths are not identity.
  *
  * The decision and the inserts of one import run under one global
  * transaction-level advisory lock, so concurrent imports cannot both insert
@@ -100,10 +100,11 @@ export const findExistingInstances = async (
   if (!sops.length && !hashes.length) return [];
   // All patients, also those in the trash.
   return sequelize.query<ExistingInstance>(
-    `SELECT i.id, c."patientId", i."sopInstanceUid", i."fileSha256",
+    `SELECT i.id, s."patientId", i."sopInstanceUid", i."fileSha256",
             i."studyInstanceUid", i."seriesInstanceUid", i."seriesId"
      FROM patients_images i
-     JOIN patient_images_clusters c ON c.id = i."clusterId"
+     JOIN series se ON se.id = i."seriesId"
+     JOIN studies s ON s.id = se."studyId"
      WHERE i."sopInstanceUid" = ANY($1::text[])
         OR i."fileSha256" = ANY($2::text[])`,
     { bind: [sops, hashes], type: QueryTypes.SELECT, transaction }
@@ -117,7 +118,7 @@ export const findExistingInstances = async (
  * - with another or an unverified (NULL) hash, or twice in the archive with
  *   different content -> CONTENT_CONFLICT.
  * A SOP UID stored with the same hash in the same patient, study and series
- * (any cluster) is already imported; nothing about the stored row changes.
+ * is already imported; nothing about the stored row changes.
  */
 export const planInstances = (
   patientId: string,

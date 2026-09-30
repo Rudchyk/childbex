@@ -20,6 +20,9 @@
  *       <imageId>=<NORMAL|ABNORMAL|UNCERTAIN|IGNORE> --operator <name>] [...]
  *                                       derive the review state of existing
  *                                       images (dry-run unless --apply)
+ *   node migrate.js audit cluster-removal [--report <file>]
+ *                                       whether the legacy clusters can be
+ *                                       removed (read-only)
  *   node migrate.js cleanup duplicate-sop [--apply] [--group k-...] [...]
  *                                       audit / clean legacy duplicate SOP
  *                                       instances (dry-run unless --apply)
@@ -49,6 +52,10 @@ import {
   runReviewStateBackfillCli,
 } from './db/backfill/review-state.cli';
 import {
+  clusterRemovalAuditUsage,
+  runClusterRemovalAuditCli,
+} from './db/audit/cluster-removal.audit';
+import {
   duplicateSopUsage,
   runDuplicateSopCli,
 } from './db/cleanup/duplicate-sop.cli';
@@ -57,6 +64,7 @@ const usage =
   'Usage: node migrate.js <up [--to <migration>] | status | down | baseline --check | baseline --apply' +
   ' | backfill dicom-metadata [options] | backfill study-series [options]' +
   ' | backfill review-state [options] | audit review-state [options]' +
+  ' | audit cluster-removal [options]' +
   ' | cleanup duplicate-sop [options]>';
 
 const printComparison = ({ errors, warnings }: SchemaComparison) => {
@@ -80,7 +88,11 @@ const run = async (
     }
     case 'audit': {
       if (flag === 'review-state') return runReviewStateAuditCli(sequelize, rest);
-      console.error(reviewStateAuditUsage);
+      if (flag === 'cluster-removal') {
+        return runClusterRemovalAuditCli(sequelize, rest);
+      }
+      console.error(`${reviewStateAuditUsage}
+${clusterRemovalAuditUsage}`);
       return 2;
     }
     case 'backfill': {

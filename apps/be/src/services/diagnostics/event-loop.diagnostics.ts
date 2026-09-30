@@ -10,7 +10,7 @@ export type DiagnosticsPhase =
   | 'assemble'
   | 'extract'
   | 'list'
-  | 'cluster'
+  | 'parse'
   | 'store'
   | 'persist';
 

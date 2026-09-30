@@ -40,8 +40,8 @@ jest.mock('../../modules/archiveUpload/httpTransport', () => ({
 jest.mock('../../modules/notifications', () => ({
   useNotifications: () => ({ notifyError: jest.fn(), notifySuccess: jest.fn() }),
 }));
-jest.mock('../PatientPage/LLMCheckItems', () => ({ LLMCheckItems: () => null }));
-jest.mock('../PatientImagesClusterPage/PatientImageReview', () => ({
+jest.mock('./LLMCheckItems', () => ({ LLMCheckItems: () => null }));
+jest.mock('./review/PatientImageReview', () => ({
   PatientImageReview: ({ item }: { item: { id: string } }) => <div>review:{item.id}</div>,
 }));
 
@@ -88,6 +88,9 @@ const response = (series: Partial<SeriesSummary> = {}): PatientSeriesResponse =>
     review: summary,
     orientationCount: 1,
     multiFrameImageCount: 0,
+    geometryCount: 1,
+    geometryIncompleteCount: 0,
+    reviewable: true,
     ...series,
   },
   // API order (second before first on purpose): the viewer keeps it.
@@ -150,8 +153,10 @@ describe('Series page', () => {
   });
 
   it.each([
-    ['several orientations', { orientationCount: 2 }],
-    ['a multi-frame image', { multiFrameImageCount: 1 }],
+    ['several orientations', { orientationCount: 2, reviewable: false }],
+    ['a multi-frame image', { multiFrameImageCount: 1, reviewable: false }],
+    ['mixed geometry', { geometryCount: 2, reviewable: false }],
+    ['incomplete geometry', { geometryIncompleteCount: 1, reviewable: false }],
   ])('a series with %s is not displayed and cannot be finished', (_, series) => {
     renderSeries(response(series));
     expect(mockViewerProps).toBeUndefined();

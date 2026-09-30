@@ -1,10 +1,4 @@
-import {
-  DataTypes,
-  Model,
-  Op,
-  Association,
-  HasManyGetAssociationsMixin,
-} from 'sequelize';
+import { DataTypes, Model, Op } from 'sequelize';
 import { sequelize } from '../sequelize';
 import {
   PatientCreationAttributes as PatientBaseCreationAttributes,
@@ -13,7 +7,6 @@ import {
 import { timestampFields, deletedAtPropertyField } from '../helpers/timestamps';
 import { afterCommit } from '../helpers/after-commit';
 import { toSlugIfCyr } from '@libs/helpers';
-import { PatientImagesCluster } from './PatientImagesCluster.model';
 import { removePath } from '../../utils';
 import path from 'path';
 import { uploadRoot } from '../../services/patients.service';
@@ -40,12 +33,6 @@ export class Patient
   declare readonly createdAt: IPatient['createdAt'];
   declare readonly updatedAt: IPatient['updatedAt'];
   declare readonly deletedAt: IPatient['deletedAt'];
-
-  declare getClusters: HasManyGetAssociationsMixin<PatientImagesCluster>;
-
-  declare static associations: {
-    clusters: Association<Patient, PatientImagesCluster>;
-  };
 
   public async ensureUniqueSlug() {
     const possibleSlug = this.slug || this.name;

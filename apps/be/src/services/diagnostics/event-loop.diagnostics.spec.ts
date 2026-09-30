@@ -70,7 +70,7 @@ describe('event-loop diagnostics', () => {
   });
 
   it('withPhase is a plain call-through when diagnostics are not running', async () => {
-    await expect(withPhase('cluster', async () => 42)).resolves.toBe(42);
+    await expect(withPhase('parse', async () => 42)).resolves.toBe(42);
     expect(mockLogger.info).not.toHaveBeenCalled();
     expect(mockLogger.warn).not.toHaveBeenCalled();
   });
@@ -82,7 +82,7 @@ describe('event-loop diagnostics', () => {
       summaryIntervalMs: 60_000,
     });
     await wait(30);
-    await withPhase('cluster', async () => {
+    await withPhase('parse', async () => {
       blockFor(300);
       await wait(30); // let the heartbeat observe the gap
     });
@@ -90,14 +90,14 @@ describe('event-loop diagnostics', () => {
     expect(mockLogger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
         blockedMs: expect.any(Number),
-        phases: ['cluster'],
+        phases: ['parse'],
       }),
       'event-loop diagnostics: event loop blocked'
     );
     const [[{ blockedMs }]] = mockLogger.warn.mock.calls;
     expect(blockedMs).toBeGreaterThanOrEqual(200);
     expect(mockLogger.info).toHaveBeenCalledWith(
-      { phase: 'cluster', durationMs: expect.any(Number) },
+      { phase: 'parse', durationMs: expect.any(Number) },
       'event-loop diagnostics: phase finished'
     );
   });

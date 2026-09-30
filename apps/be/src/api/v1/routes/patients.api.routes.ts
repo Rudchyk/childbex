@@ -21,16 +21,11 @@ import {
   Value,
   GetPatientsResponseSchema,
   GetPatientsResponse,
-  UpdatePatientAssetRequestBodySchema,
-  GetPatientClusterParamsSchema,
-  GetPatientClusterResponseSchema,
-  GetPatientClusterResponse,
   PatientImageReviewVoteRequestBodySchema,
   PatientImageReviewVoteRequestBody,
   PatientImageReviewVoteParamsSchema,
   PatientImageFileParamsSchema,
   ReviewResolutionRequestBodySchema,
-  FinishReviewResponseSchema,
 } from '@libs/schemas';
 import { getKeycloakSecurity } from '../lib/security.service';
 import { Tags } from '../lib/tags.service';
@@ -42,28 +37,36 @@ import {
   getReviewHttpError,
   readJsonBody,
 } from '../lib/helpers';
-import { PatientImagesCluster } from '../../../db/models/PatientImagesCluster.model';
-import { PatientImage } from '../../../db/models/PatientImage.model';
 import { getSecurityContentFromResponse } from '../lib/security.service';
 import { Op } from 'sequelize';
-import { PatientImageReviewVote } from '../../../db/models/PatientImageReviewVote.model';
 import { uploadSessionService } from '../../../services/upload-sessions';
 import { logger } from '../../../services/logger.service';
 import {
   findPatientImageSource,
   openUploadFile,
 } from '../../../services/patient-image-file.service';
-import { patientImageDicomMetadataAttributes } from '../../../services/dicom.metadata';
+import { countPatientImages } from '../../../services/hierarchy.service';
 import {
   castVote,
   changeOwnVote,
-  finishClusterReview,
   removeResolution,
   ReviewError,
   setResolution,
   withReviewFreezeGuard,
 } from '../../../services/review.service';
 import { getReviewer, runReviewAction } from '../lib/review.helpers';
+
+/** Patients with their study and image counts (one grouped query). */
+const withImageCounts = async (
+  patients: Patient[]
+): Promise<GetPatientsResponse> => {
+  const counts = await countPatientImages(patients.map(({ id }) => id));
+  return patients.map((patient) => ({
+    ...patient.toJSON(),
+    studyCount: counts.get(patient.id)?.studyCount ?? 0,
+    imageCount: counts.get(patient.id)?.imageCount ?? 0,
+  }));
+};
 
 /** The vote request body; an empty body is an invalid request. */
 const readVoteBody = async (request: {
@@ -139,18 +142,8 @@ router
       const { query } = request;
       const isFilter = !!Object.keys(query).length;
       const props = isFilter ? { where: query } : {};
-      const result = await Patient.findAll({
-        ...props,
-        include: [
-          {
-            model: PatientImagesCluster,
-            as: 'clusters',
-          },
-        ],
-      });
-      return Response.json(
-        result.map((i) => i.toJSON()) as GetPatientsResponse
-      );
+      const result = await Patient.findAll(props);
+      return Response.json(await withImageCounts(result));
     },
   })
   // Add a patient
@@ -234,32 +227,11 @@ router
     },
     async handler(request) {
       const { slug } = request.params;
-      const result = await Patient.findOne({
-        where: {
-          slug,
-        },
-        include: [
-          {
-            model: PatientImagesCluster,
-            as: 'clusters',
-            include: [
-              {
-                model: PatientImage,
-                as: 'images',
-                attributes: ['id'],
-              },
-            ],
-          },
-        ],
-        order: [
-          [{ model: PatientImagesCluster, as: 'clusters' }, 'createdAt', 'ASC'],
-        ],
-      });
+      const result = await Patient.findOne({ where: { slug } });
       if (!result) {
         throw getNotFoundError('patient');
       }
-      const res = result.toJSON<GetPatientResponse>();
-      return Response.json(res);
+      return Response.json(result.toJSON<GetPatientResponse>());
     },
   })
   // Delete a patient
@@ -350,16 +322,8 @@ router
           ...query,
           deletedAt: { [Op.ne]: null },
         },
-        include: [
-          {
-            model: PatientImagesCluster,
-            as: 'clusters',
-          },
-        ],
       });
-      return Response.json(
-        result.map((i) => i.toJSON()) as GetPatientsResponse
-      );
+      return Response.json(await withImageCounts(result));
     },
   })
   // Delete or restore a patient
@@ -405,122 +369,6 @@ router
       }
 
       return Response.json(patient.toJSON());
-    },
-  })
-  // Update patient cluster
-  .route({
-    description:
-      'Update patient cluster (legacy: use the Study/Series routes)',
-    method: 'PATCH',
-    path: apiRoutes.patientImagesCluster,
-    tags: [Tags.PATIENTS],
-    ...getKeycloakSecurity(),
-    schemas: {
-      request: {
-        params: IDPropertySchema,
-        json: UpdatePatientAssetRequestBodySchema,
-      },
-      responses: {
-        204: { description: 'success' },
-        ...unauthorizedResponse,
-        ...defaultResponses,
-      },
-    },
-    async handler(request) {
-      const { id } = request.params;
-      const result = await PatientImagesCluster.findByPk(id);
-      if (!result) {
-        throw getNotFoundError('patient images cluster');
-      }
-      const { inReview } = await request.json();
-      if (inReview === result.inReview) {
-        throw getInvalidRequestError('Nothing to update');
-      }
-      await result.update({ inReview });
-      return Response.json(null, { status: 204 });
-    },
-  })
-  // Delete patient cluster
-  .route({
-    description:
-      'Delete patient cluster (legacy: use the Study/Series routes)',
-    method: 'DELETE',
-    path: apiRoutes.patientImagesCluster,
-    tags: [Tags.PATIENTS],
-    ...getKeycloakSecurity(),
-    schemas: {
-      request: {
-        params: IDPropertySchema,
-      },
-      responses: {
-        204: { description: 'success' },
-        ...unauthorizedResponse,
-        ...defaultResponses,
-      },
-    },
-    async handler(request) {
-      const { id } = request.params;
-      const result = await PatientImagesCluster.findByPk(id);
-      if (!result) {
-        throw getNotFoundError('cluster');
-      }
-      // Removes the cluster's images and their review data.
-      await runReviewAction(() =>
-        withReviewFreezeGuard((transaction) => result.destroy({ transaction }))
-      );
-      return Response.json(null, { status: 204 });
-    },
-  })
-  // Get patient images cluster
-  .route({
-    description:
-      'Get patient images cluster (legacy: use the Study/Series routes)',
-    method: 'GET',
-    path: apiRoutes.patientSlugImagesClustersCluster,
-    tags: [Tags.PATIENTS],
-    ...getKeycloakSecurity(),
-    schemas: {
-      request: {
-        params: GetPatientClusterParamsSchema,
-      },
-      responses: {
-        200: GetPatientClusterResponseSchema,
-        ...unauthorizedResponse,
-        ...defaultResponses,
-      },
-    },
-    async handler(request) {
-      const { slug, cluster } = request.params;
-      const result = await Patient.findOne({ where: { slug } });
-      if (!result) {
-        throw getNotFoundError('patient');
-      }
-      const imagesCluster = await PatientImagesCluster.findOne({
-        where: {
-          patientId: result.id,
-          cluster,
-        },
-        include: [
-          {
-            model: PatientImage,
-            as: 'images',
-            // The DICOM metadata and series are backend-internal.
-            attributes: {
-              exclude: [...patientImageDicomMetadataAttributes, 'seriesId'],
-            },
-            include: [
-              {
-                model: PatientImageReviewVote,
-                as: 'votes',
-              },
-            ],
-          },
-        ],
-      });
-      if (!imagesCluster) {
-        throw getNotFoundError('images cluster');
-      }
-      return Response.json(imagesCluster.toJSON<GetPatientClusterResponse>());
     },
   })
   // Get the DICOM file of a patient image
@@ -679,32 +527,5 @@ router
       const admin = getReviewer(ctx as Ctx);
       await runReviewAction(() => removeResolution(id, admin));
       return Response.json(null, { status: 204 });
-    },
-  })
-  // Finish the review of a cluster
-  .route({
-    description:
-      'Legacy (use the Series route): finish the review of a cluster: images without votes or a resolution are completed as NORMAL (recorded as FINISH_REVIEW, overridden by any later vote)',
-    method: 'POST',
-    path: apiRoutes.patientImagesClusterFinishReview,
-    tags: [Tags.PATIENTS],
-    ...getKeycloakSecurity(),
-    schemas: {
-      request: {
-        params: IDPropertySchema,
-      },
-      responses: {
-        200: FinishReviewResponseSchema,
-        ...unauthorizedResponse,
-        ...defaultResponses,
-      },
-    },
-    async handler(request, ctx) {
-      const { id } = request.params;
-      const reviewer = getReviewer(ctx as Ctx);
-      const result = await runReviewAction(() =>
-        finishClusterReview(id, reviewer)
-      );
-      return Response.json(result);
     },
   });

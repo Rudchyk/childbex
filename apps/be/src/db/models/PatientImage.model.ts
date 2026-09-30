@@ -1,8 +1,6 @@
 import {
   Association,
-  BelongsToGetAssociationMixin,
   DataTypes,
-  ForeignKey,
   HasManyCreateAssociationMixin,
   HasManyGetAssociationsMixin,
   Model,
@@ -14,8 +12,6 @@ import {
   ReviewState,
   ReviewStateSource,
 } from '@libs/schemas';
-import { Patient } from './Patient.model';
-import { PatientImagesCluster } from './PatientImagesCluster.model';
 import { PatientImageReviewVote } from './PatientImageReviewVote.model';
 import { timestampFields } from '../helpers/timestamps';
 import { afterCommit } from '../helpers/after-commit';
@@ -27,13 +23,13 @@ import type { PatientImageDicomMetadata } from '../../services/dicom.metadata';
 
 /** The API shape plus the backend-internal DICOM metadata and series. */
 type PatientImageAttributes = IPatientImage &
-  PatientImageDicomMetadata & { seriesId: string | null };
+  PatientImageDicomMetadata & { seriesId: string };
 
 export type PatientImageCreationAttributes = Pick<
   IPatientImage,
-  'details' | 'clusterId' | 'notes' | 'source'
+  'notes' | 'source'
 > &
-  Partial<PatientImageDicomMetadata> & { seriesId?: string | null };
+  Partial<PatientImageDicomMetadata> & { id?: string; seriesId: string };
 
 export class PatientImage
   extends Model<PatientImageAttributes, PatientImageCreationAttributes>
@@ -42,10 +38,8 @@ export class PatientImage
   declare id: IPatientImage['id'];
   declare source: IPatientImage['source'];
   declare notes: IPatientImage['notes'];
-  declare clusterId: ForeignKey<IPatientImage['clusterId']>;
   declare isBrocken: IPatientImage['isBrocken'];
   declare isAbnormal: IPatientImage['isAbnormal'];
-  declare details: IPatientImage['details'];
   declare status: IPatientImage['status'];
   declare adminResolutionId: IPatientImage['adminResolutionId'];
   declare adminResolutionName: IPatientImage['adminResolutionName'];
@@ -91,21 +85,21 @@ export class PatientImage
   declare fileSha256: PatientImageDicomMetadata['fileSha256'];
   /** BIGINT: read back as a string by the pg driver. */
   declare fileSize: PatientImageDicomMetadata['fileSize'];
-  /** DICOM series (backend-internal; null until linked). */
-  declare seriesId: string | null;
+  /**
+   * The DICOM Series: the image's place in the hierarchy (and its owner:
+   * Series -> Study -> Patient). `source` is only where the file is stored.
+   */
+  declare seriesId: string;
 
   // Sequelize‑generated:
   declare readonly createdAt: IPatientImage['createdAt'];
   declare readonly updatedAt: IPatientImage['updatedAt'];
 
-  declare getPatient: BelongsToGetAssociationMixin<Patient>;
   declare getVotes: HasManyGetAssociationsMixin<PatientImageReviewVote>;
   declare createVote: HasManyCreateAssociationMixin<PatientImageReviewVote>;
 
   // Статичні асоціації
   declare static associations: {
-    patient: Association<PatientImage, Patient>;
-    cluster: Association<PatientImage, PatientImagesCluster>;
     votes: Association<PatientImage, PatientImageReviewVote>;
   };
 
@@ -128,15 +122,6 @@ PatientImage.init(
       type: DataTypes.TEXT,
       allowNull: true,
     },
-    clusterId: {
-      type: DataTypes.UUID,
-      allowNull: false,
-      references: {
-        model: PatientImagesCluster,
-        key: 'id',
-      },
-      onDelete: 'CASCADE',
-    },
     isBrocken: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
@@ -146,10 +131,6 @@ PatientImage.init(
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
-    },
-    details: {
-      type: DataTypes.JSON,
-      allowNull: true,
     },
     status: {
       type: DataTypes.ENUM(...Object.values(PatientImageStatus)),
@@ -237,13 +218,14 @@ PatientImage.init(
     transferSyntaxUid: { type: DataTypes.STRING(64), allowNull: true },
     fileSha256: { type: DataTypes.CHAR(64), allowNull: true },
     fileSize: { type: DataTypes.BIGINT, allowNull: true },
-    // Migration 202609291200-study-series. Referenced by table name: the
-    // Series model is not imported here (it would create an import cycle).
+    // Migrations 202609291200-study-series and 202610010000-drop-patient-
+    // image-clusters. Referenced by table name: the Series model is not
+    // imported here (it would create an import cycle).
     seriesId: {
       type: DataTypes.UUID,
-      allowNull: true,
+      allowNull: false,
       references: { model: 'series', key: 'id' },
-      onDelete: 'NO ACTION',
+      onDelete: 'CASCADE',
     },
     ...timestampFields,
   },
@@ -280,14 +262,3 @@ PatientImage.init(
   }
 );
 
-PatientImagesCluster.hasMany(PatientImage, {
-  foreignKey: 'clusterId',
-  as: 'images',
-  onDelete: 'CASCADE',
-  hooks: true,
-});
-
-PatientImage.belongsTo(PatientImagesCluster, {
-  foreignKey: 'clusterId',
-  as: 'cluster',
-});

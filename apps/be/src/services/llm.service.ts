@@ -3,7 +3,6 @@ import { logger } from './logger.service';
 import { axiosRetryDefaultOptions, getLimitedAxios } from './axios.service';
 import { apiRoutes } from '@libs/constants';
 import {
-  LLMServiceCheckItemsRequestBody,
   LLMServiceCheckItemsResponse,
   LLMServiceHealthResponse,
   LLMServiceInferenceResponse,
@@ -51,7 +50,8 @@ class LLMService {
   }
 
   async checkItems(
-    items: LLMServiceCheckItemsRequestBody
+    /** Stored file locations of images already checked for ownership. */
+    items: string[]
   ): Promise<LLMServiceCheckItemsResponse> {
     if (!this.client) {
       throw new Error('LLM Service client is not initialized');

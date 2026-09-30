@@ -29,7 +29,7 @@ const CHUNK = 10;
 const RESULT: UploadSessionResult = {
   importedImages: 3,
   alreadyImported: 0,
-  clusters: 1,
+  series: 1,
   brokenImages: 0,
   skippedFiles: 0,
 };

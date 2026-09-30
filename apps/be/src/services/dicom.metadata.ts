@@ -20,7 +20,12 @@ export interface PatientImageDicomMetadata {
   convolutionKernel: string | null;
   imagePositionPatient: number[] | null;
   imageOrientationPatient: number[] | null;
-  /** Position along the cluster's slice normal (the current sort key). */
+  /**
+   * Cached position along a slice normal (legacy: rows imported before
+   * migration 202610010000 used the old cluster's normal, newer ones the
+   * image's own normal). Ordering never relies on it: it is recomputed from
+   * ImagePositionPatient / ImageOrientationPatient (series-stack.ts).
+   */
   slicePosition: number | null;
   rows: number | null;
   columns: number | null;

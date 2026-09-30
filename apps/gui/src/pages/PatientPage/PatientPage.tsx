@@ -5,11 +5,10 @@ import { PatientStudies } from './PatientStudies';
 import { useParams } from 'react-router-dom';
 import { SlugProperty } from '@libs/schemas';
 import { PageTitle } from '../../components';
-import { AddPatientImagesCluster } from './AddPatientImagesCluster/AddPatientImagesCluster';
+import { AddPatientImages } from './AddPatientImages/AddPatientImages';
 import { WithLoader } from '../../hoc';
 
-// The patient's (legacy) clusters in this response are not used: the page
-// lists DICOM Studies.
+// The page lists the patient's DICOM Studies.
 const PatientContent = WithLoader<{ id: string }>(({ data }) => (
   <PatientStudies patientId={data.id} />
 ));
@@ -25,7 +24,7 @@ export const Component = () => {
       <PageTmpl
         customTitle={
           <PageTitle
-            titleActions={data?.id && <AddPatientImagesCluster id={data.id} />}
+            titleActions={data?.id && <AddPatientImages id={data.id} />}
           >
             {data?.name}
           </PageTitle>

@@ -10,16 +10,16 @@ import {
 } from '../../../modules/archiveUpload';
 import type { UploadSession } from '@libs/schemas';
 import { SubmitHandler, SubmitErrorHandler } from 'react-hook-form';
-import { AddPatientImagesClusterForm } from './AddPatientImagesClusterForm';
+import { AddPatientImagesForm } from './AddPatientImagesForm';
 import { DialogForm } from '../../../components';
 import { FC, useEffect } from 'react';
-import { AddPatientImagesClusterFormData } from './addPatientImagesClusterForm.schema';
+import { AddPatientImagesFormData } from './addPatientImagesForm.schema';
 
-interface AddPatientImagesClusterProps {
+interface AddPatientImagesProps {
   id: string;
 }
 
-export const AddPatientImagesCluster: FC<AddPatientImagesClusterProps> = ({
+export const AddPatientImages: FC<AddPatientImagesProps> = ({
   id,
 }) => {
   const title = 'Add patient asset';
@@ -28,13 +28,13 @@ export const AddPatientImagesCluster: FC<AddPatientImagesClusterProps> = ({
   const pending = usePendingUploads(id);
   const { notifyError, notifySuccess } = useNotifications();
   const [open, toggleOpen] = useToggle(false);
-  const onSubmit: SubmitHandler<AddPatientImagesClusterFormData> = async ({
+  const onSubmit: SubmitHandler<AddPatientImagesFormData> = async ({
     archive,
   }) => {
     // The dialog stays open to show progress; it closes on success.
     start(id, archive);
   };
-  const onError: SubmitErrorHandler<AddPatientImagesClusterFormData> = async (
+  const onError: SubmitErrorHandler<AddPatientImagesFormData> = async (
     err
   ) => {
     console.error(err);
@@ -82,7 +82,7 @@ export const AddPatientImagesCluster: FC<AddPatientImagesClusterProps> = ({
         isButtonClose={!isActive}
         onDialogClose={onDialogClose}
         form={
-          <AddPatientImagesClusterForm
+          <AddPatientImagesForm
             onSubmit={onSubmit}
             onError={onError}
             loading={isActive}

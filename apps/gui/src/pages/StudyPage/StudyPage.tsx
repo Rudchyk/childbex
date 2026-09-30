@@ -20,11 +20,7 @@ import { PageTmpl } from '../../templates';
 import { WithLoader } from '../../hoc';
 import { useGetStudySeriesQuery } from '../../store/apis';
 import { ReviewSummaryChips } from '../hierarchy/ReviewSummaryChips';
-import {
-  formatStudyDateTime,
-  isSimpleStackSeries,
-  seriesTitle,
-} from '../hierarchy/hierarchy.utils';
+import { formatStudyDateTime, seriesTitle } from '../hierarchy/hierarchy.utils';
 
 interface StudySeriesListProps {
   patientId: string;
@@ -48,14 +44,15 @@ export const StudySeriesList = WithLoader<StudySeriesResponse, StudySeriesListPr
             >
               <ListItemAvatar>
                 <Avatar>
-                  {isSimpleStackSeries(series) ? <ViewListIcon /> : <WarningIcon />}
+                  {series.reviewable ? <ViewListIcon /> : <WarningIcon />}
                 </Avatar>
               </ListItemAvatar>
               <ListItemText
                 primary={seriesTitle(series)}
                 secondary={[
                   series.modality,
-                  isSimpleStackSeries(series)
+                  // Server-derived (the same rule as Finish review).
+                  series.reviewable
                     ? null
                     : 'not viewable as one stack',
                 ]

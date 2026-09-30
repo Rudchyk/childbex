@@ -3,23 +3,23 @@ import { FC } from 'react';
 import { FormUIFileInput } from '../../../components';
 import { Box } from '@mui/material';
 import {
-  AddPatientImagesClusterFormDataSchema,
-  AddPatientImagesClusterFormData,
+  AddPatientImagesFormDataSchema,
+  AddPatientImagesFormData,
   accept,
-} from './addPatientImagesClusterForm.schema';
+} from './addPatientImagesForm.schema';
 import { zodResolver } from '@hookform/resolvers/zod';
 
-interface AddPatientImagesClusterFormProps {
-  onSubmit: SubmitHandler<AddPatientImagesClusterFormData>;
-  onError?: SubmitErrorHandler<AddPatientImagesClusterFormData>;
+interface AddPatientImagesFormProps {
+  onSubmit: SubmitHandler<AddPatientImagesFormData>;
+  onError?: SubmitErrorHandler<AddPatientImagesFormData>;
   loading?: boolean;
 }
 
-export const AddPatientImagesClusterForm: FC<
-  AddPatientImagesClusterFormProps
+export const AddPatientImagesForm: FC<
+  AddPatientImagesFormProps
 > = ({ onSubmit, onError, loading }) => {
   const methods = useForm({
-    resolver: zodResolver(AddPatientImagesClusterFormDataSchema),
+    resolver: zodResolver(AddPatientImagesFormDataSchema),
     defaultValues: {
       archive: undefined,
     },

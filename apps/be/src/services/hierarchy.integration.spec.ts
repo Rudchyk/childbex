@@ -1,9 +1,9 @@
 /**
  * Patient -> Study -> Series API and Series "Finish review" against
  * PostgreSQL (and over HTTP with a fake Keycloak): ownership isolation,
- * ordering, review summaries, broken and unassigned images, reviewability
- * of a Series as one stack, completion provenance, and compatibility with
- * the legacy cluster API. Synthetic data only.
+ * ordering, review summaries, broken images, reviewability of a Series as
+ * one stack (orientation, geometry, multi-frame), completion provenance,
+ * LLM check ownership and the removed cluster API. Synthetic data only.
  *
  * Runs only when TEST_DATABASE_URL is set, in its own database
  * "<name of TEST_DATABASE_URL>_navigation" (created when missing); every
@@ -19,6 +19,7 @@ import { QueryTypes, Sequelize } from 'sequelize';
 import {
   PatientImageReviewVoteTypes as Vote,
   ReviewResolutionLabel,
+  type StudySeriesResponse,
 } from '@libs/schemas';
 import type * as MigratorModule from '../db/migrator';
 import type * as ReviewModule from './review.service';
@@ -40,8 +41,6 @@ jest.setTimeout(60_000);
 // --- Synthetic fixture ----------------------------------------------------------
 const P1 = '11111111-1111-4111-8111-000000000001';
 const P2 = '11111111-1111-4111-8111-000000000002';
-const C1 = '22222222-2222-4222-8222-000000000001'; // P1 cluster (all P1 images)
-const C2 = '22222222-2222-4222-8222-000000000002'; // P2 cluster
 const ST1 = '44444444-4444-4444-8444-000000000001'; // P1, 2026-01-02
 const ST2 = '44444444-4444-4444-8444-000000000002'; // P1, 2025-05-06
 const ST3 = '44444444-4444-4444-8444-000000000003'; // P2
@@ -50,6 +49,8 @@ const SE_MIX = '55555555-5555-4555-8555-000000000002'; // ST1 #1, axial + sagitt
 const SE_MF = '55555555-5555-4555-8555-000000000003'; // ST1 #3, multi-frame
 const SE_OTHER = '55555555-5555-4555-8555-000000000004'; // ST2
 const SE_P2 = '55555555-5555-4555-8555-000000000005'; // ST3 (P2)
+const SE_GEO = '55555555-5555-4555-8555-000000000006'; // ST3 (P2), mixed geometry
+const SE_INC = '55555555-5555-4555-8555-000000000007'; // ST3 (P2), incomplete geometry
 const img = (n: number) => `33333333-3333-4333-8333-${String(n).padStart(12, '0')}`;
 const AXIAL = [1, 0, 0, 0, 1, 0];
 const SAGITTAL = [0, 1, 0, 0, 0, -1];
@@ -60,9 +61,10 @@ const HASH = 'f'.repeat(64);
 
 interface ImageFixture {
   n: number;
-  series: string | null;
-  cluster?: string;
+  series: string;
   instance?: number | null;
+  rows?: number;
+  pixelSpacing?: number[] | null;
   iop?: number[] | null;
   z?: number;
   frames?: number;
@@ -80,9 +82,13 @@ const images: ImageFixture[] = [
   { n: 11, series: SE_MIX, instance: 2, iop: SAGITTAL, z: 0 },
   { n: 20, series: SE_MF, instance: 1, z: 0, frames: 40 },
   { n: 30, series: SE_OTHER, instance: 1, z: 0 },
-  { n: 40, series: null, instance: 1, z: 0 }, // unassigned
-  { n: 41, series: null, broken: true }, // unassigned broken
-  { n: 50, series: SE_P2, cluster: C2, instance: 1, z: 0 },
+  { n: 50, series: SE_P2, instance: 1, z: 0 },
+  // Formerly a geometry outlier: another matrix size in the same series.
+  { n: 60, series: SE_GEO, instance: 1, z: 0 },
+  { n: 61, series: SE_GEO, instance: 2, z: 1, rows: 256 },
+  // An image without pixel spacing: incomplete geometry.
+  { n: 70, series: SE_INC, instance: 1, z: 0 },
+  { n: 71, series: SE_INC, instance: 2, z: 1, pixelSpacing: null },
 ];
 
 describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
@@ -133,13 +139,6 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
         { bind: [id, slug] }
       );
     }
-    for (const [id, patient] of [[C1, P1], [C2, P2]]) {
-      await sequelize.query(
-        `INSERT INTO patient_images_clusters (id, name, cluster, "patientId", "createdAt", "updatedAt")
-         VALUES ($1, 'SYNTHETIC', 0, $2, now(), now())`,
-        { bind: [id, patient] }
-      );
-    }
     for (const [id, patient, uid, date, time] of [
       [ST1, P1, STUDY_UID, '2026-01-02', '101500'],
       [ST2, P1, '2.25.9000002', '2025-05-06', null],
@@ -157,6 +156,8 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
       [SE_MF, ST1, 3, 'MULTIFRAME'],
       [SE_OTHER, ST2, null, null],
       [SE_P2, ST3, 1, 'OTHER PATIENT'],
+      [SE_GEO, ST3, 2, 'MIXED GEOMETRY'],
+      [SE_INC, ST3, 3, 'INCOMPLETE GEOMETRY'],
     ] as const) {
       await sequelize.query(
         `INSERT INTO series (id, "studyId", "seriesInstanceUid", "seriesNumber", "seriesDescription", modality, "createdAt", "updatedAt")
@@ -166,15 +167,15 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
     }
     for (const image of images) {
       await sequelize.query(
-        `INSERT INTO patients_images (id, source, "clusterId", "seriesId", "isBrocken", status, notes,
+        `INSERT INTO patients_images (id, source, "seriesId", "isBrocken", status, notes,
            "instanceNumber", "imageOrientationPatient", "imagePositionPatient", "numberOfFrames",
-           "sopInstanceUid", "studyInstanceUid", "fileSha256", "createdAt", "updatedAt")
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now(), now())`,
+           "sopInstanceUid", "studyInstanceUid", "fileSha256", rows, columns, "pixelSpacing",
+           "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now(), now())`,
         {
           bind: [
             img(image.n),
-            `/uploads/${P1}/${C1}/IM${image.n}`,
-            image.cluster ?? C1,
+            `/uploads/${P1}/${image.series}/IM${image.n}`,
             image.series,
             !!image.broken,
             image.broken ? 'broken' : 'not_reviewed',
@@ -186,6 +187,9 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
             `${SOP_PREFIX}${image.n}`,
             STUDY_UID,
             HASH,
+            image.broken ? null : image.rows ?? 512,
+            image.broken ? null : 512,
+            image.broken || image.pixelSpacing === null ? null : image.pixelSpacing ?? [0.7, 0.7],
           ],
         }
       );
@@ -222,7 +226,7 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
   // --- Hierarchy reads ---------------------------------------------------------------
 
   describe('studies and series', () => {
-    it("lists only the patient's studies, with summaries and the unassigned count", async () => {
+    it("lists only the patient's studies, with summaries", async () => {
       const result = await hierarchy.getPatientStudies(P1);
       expect(result).toEqual({
         patientId: P1,
@@ -244,7 +248,6 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
             review: { total: 8, broken: 1, notReviewed: 7, normal: 0, abnormal: 0, uncertain: 0, conflicted: 0 },
           },
         ],
-        unassigned: { images: 2, broken: 1 },
       });
       expect((await hierarchy.getPatientStudies(P2))?.studies.map(({ id }) => id)).toEqual([ST3]);
     });
@@ -327,6 +330,24 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
       expect(await hierarchy.getPatientSeries(P1, SE_AX)).toBeNull();
     });
 
+    it('reports the readiness of each series (server-derived, the Finish review rule)', async () => {
+      const flags = (series: StudySeriesResponse['series'] | undefined) =>
+        series?.map(({ id, orientationCount, multiFrameImageCount, geometryCount, geometryIncompleteCount, reviewable }) => ({
+          id, orientationCount, multiFrameImageCount, geometryCount, geometryIncompleteCount, reviewable,
+        }));
+      expect(flags((await hierarchy.getStudySeries(P1, ST1))?.series)).toEqual([
+        { id: SE_MIX, orientationCount: 2, multiFrameImageCount: 0, geometryCount: 1, geometryIncompleteCount: 0, reviewable: false },
+        { id: SE_AX, orientationCount: 1, multiFrameImageCount: 0, geometryCount: 1, geometryIncompleteCount: 0, reviewable: true },
+        { id: SE_MF, orientationCount: 1, multiFrameImageCount: 1, geometryCount: 1, geometryIncompleteCount: 0, reviewable: false },
+      ]);
+      expect(flags((await hierarchy.getStudySeries(P2, ST3))?.series)).toEqual([
+        { id: SE_P2, orientationCount: 1, multiFrameImageCount: 0, geometryCount: 1, geometryIncompleteCount: 0, reviewable: true },
+        { id: SE_GEO, orientationCount: 1, multiFrameImageCount: 0, geometryCount: 2, geometryIncompleteCount: 0, reviewable: false },
+        // The known geometry combinations count as one: still not reviewable.
+        { id: SE_INC, orientationCount: 1, multiFrameImageCount: 0, geometryCount: 1, geometryIncompleteCount: 1, reviewable: false },
+      ]);
+    });
+
     it('reading changes no review data', async () => {
       const before = await reviewSnapshot();
       await hierarchy.getPatientStudies(P1);
@@ -349,8 +370,8 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
       const result = await review.finishSeriesReview(P1, SE_AX, reviewer('f'), AX_DISPLAYED);
 
       expect(result).toEqual({ runId: expect.any(String), completed: 1, alreadyReviewed: 3, skippedBroken: 1 });
-      expect(await rows(`SELECT "patientImageId", "runId", "scopeSeriesId", "scopeClusterId", "completedById", "completedByName" FROM patient_image_review_completions`)).toEqual([
-        { patientImageId: img(3), runId: result.runId, scopeSeriesId: SE_AX, scopeClusterId: null, completedById: 'sub-f', completedByName: 'Reviewer f' },
+      expect(await rows(`SELECT "patientImageId", "runId", "scopeSeriesId", "legacyScopeClusterId", "completedById", "completedByName" FROM patient_image_review_completions`)).toEqual([
+        { patientImageId: img(3), runId: result.runId, scopeSeriesId: SE_AX, legacyScopeClusterId: null, completedById: 'sub-f', completedByName: 'Reviewer f' },
       ]);
       const state = async (n: number) =>
         (await rows(`SELECT "reviewState", "reviewStateSource" FROM patients_images WHERE id = $1`, [img(n)]))[0];
@@ -359,8 +380,8 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
       expect(await state(2)).toEqual({ reviewState: 'CONFLICTED', reviewStateSource: 'VOTES' });
       expect(await state(4)).toEqual({ reviewState: 'UNCERTAIN', reviewStateSource: 'RESOLUTION' });
       expect(await state(5)).toEqual({ reviewState: 'NOT_REVIEWED', reviewStateSource: 'NONE' }); // broken
-      // Same cluster, other series / unassigned: untouched.
-      for (const n of [10, 11, 20, 30, 40]) {
+      // Other series: untouched.
+      for (const n of [10, 11, 20, 30, 50]) {
         expect(await state(n)).toEqual({ reviewState: 'NOT_REVIEWED', reviewStateSource: 'NONE' });
       }
       const after = await reviewSnapshot();
@@ -374,12 +395,14 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
     });
 
     it.each([
-      ['mixed orientations', SE_MIX, [img(10), img(11)]],
-      ['a multi-frame image', SE_MF, [img(20)]],
-    ])('refuses a series with %s (SERIES_NOT_FULLY_REVIEWABLE), changing nothing', async (_, series, presented) => {
+      ['mixed orientations', P1, SE_MIX, [img(10), img(11)]],
+      ['a multi-frame image', P1, SE_MF, [img(20)]],
+      ['mixed geometry (a former geometry outlier)', P2, SE_GEO, [img(60), img(61)]],
+      ['incomplete geometry', P2, SE_INC, [img(70), img(71)]],
+    ])('refuses a series with %s (SERIES_NOT_FULLY_REVIEWABLE), changing nothing', async (_, patient, series, presented) => {
       const before = await reviewSnapshot();
       await expect(
-        review.finishSeriesReview(P1, series, reviewer('f'), presented)
+        review.finishSeriesReview(patient, series, reviewer('f'), presented)
       ).rejects.toMatchObject({ code: 'SERIES_NOT_FULLY_REVIEWABLE', status: 409 });
       expect(await reviewSnapshot()).toEqual(before);
     });
@@ -411,41 +434,15 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
     it('exactly one completion scope (CHECK)', async () => {
       const insert = (cluster: string | null, series: string | null) =>
         sequelize.query(
-          `INSERT INTO patient_image_review_completions (id, "patientImageId", "runId", "scopeClusterId", "scopeSeriesId", "completedById", "completedByName", "createdAt")
+          `INSERT INTO patient_image_review_completions (id, "patientImageId", "runId", "legacyScopeClusterId", "scopeSeriesId", "completedById", "completedByName", "createdAt")
            VALUES (gen_random_uuid(), $1, gen_random_uuid(), $2, $3, 'u', 'U', now())`,
           { bind: [img(30), cluster, series] }
         );
-      for (const [cluster, series] of [[C1, SE_OTHER], [null, null]]) {
+      for (const [cluster, series] of [['22222222-2222-4222-8222-000000000001', SE_OTHER], [null, null]]) {
         await expect(insert(cluster, series)).rejects.toMatchObject({
           parent: { code: '23514', constraint: 'patient_image_review_completions_one_scope' },
         });
       }
-    });
-  });
-
-  // --- Completion provenance migration -------------------------------------------
-
-  describe('completion scope migration', () => {
-    const SCOPE_MIGRATION = '202609302100-review-completion-series-scope';
-
-    it('keeps cluster-scoped completions unchanged; down refuses once series-scoped ones exist', async () => {
-      // Back to before the migration, with a cluster-scoped completion.
-      expect((await migrator.migrateDown(sequelize)).map(({ name }) => name)).toEqual([SCOPE_MIGRATION]);
-      await sequelize.query(
-        `INSERT INTO patient_image_review_completions (id, "patientImageId", "runId", "scopeClusterId", "completedById", "completedByName", "createdAt")
-         VALUES ('66666666-6666-4666-8666-000000000001', $1, '77777777-7777-4777-8777-000000000001', $2, 'u', 'U', '2026-09-01T00:00:00Z')`,
-        { bind: [img(30), C1] }
-      );
-      const legacy = await rows('SELECT * FROM patient_image_review_completions');
-
-      await migrator.migrateUp(sequelize);
-      expect(await rows('SELECT * FROM patient_image_review_completions')).toEqual(
-        legacy.map((row) => ({ ...row, scopeSeriesId: null }))
-      );
-
-      await review.finishSeriesReview(P1, SE_AX, reviewer('f'), AX_DISPLAYED);
-      await expect(migrator.migrateDown(sequelize)).rejects.toThrow(/series-scoped/);
-      expect((await migrator.getMigrationStatus(sequelize)).executed).toContain(SCOPE_MIGRATION);
     });
   });
 
@@ -455,11 +452,11 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
     const sql = await readFile(path.join(__dirname, '../db/queries/series-readiness.sql'), 'utf8');
     const [result] = await rows(sql);
     expect(result).toEqual({
-      series: 5,
+      series: 7,
       seriesWithSeveralOrientations: 1,
       seriesWithMultiFrameImages: 1,
-      imagesWithoutSeries: 2,
-      brokenImagesWithoutSeries: 1,
+      imagesWithoutSeries: 0,
+      brokenImagesWithoutSeries: 0,
       brokenImagesInSeries: 1,
     });
   });
@@ -534,11 +531,11 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
         )),
       ];
       for (const body of bodies) {
-        expect(body).not.toMatch(/\/uploads|IM\d|"source"|"details"|clusterId/);
+        expect(body).not.toMatch(/\/uploads|IM\d|"source"|"details"|cluster/i);
         expect(body).not.toContain('2.25.');
         expect(body).not.toContain(HASH);
       }
-      expect((await fetch(`${origin}/uploads/${P1}/${C1}/IM1`)).status).toBe(404);
+      expect((await fetch(`${origin}/uploads/${P1}/${SE_AX}/IM1`)).status).toBe(404);
     });
 
     it('Finish review over HTTP: 200 for a simple stack, 409 codes otherwise', async () => {
@@ -572,15 +569,64 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
       expect((await admin('POST', '/review/freeze')).status).toBe(400);
     });
 
-    it('the legacy cluster API keeps working (and is not used for the new hierarchy)', async () => {
-      const legacy = await call('GET', `/patients/slug/patient-one/clusters/cluster/0`);
-      expect(legacy.status).toBe(200);
-      expect((await legacy.json()).images).toHaveLength(11);
-      const finish = await call('POST', `/patients/clusters/${C1}/review/finish`);
-      expect(finish.status).toBe(200);
-      expect(await rows(`SELECT DISTINCT "scopeClusterId", "scopeSeriesId" FROM patient_image_review_completions`)).toEqual([
-        { scopeClusterId: C1, scopeSeriesId: null },
-      ]);
+    it('the removed cluster API is 410 Gone and writes nothing', async () => {
+      const cluster = '22222222-2222-4222-8222-000000000001';
+      for (const [method, url] of [
+        ['GET', '/patients/slug/patient-one/clusters/cluster/0'],
+        ['PATCH', `/patients/clusters/${cluster}`],
+        ['DELETE', `/patients/clusters/${cluster}`],
+        ['POST', `/patients/clusters/${cluster}/review/finish`],
+      ]) {
+        const response = await call(method, url);
+        expect([method, response.status]).toEqual([method, 410]);
+        expect(await response.json()).toMatchObject({ code: 'CLUSTERS_REMOVED' });
+      }
+      expect(await rows('SELECT 1 FROM patient_image_review_completions')).toHaveLength(0);
+    });
+
+    describe('LLM check-items ownership', () => {
+      let checkItems: jest.SpyInstance;
+      beforeEach(() => {
+        const { llmService } = require('./llm.service');
+        checkItems = jest
+          .spyOn(llmService, 'checkItems')
+          .mockResolvedValue({ items: [] });
+      });
+      afterEach(() => checkItems.mockRestore());
+      const check = (body: unknown) => call('POST', '/llm/check-items', body);
+
+      it('sends only images of the requested Series of the patient', async () => {
+        const response = await check({ patientId: P1, seriesId: SE_AX, imageIds: [img(2), img(1)] });
+        expect(response.status).toBe(200);
+        expect(checkItems).toHaveBeenCalledWith([
+          `/uploads/${P1}/${SE_AX}/IM2`,
+          `/uploads/${P1}/${SE_AX}/IM1`,
+        ]);
+      });
+
+      it.each([
+        ['an image of another series of the patient', { patientId: P1, seriesId: SE_AX, imageIds: [img(1), img(30)] }],
+        ["another patient's series", { patientId: P1, seriesId: SE_P2, imageIds: [img(50)] }],
+        ["another patient's image", { patientId: P1, seriesId: SE_AX, imageIds: [img(50)] }],
+        ['the series under the wrong patient', { patientId: P2, seriesId: SE_AX, imageIds: [img(1)] }],
+        ['an unknown image', { patientId: P1, seriesId: SE_AX, imageIds: ['33333333-3333-4333-8333-999999999999'] }],
+        ['a malformed id', { patientId: P1, seriesId: SE_AX, imageIds: ['../../etc/passwd'] }],
+      ])('rejects %s with the same 404, sending nothing', async (_, body) => {
+        const response = await check(body);
+        expect(response.status).toBe(404);
+        expect(await response.json()).toEqual(
+          await (await check({ patientId: P1, seriesId: SE_AX, imageIds: ['33333333-3333-4333-8333-999999999998'] })).json()
+        );
+        expect(checkItems).not.toHaveBeenCalled();
+      });
+
+      it('rejects a trashed patient and a body without the Series context', async () => {
+        expect((await check([img(1)])).status).toBe(400);
+        expect((await check({ imageIds: [img(1)] })).status).toBe(400);
+        await sequelize.query(`UPDATE patients SET "deletedAt" = now() WHERE id = $1`, { bind: [P1] });
+        expect((await check({ patientId: P1, seriesId: SE_AX, imageIds: [img(1)] })).status).toBe(404);
+        expect(checkItems).not.toHaveBeenCalled();
+      });
     });
 
     it('moves or renames no stored file', async () => {

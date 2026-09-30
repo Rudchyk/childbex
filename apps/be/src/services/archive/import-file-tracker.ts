@@ -28,21 +28,13 @@ export class ImportFileTracker {
     }
   }
 
-  /** Places `source` into `folder` without overwriting; returns the final name. */
-  async placeFile(source: string, folder: string, name: string) {
-    const { name: stem, ext } = path.parse(name);
-    for (let n = 0; n < 1000; n++) {
-      const candidate = n ? `${stem}_${n}${ext}` : name;
-      const target = path.join(folder, candidate);
-      try {
-        await this.placeNoClobber(source, target);
-        this.files.push(target);
-        return candidate;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      }
-    }
-    throw new Error('Could not find a free file name in the cluster folder');
+  /**
+   * Places `source` at exactly `target` (never overwriting: an existing
+   * file is an error, the name is not changed).
+   */
+  async placeNewFile(source: string, target: string) {
+    await this.placeNoClobber(source, target);
+    this.files.push(target);
   }
 
   private async placeNoClobber(source: string, target: string) {

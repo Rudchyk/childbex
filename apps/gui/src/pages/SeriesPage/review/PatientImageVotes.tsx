@@ -7,9 +7,9 @@ import {
   TableRow,
 } from '@mui/material';
 import { FC } from 'react';
-import { useToggle } from '../../hooks';
+import { useToggle } from '../../../hooks';
 import { SeriesImage } from '@libs/schemas';
-import { UIDialog } from '../../components';
+import { UIDialog } from '../../../components';
 
 interface PatientImageVotesProps {
   data: SeriesImage['votes'];

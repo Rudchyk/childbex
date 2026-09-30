@@ -343,12 +343,30 @@ describeWithDatabase('unique SOP Instance UID (PostgreSQL)', () => {
         })
       )[0];
 
-    beforeEach(() => migrator.migrateUp(sequelize));
+    // The backfill works before the cluster removal (it refuses after it).
+    beforeEach(() =>
+      migrator.migrateUp(sequelize, undefined, {
+        to: '202609302100-review-completion-series-scope',
+      })
+    );
 
     it('does not fill a SOP UID stored on another image: no partial update, other rows go on', async () => {
       // The instance is already stored (imported), and a legacy row holds
-      // another copy of the same file; another legacy row is new.
-      await importFiles([['IM1', { instance: 1 }]]);
+      // another copy of the same file; another legacy row is new. (Stored as
+      // an import did before the clusters were removed.)
+      await sequelize.query(
+        `INSERT INTO patients_images (id, source, "clusterId", "sopInstanceUid", "fileSha256", "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, $5, now(), now())`,
+        {
+          bind: [
+            id(9),
+            `/uploads/${P1}/${C1}/IMPORTED`,
+            C1,
+            '2.25.10000000000000000000000001',
+            createHash('sha256').update(makeSyntheticDicom({ instance: 1 })).digest('hex'),
+          ],
+        }
+      );
       await addLegacyRow(1, 1);
       await addLegacyRow(2, 2, C2);
       const before = await readRow(1);

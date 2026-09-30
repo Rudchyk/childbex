@@ -3,9 +3,13 @@
  * simple stack (pure; no database access).
  *
  * The viewer (dwv) shows one volume of single-frame slices with one
- * orientation. A Series with several orientations (e.g. a 3-plane
- * localizer) or a multi-frame image cannot be shown completely that way, so
- * it is not reviewable as a whole (no Series "Finish review").
+ * orientation and one geometry. A Series is reviewable as a whole (viewer,
+ * Series "Finish review") only when, among its non-broken images:
+ *   orientationCount == 1 && multiFrameImageCount == 0
+ *   && geometryCount == 1 && geometryIncompleteCount == 0
+ * (a 3-plane localizer, a multi-frame image, images of different size or
+ * pixel spacing, or an image without complete geometry are not). The API,
+ * the GUI and Finish review all use `isSimpleStack`.
  *
  * Order (deterministic):
  *   1. non-broken images, by orientation group: images whose slice normals
@@ -27,6 +31,9 @@ export interface StackImage {
   imageOrientationPatient: readonly number[] | null;
   imagePositionPatient: readonly number[] | null;
   numberOfFrames: number | null;
+  rows: number | null;
+  columns: number | null;
+  pixelSpacing: readonly number[] | null;
 }
 
 type Vector = [number, number, number];
@@ -70,7 +77,30 @@ export interface SeriesStack<T extends StackImage> {
   orientationCount: number;
   /** Non-broken images with more than one frame. */
   multiFrameImageCount: number;
+  /** Distinct (rows, columns, pixel spacing) among complete non-broken images. */
+  geometryCount: number;
+  /**
+   * Non-broken images without complete geometry (rows, columns, pixel
+   * spacing, orientation or position missing / unusable).
+   */
+  geometryIncompleteCount: number;
 }
+
+/** Pixel spacing is compared to 1e-6 mm (the importer's tolerance). */
+const geometryKey = (image: StackImage) =>
+  finite(image.pixelSpacing, 2) &&
+  typeof image.rows === 'number' &&
+  image.rows > 0 &&
+  typeof image.columns === 'number' &&
+  image.columns > 0 &&
+  sliceNormal(image.imageOrientationPatient) &&
+  finite(image.imagePositionPatient, 3)
+    ? [
+        image.rows,
+        image.columns,
+        ...(image.pixelSpacing as number[]).map((value) => Math.round(value * 1e6)),
+      ].join(':')
+    : null;
 
 export const orderSeriesImages = <T extends StackImage>(
   images: readonly T[]
@@ -105,18 +135,29 @@ export const orderSeriesImages = <T extends StackImage>(
     ordered.push({ image, orientationGroup: null });
   }
 
+  const keys = displayable.map(geometryKey);
   return {
     images: ordered,
     orientationCount: groups.length,
     multiFrameImageCount: displayable.filter(
       (image) => (image.numberOfFrames ?? 1) > 1
     ).length,
+    geometryCount: new Set(keys.filter((key) => key !== null)).size,
+    geometryIncompleteCount: keys.filter((key) => key === null).length,
   };
 };
 
-/** One orientation and no multi-frame image: the viewer shows it all. */
+/**
+ * The Series is one complete simple stack: the viewer shows all of its
+ * (non-broken) images, so it can be reviewed and finished as a whole.
+ */
 export const isSimpleStack = ({
   orientationCount,
   multiFrameImageCount,
-}: Pick<SeriesStack<StackImage>, 'orientationCount' | 'multiFrameImageCount'>) =>
-  orientationCount <= 1 && multiFrameImageCount === 0;
+  geometryCount,
+  geometryIncompleteCount,
+}: Omit<SeriesStack<StackImage>, 'images'>) =>
+  orientationCount === 1 &&
+  multiFrameImageCount === 0 &&
+  geometryCount === 1 &&
+  geometryIncompleteCount === 0;

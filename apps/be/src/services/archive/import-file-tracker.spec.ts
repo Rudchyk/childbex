@@ -24,19 +24,19 @@ afterEach(async () => {
 });
 
 describe('ImportFileTracker', () => {
-  it('never overwrites an existing file and picks a free name instead', async () => {
-    const folder = path.join(tmp, 'uploads', 'patient', 'cluster');
+  it('never overwrites an existing file (and never renames)', async () => {
+    const folder = path.join(tmp, 'uploads', 'patient', 'series');
     const tracker = new ImportFileTracker();
     await tracker.ensureDir(folder);
-    await writeFile(path.join(folder, 'IM0001'), 'previous import');
+    await writeFile(path.join(folder, 'image.dcm'), 'previous import');
 
-    expect(await tracker.placeFile(source, folder, 'IM0001')).toBe('IM0001_1');
-    expect(await readFile(path.join(folder, 'IM0001'), 'utf8')).toBe(
+    await expect(
+      tracker.placeNewFile(source, path.join(folder, 'image.dcm'))
+    ).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(await readFile(path.join(folder, 'image.dcm'), 'utf8')).toBe(
       'previous import'
     );
-    expect(await readFile(path.join(folder, 'IM0001_1'), 'utf8')).toBe(
-      'synthetic image bytes'
-    );
+    expect(await readdir(folder)).toEqual(['image.dcm']);
   });
 
   it('rollback removes only files and directories created by this import', async () => {
@@ -46,10 +46,10 @@ describe('ImportFileTracker', () => {
     await writeFile(path.join(existingFolder, 'kept'), 'previous import');
 
     const tracker = new ImportFileTracker();
-    const newFolder = path.join(tmp, 'uploads', 'patient', 'new-cluster');
+    const newFolder = path.join(tmp, 'uploads', 'patient', 'new-series');
     await tracker.ensureDir(newFolder);
-    await tracker.placeFile(source, newFolder, 'IM0001');
-    await tracker.placeFile(source, existingFolder, 'IM0002');
+    await tracker.placeNewFile(source, path.join(newFolder, 'a.dcm'));
+    await tracker.placeNewFile(source, path.join(existingFolder, 'b.dcm'));
 
     await tracker.rollback();
 

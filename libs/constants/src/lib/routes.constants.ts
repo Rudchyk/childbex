@@ -22,17 +22,10 @@ const patients = {
   patient: '/patients/:id',
   patientSlug: '/patients/slug/:slug',
   patientUploadSessions: '/patients/:id/upload-sessions',
-  /** Legacy (cluster-based; the GUI uses the Study/Series routes). */
-  patientImagesCluster: '/patients/clusters/:id',
-  /** Legacy (cluster-based; the GUI uses the Study/Series routes). */
-  patientSlugImagesClustersCluster:
-    '/patients/slug/:slug/clusters/cluster/:cluster',
   /** DICOM file of a patient image (authenticated; `id` is the patient id). */
   patientImageFile: '/patients/:id/images/:imageId/file',
   /** Admin resolution of an image (PUT / DELETE). */
   patientImageReviewResolution: '/patients/images/:id/review/resolution',
-  /** Legacy Finish review of a cluster (the GUI uses the Series route). */
-  patientImagesClusterFinishReview: '/patients/clusters/:id/review/finish',
   patientImagesReviewsVotes: '/patients/images/:id/review-votes',
   patientImageReviewVote: '/patients/images/:id/review-votes/:voteId',
 };
@@ -85,8 +78,8 @@ export const guiRoutes = {
   dwv: '/dwv',
   patients: '/patients',
   patient: '/patients/:slug',
-  /** Legacy cluster page (still routable; no longer linked). */
-  patientImagesCluster: '/patients/:slug/:cluster',
+  /** Removed cluster page: old bookmarks get a notice (never linked). */
+  legacyClusterPage: '/patients/:slug/:cluster',
   patientStudy: '/patients/:patientId/studies/:studyId',
   patientSeries: '/patients/:patientId/studies/:studyId/series/:seriesId',
 };

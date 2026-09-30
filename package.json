@@ -36,6 +36,7 @@
     "be:cleanup:duplicate-sop": "nx run be:cleanup-duplicate-sop --skip-nx-cache",
     "be:cleanup:duplicate-sop:apply": "nx run be:cleanup-duplicate-sop-apply --skip-nx-cache",
     "be:audit:review-state": "nx run be:audit-review-state --skip-nx-cache",
+    "be:audit:cluster-removal": "nx run be:audit-cluster-removal --skip-nx-cache",
     "be:backfill:review-state": "nx run be:backfill-review-state --skip-nx-cache",
     "be:backfill:review-state:apply": "nx run be:backfill-review-state-apply --skip-nx-cache",
     "start": "nx run-many -t serve --projects=be,gui --parallel",

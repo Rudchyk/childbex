@@ -162,6 +162,27 @@ export const assertMigratedThrough = async (
   }
 };
 
+/**
+ * For maintenance commands made obsolete by a migration: refuses once
+ * `name` is applied (the command works on the schema before it).
+ */
+export const assertNotMigrated = async (
+  sequelize: Sequelize,
+  name: string,
+  reason: string,
+  migrations: Migration[] = registeredMigrations
+) => {
+  if (!migrations.some((migration) => migration.name === name)) {
+    throw new Error(`Unknown migration "${name}".`);
+  }
+  const executed = await readExecutedMigrations(sequelize);
+  if (executed?.includes(name)) {
+    throw new SchemaNotReadyError(
+      `This command is obsolete since migration ${name}: ${reason}`
+    );
+  }
+};
+
 export const migrateUp = async (
   sequelize: Sequelize,
   migrations: Migration[] = registeredMigrations,

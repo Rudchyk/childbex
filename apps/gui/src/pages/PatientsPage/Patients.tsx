@@ -42,7 +42,7 @@ import { generatePath, Link as RouteLink } from 'react-router-dom';
 import { guiRoutes, TrashedPatientsActionTypes } from '@libs/constants';
 import { useAuth } from '../../auth/useAuth';
 import { TrashedPatientsAction } from './TrashedPatientsAction';
-import { PatientClustersChip } from './PatientClustersChip';
+import { PatientCountChip } from './PatientCountChip';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 
 type Patient = GetPatientsResponse[0];
@@ -162,11 +162,19 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       editable: true,
     },
     {
-      field: 'clusters',
-      headerName: 'Clusters',
+      field: 'studyCount',
+      headerName: 'Studies',
       flex: 1,
-      renderCell: ({ value }: GridCellParams<Patient, Patient['clusters']>) => (
-        <PatientClustersChip value={value?.length} />
+      renderCell: ({ value }: GridCellParams<Patient, Patient['studyCount']>) => (
+        <PatientCountChip value={value} />
+      ),
+    },
+    {
+      field: 'imageCount',
+      headerName: 'Images',
+      flex: 1,
+      renderCell: ({ value }: GridCellParams<Patient, Patient['imageCount']>) => (
+        <PatientCountChip value={value} />
       ),
     },
     {
@@ -230,11 +238,10 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       ),
     },
     {
-      field: 'clusters',
-      headerName: 'Clusters',
+      field: 'studyCount',
+      headerName: 'Studies',
       flex: 1,
       align: 'center',
-      valueFormatter: (value: Patient['clusters']) => value.length,
     },
     {
       field: 'actions',

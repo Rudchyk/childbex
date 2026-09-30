@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { clusterByOrientation, type ClusterResult } from './dicom.service';
+import { parseArchiveFiles, type ParsedArchive } from './dicom.service';
 import {
   makeSyntheticDicom,
   SYNTHETIC_FRAME_OF_REFERENCE_UID,
@@ -17,7 +17,7 @@ let files: string[];
 beforeAll(async () => {
   dir = await mkdtemp(path.join(os.tmpdir(), 'childbex-dicom-'));
   files = [];
-  // Written out of slice order: clustering must sort by position.
+  // Written out of slice order.
   for (const z of [3, 1, 4, 0, 2, 5, 7, 6]) {
     const file = path.join(dir, `IM${z}`);
     await writeFile(
@@ -35,7 +35,7 @@ afterAll(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-describe('clusterByOrientation', () => {
+describe('parseArchiveFiles', () => {
   it('keeps the event loop responsive while reading files', async () => {
     // Macrotasks (I/O callbacks, timers, other requests) can only run when
     // the event loop is not blocked. A synchronous implementation completes
@@ -49,38 +49,54 @@ describe('clusterByOrientation', () => {
     };
     setImmediate(spin);
 
-    const result = await clusterByOrientation(files);
+    const result = await parseArchiveFiles(files);
     done = true;
 
-    expect(result.clusters).toHaveLength(1);
+    expect(result.images).toHaveLength(8);
     expect(ticks).toBeGreaterThan(0);
   });
 
-  it('produces the same clustering result as before', async () => {
-    const { clusters, broken, skipped } = await clusterByOrientation(files);
-    expect(clusters).toHaveLength(1);
-    expect(clusters[0].group).toBe('SYNTHETIC AXIAL');
-    expect(clusters[0].geometry).toEqual({
-      rows: 64,
-      cols: 64,
-      pixelSpacing: [0.5, 0.5],
-    });
-    // Sorted by position along the slice normal.
-    expect(clusters[0].files.map((f) => path.basename(f.file))).toEqual([
-      'IM0',
-      'IM1',
-      'IM2',
-      'IM3',
-      'IM4',
-      'IM5',
-      'IM6',
-      'IM7',
-    ]);
+  it('keeps every usable image with its position along its own slice normal (no grouping)', async () => {
+    const { images, broken, skipped } = await parseArchiveFiles(files);
+    expect(images.map(({ file, positionScalar }) => [path.basename(file), positionScalar])).toEqual(
+      [3, 1, 4, 0, 2, 5, 7, 6].map((z) => [`IM${z}`, z])
+    );
     expect(broken).toEqual([]);
     expect(skipped).toEqual([
       { file: path.join(dir, 'README.txt'), reason: 'not_dicom' },
     ]);
   });
+
+  it('keeps an image whose geometry differs (formerly dropped as a geometry outlier)', async () => {
+    const outlier = path.join(dir, 'outlier');
+    await writeFile(outlier, makeSyntheticDicom({ instance: 20, sliceZ: 20, rows: 32, cols: 48 }));
+    const { images } = await parseArchiveFiles([...files, outlier]);
+    expect(images).toHaveLength(9);
+    expect(images.find(({ file }) => file === outlier)?.metadata.image).toMatchObject({
+      rows: 32,
+      columns: 48,
+    });
+  });
+
+  it.each([['StudyInstanceUID'], ['SeriesInstanceUID']] as const)(
+    'skips an image without %s (missing_hierarchy_uid), broken ones too',
+    async (attribute) => {
+      const valid = path.join(dir, `no-${attribute}`);
+      const broken = path.join(dir, `no-${attribute}-broken`);
+      await writeFile(valid, makeSyntheticDicom({ attributes: { [attribute]: null } }));
+      await writeFile(
+        broken,
+        makeSyntheticDicom({ attributes: { [attribute]: null }, pixelDataBytes: 10 })
+      );
+      const result = await parseArchiveFiles([valid, broken]);
+      expect(result.images).toEqual([]);
+      expect(result.broken).toEqual([]);
+      expect(result.skipped).toEqual([
+        { file: valid, reason: 'missing_hierarchy_uid' },
+        { file: broken, reason: 'missing_hierarchy_uid' },
+      ]);
+    }
+  );
 });
 
 const JPEG_LOSSLESS = '1.2.840.10008.1.2.4.70';
@@ -92,13 +108,13 @@ describe('DICOM metadata', () => {
     const bytes = makeSyntheticDicom({ rows: 8, cols: 8, ...options });
     const file = path.join(dir, `meta-${n++}`);
     await writeFile(file, bytes);
-    return { bytes, file, result: await clusterByOrientation([file]) };
+    return { bytes, file, result: await parseArchiveFiles([file]) };
   };
-  /** The single parsed image (clustered or broken). */
+  /** The single parsed image (usable or broken). */
   const parseImage = async (options: SyntheticDicomOptions = {}) => {
     const { bytes, result } = await parse(options);
     const [image] = [
-      ...result.clusters.flatMap(({ files }) => files),
+      ...result.images,
       ...result.broken,
     ];
     return { bytes, image, result };
@@ -183,7 +199,7 @@ describe('DICOM metadata', () => {
     // parsed with a guessed transfer syntax.
     const { result } = await parse({ transferSyntaxUid: null });
 
-    expect(result.clusters).toEqual([]);
+    expect(result.images).toEqual([]);
     expect(result.skipped).toEqual([
       expect.objectContaining({ reason: 'dicom_parse_failed' }),
     ]);
@@ -197,7 +213,7 @@ describe('DICOM metadata', () => {
     async (_, options) => {
       const { image, result } = await parseImage(options);
 
-      expect(result.clusters).toHaveLength(1);
+      expect(result.images).toHaveLength(1);
       expect(image.metadata.image.transferSyntaxUid).toBeNull();
     }
   );
@@ -224,7 +240,7 @@ describe('DICOM metadata', () => {
       pixelDataBytes: 8 * 8 * 2 * 3,
     });
 
-    expect(result.clusters.flatMap(({ files }) => files)).toHaveLength(1);
+    expect(result.images).toHaveLength(1);
     expect(image.metadata.image).toMatchObject({
       sopClassUid: '1.2.840.10008.5.1.4.1.1.2.1',
       numberOfFrames: 3,
@@ -253,8 +269,6 @@ describe('DICOM metadata', () => {
   it('leaves missing optional metadata null (no defaults) and still imports the file', async () => {
     const { image, result } = await parseImage({
       attributes: {
-        StudyInstanceUID: null,
-        SeriesInstanceUID: null,
         FrameOfReferenceUID: null,
         ImageType: null,
         SeriesNumber: null,
@@ -270,10 +284,8 @@ describe('DICOM metadata', () => {
       ushorts: { BitsStored: null, PixelRepresentation: null },
     });
 
-    expect(result.clusters).toHaveLength(1);
+    expect(result.images).toHaveLength(1);
     expect(image.metadata.image).toMatchObject({
-      studyInstanceUid: null,
-      seriesInstanceUid: null,
       frameOfReferenceUid: null,
       imageType: null,
       seriesNumber: null,
@@ -293,7 +305,7 @@ describe('DICOM metadata', () => {
   it('treats malformed values as missing instead of guessing', async () => {
     const { image, result } = await parseImage({
       attributes: {
-        StudyInstanceUID: '1.2.X.4',
+        FrameOfReferenceUID: '1.2.X.4',
         InstanceNumber: 'first',
         RescaleSlope: '1,5',
         PixelSpacing: '0.5',
@@ -301,9 +313,9 @@ describe('DICOM metadata', () => {
       },
     });
 
-    expect(result.clusters).toHaveLength(1);
+    expect(result.images).toHaveLength(1);
     expect(image.metadata.image).toMatchObject({
-      studyInstanceUid: null,
+      frameOfReferenceUid: null,
       instanceNumber: null,
       rescaleSlope: null,
       pixelSpacing: null,
@@ -311,12 +323,20 @@ describe('DICOM metadata', () => {
     });
   });
 
+  it('skips an image whose Study Instance UID is malformed (no hierarchy)', async () => {
+    const { result } = await parse({ attributes: { StudyInstanceUID: '1.2.X.4' } });
+    expect(result.images).toEqual([]);
+    expect(result.skipped).toEqual([
+      { file: expect.any(String), reason: 'missing_hierarchy_uid' },
+    ]);
+  });
+
   it('still skips files without ImagePositionPatient (current behavior)', async () => {
     const { result } = await parse({
       attributes: { ImagePositionPatient: null },
     });
 
-    expect(result.clusters).toEqual([]);
+    expect(result.images).toEqual([]);
     expect(result.skipped).toEqual([
       expect.objectContaining({ reason: 'not_an_image' }),
     ]);
@@ -329,28 +349,27 @@ describe('pixel data validation', () => {
   const parseBytes = async (bytes: Buffer) => {
     const file = path.join(dir, `pixels-${n++}`);
     await writeFile(file, bytes);
-    return clusterByOrientation([file]);
+    return parseArchiveFiles([file]);
   };
   const parse = (options: SyntheticDicomOptions = {}) =>
     parseBytes(makeSyntheticDicom({ rows: 8, cols: 8, ...options }));
   /** 8 x 8 x 16 bit = 128 bytes uncompressed. */
   const compressed = (encapsulatedPixelData: Buffer | Buffer[]) =>
     parse({ transferSyntaxUid: JPEG_LOSSLESS, encapsulatedPixelData });
-  const clusteredCount = (result: ClusterResult) =>
-    result.clusters.flatMap(({ files }) => files).length;
+  const usableCount = (result: ParsedArchive) => result.images.length;
 
   describe('native (uncompressed) pixel data', () => {
     it('accepts complete pixel data', async () => {
       const result = await parse();
 
-      expect(clusteredCount(result)).toBe(1);
+      expect(usableCount(result)).toBe(1);
       expect(result.broken).toEqual([]);
     });
 
     it('still reports truncated pixel data as broken', async () => {
       const result = await parse({ pixelDataBytes: 64 });
 
-      expect(clusteredCount(result)).toBe(0);
+      expect(usableCount(result)).toBe(0);
       expect(result.broken).toEqual([
         expect.objectContaining({
           reason: 'pixeldata_size(expected=128,actual=64)',
@@ -376,7 +395,7 @@ describe('pixel data validation', () => {
       const result = await compressed(Buffer.alloc(20, 1));
 
       expect(result.broken).toEqual([]);
-      const [image] = result.clusters.flatMap(({ files }) => files);
+      const [image] = result.images;
       expect(image.metadata.image).toMatchObject({
         transferSyntaxUid: JPEG_LOSSLESS,
         sopInstanceUid: expect.any(String),
@@ -395,7 +414,7 @@ describe('pixel data validation', () => {
     ])('accepts %s', async (_, fragments) => {
       const result = await compressed(fragments);
 
-      expect(clusteredCount(result)).toBe(1);
+      expect(usableCount(result)).toBe(1);
       expect(result.broken).toEqual([]);
     });
 
@@ -405,7 +424,7 @@ describe('pixel data validation', () => {
     ])('reports %s as broken, keeping the metadata', async (_, fragments) => {
       const result = await compressed(fragments);
 
-      expect(clusteredCount(result)).toBe(0);
+      expect(usableCount(result)).toBe(0);
       expect(result.broken).toEqual([
         expect.objectContaining({ reason: 'pixeldata_empty_fragments' }),
       ]);

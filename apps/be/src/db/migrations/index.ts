@@ -7,6 +7,7 @@ import { reviewStatusUncertainMigration } from './202609302000-review-status-unc
 import { reviewSemanticsSchemaMigration } from './202609302010-review-semantics-schema';
 import { reviewStateRequiredMigration } from './202609302020-review-state-required';
 import { reviewCompletionSeriesScopeMigration } from './202609302100-review-completion-series-scope';
+import { dropPatientImageClustersMigration } from './202610010000-drop-patient-image-clusters';
 import type { Migration } from './types';
 
 export type { Migration, MigrationContext } from './types';
@@ -26,4 +27,5 @@ export const migrations: Migration[] = [
   reviewSemanticsSchemaMigration,
   reviewStateRequiredMigration,
   reviewCompletionSeriesScopeMigration,
+  dropPatientImageClustersMigration,
 ];

@@ -102,7 +102,6 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
       require('./models/Patient.model').Patient,
       require('./models/Study.model').Study,
       require('./models/Series.model').Series,
-      require('./models/PatientImagesCluster.model').PatientImagesCluster,
       PatientImage,
       require('./models/PatientImageReviewVote.model').PatientImageReviewVote,
       require('./models/PatientImageReviewVoteEvent.model')
@@ -160,8 +159,14 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
     const status = await migrator.getMigrationStatus(sequelize);
     expect(status.pending).toEqual([]);
     await expect(migrator.assertSchemaUpToDate(sequelize)).resolves.toBeTruthy();
-    // Later migrations add columns (reported as warnings), never errors.
-    expect((await migrator.checkBaseline(sequelize)).errors).toEqual([]);
+    // The baseline check is for databases created before migrations. After
+    // all migrations the only differences it reports as errors are the
+    // intentionally removed clusters (202610010000); new columns are warnings.
+    const { errors } = await migrator.checkBaseline(sequelize);
+    expect(errors.length).toBeGreaterThan(0);
+    for (const error of errors) {
+      expect(error).toMatch(/patient_images_clusters|clusterId|details/);
+    }
     // Idempotent: nothing left to apply.
     expect(await migrator.migrateUp(sequelize)).toEqual([]);
   });
@@ -279,15 +284,18 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
     });
 
     it('accepts a schema altered repeatedly by sync({ alter: true }), with warnings only', async () => {
-      // Every old startup ran this.
-      for (let i = 0; i < 3; i++) await syncModels({ alter: true });
+      // Every old startup ran sync({ alter: true }), which added another copy
+      // of the unique constraint on source each time. (The old models no
+      // longer exist, so the effect is reproduced directly.)
+      for (let i = 1; i <= 3; i++) {
+        await sequelize.query(
+          `ALTER TABLE patients_images ADD CONSTRAINT patients_images_source_key${i} UNIQUE (source)`
+        );
+      }
 
       const { errors, warnings } = await migrator.checkBaseline(sequelize);
 
       expect(errors).toEqual([]);
-      // Each alter run adds another copy of the unique constraint on source.
-      // (The current models also add the columns of later migrations, which
-      // are reported as unexpected columns.)
       expect(warnings).toContainEqual(
         expect.stringMatching(
           /^4 duplicate unique indexes on patients_images\(source\): /
@@ -319,6 +327,8 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
     const PATIENT_ID = '11111111-1111-4111-8111-111111111111';
     const CLUSTER_ID = '22222222-2222-4222-8222-222222222222';
     const IMAGE_ID = '33333333-3333-4333-8333-333333333333';
+    const STUDY_ID = '44444444-4444-4444-8444-444444444444';
+    const SERIES_ID = '55555555-5555-4555-8555-555555555555';
 
     /** Column -> Postgres udt_name, as the migration adds them. */
     const expectedColumns: Record<string, string> = {
@@ -394,12 +404,18 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
 
     it('stores typed arrays, doubles and a bigint file size through the model', async () => {
       await migrator.migrateUp(sequelize);
-      await insertPatientAndCluster();
+      await sequelize.query(
+        `INSERT INTO patients (id, name, slug, "creatorId", "creatorName", "createdAt", "updatedAt")
+         VALUES ('${PATIENT_ID}', 'Synthetic', 'synthetic', 'u', 'U', now(), now());
+         INSERT INTO studies (id, "patientId", "studyInstanceUid", "createdAt", "updatedAt")
+         VALUES ('${STUDY_ID}', '${PATIENT_ID}', '2.25.10', now(), now());
+         INSERT INTO series (id, "studyId", "seriesInstanceUid", "createdAt", "updatedAt")
+         VALUES ('${SERIES_ID}', '${STUDY_ID}', '2.25.11', now(), now());`
+      );
 
       await PatientImage.create({
-        clusterId: CLUSTER_ID,
-        source: '/uploads/p/c/IM2',
-        details: null,
+        seriesId: SERIES_ID,
+        source: '/uploads/p/s/IM2',
         notes: undefined,
         sopInstanceUid: '2.25.1',
         imageType: ['ORIGINAL', 'PRIMARY', 'AXIAL'],
@@ -416,7 +432,7 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
       });
 
       const stored = await PatientImage.findOne({
-        where: { source: '/uploads/p/c/IM2' },
+        where: { source: '/uploads/p/s/IM2' },
       });
       expect(stored?.toJSON()).toMatchObject({
         sopInstanceUid: '2.25.1',
@@ -463,7 +479,7 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
         'patients_images_file_sha256_hex',
       ],
     ])('rejects %s', async (_, assignment, constraint) => {
-      await migrator.migrateUp(sequelize);
+      await migrator.migrateUp(sequelize, upToMetadata());
       await insertPatientAndCluster();
       await sequelize.query(
         `INSERT INTO patients_images (id, source, "clusterId", "createdAt", "updatedAt")

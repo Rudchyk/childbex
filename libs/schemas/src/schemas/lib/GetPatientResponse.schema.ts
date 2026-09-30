@@ -1,20 +1,7 @@
-import { Type, type Static } from '@sinclair/typebox';
+import { type Static } from '@sinclair/typebox';
 import { PatientSchema } from './Patient.schemas.js';
-import { PatientImagesClusterSchema } from './PatientImagesCluster.schemas.js';
-import { PatientImageSchema } from './PatientImage.schema.js';
 
-export const GetPatientResponseSchema = Type.Composite([
-  PatientSchema,
-  Type.Object({
-    clusters: Type.Array(
-      Type.Composite([
-        PatientImagesClusterSchema,
-        Type.Object({
-          images: Type.Array(PatientImageSchema),
-        }),
-      ])
-    ),
-  }),
-]);
+/** A patient (its images are browsed by Study / Series). */
+export const GetPatientResponseSchema = PatientSchema;
 
 export type GetPatientResponse = Static<typeof GetPatientResponseSchema>;

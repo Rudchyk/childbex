@@ -15,7 +15,8 @@ column). It is only for migration tracking, never for application data.
 SELECT * FROM migrations_meta
 SELECT * FROM patients
 SELECT * FROM patients_images
-SELECT * FROM patient_images_clusters
+SELECT * FROM studies
+SELECT * FROM series
 SELECT * FROM patient_image_review_votes
 ```
 
@@ -28,8 +29,12 @@ Number, FrameOfReferenceUID, SeriesDescription, ConvolutionKernel, IPP, IOP,
 Rows, Columns, PixelSpacing, SliceThickness, RescaleSlope / Intercept,
 PhotometricInterpretation, BitsStored, PixelRepresentation, NumberOfFrames,
 the TransferSyntaxUID of the file meta header, the lowercase hex SHA-256 and
-size of the stored file, and `slicePosition` (position along the cluster's
-slice normal, the current sort key; `null` for broken images).
+size of the stored file, and `slicePosition` (a cached position along a
+slice normal; `null` for broken images). `slicePosition` is a legacy cache:
+rows imported before `202610010000-drop-patient-image-clusters` used the old
+cluster's normal, newer ones the image's own normal. Nothing relies on it:
+ordering and reviewability are computed from IPP / IOP
+(`services/series-stack.ts`).
 
 - The metadata is backend-internal: it is not returned by the API, and
   free-text values (SeriesDescription) are never logged.
@@ -123,11 +128,10 @@ Production run:
 
 ## DICOM Study and Series
 
-Since migration `202609291200-study-series`:
-`Patient -> Study -> Series -> PatientImage` (`patients_images.seriesId`),
-in parallel with `Patient -> PatientImagesCluster -> PatientImage` during
-the transition (the cluster API and GUI are unchanged; `seriesId` is not
-returned by the API).
+`Patient -> Study -> Series -> PatientImage` (`patients_images.seriesId`)
+is the only hierarchy. It was added by `202609291200-study-series` next to
+the old heuristic clusters, which `202610010000-drop-patient-image-clusters`
+removed (see "Legacy clusters removed" below).
 
 - `studies`: `patientId`, `studyInstanceUid` (UNIQUE), `studyDate`
   (DICOM DA as a date, no time zone), `studyTime` (DICOM TM as recorded).
@@ -142,24 +146,24 @@ returned by the API).
   Series UID of another study rejects the whole archive
   (`STUDY_BELONGS_TO_ANOTHER_PATIENT` / `SERIES_BELONGS_TO_ANOTHER_STUDY`);
   nothing is re-parented.
-- Images without both UIDs stay unlinked (`seriesId` NULL).
-- Deleting: studies and series follow the patient (ON DELETE CASCADE); an
-  image prevents its series from being deleted (NO ACTION). Deleting a
-  cluster deletes its images and files as before, but not the studies and
-  series (they may be left without images).
+- Every image has its Series (`seriesId` NOT NULL). Files without a Study /
+  Series Instance UID are skipped by the import (`missing_hierarchy_uid`),
+  broken ones included.
+- Deleting: Patient -> Studies -> Series -> images -> review records all
+  cascade (ON DELETE CASCADE); the patient's upload folder is removed after
+  the commit. There is no Study / Series / image deletion endpoint.
 
 ### DICOM instance identity (import deduplication)
 
 An image is identified by its **SOP Instance UID**; the file SHA-256 tells
-whether a known UID comes with the same content. File names, storage paths
-(`source`) and clusters are not identity (a file name already taken in the
-cluster only gets a `_1`, `_2`, ... suffix). See
+whether a known UID comes with the same content. File names and storage
+paths (`source`) are not identity (new files are stored by image id). See
 `services/instance-dedup.service.ts`.
 
 | Archive image vs. stored images | Result |
 | --- | --- |
 | New SOP UID | imported |
-| Same SOP UID, same hash, same patient / study / series (any cluster) | `alreadyImported`: no row, no file; the stored row (id, cluster, review state, votes, metadata) is unchanged |
+| Same SOP UID, same hash, same patient / study / series | `alreadyImported`: no row, no file; the stored row (id, path, review state, votes, metadata) is unchanged |
 | Same SOP UID, other hash, or a stored row without hash | archive rejected: `SOP_INSTANCE_CONTENT_CONFLICT` |
 | Same SOP UID stored for another patient (also in the trash) | archive rejected: `SOP_INSTANCE_BELONGS_TO_ANOTHER_PATIENT` |
 | Same SOP UID in another study or series | archive rejected: `SOP_INSTANCE_BELONGS_TO_ANOTHER_SERIES` |
@@ -168,7 +172,7 @@ cluster only gets a `_1`, `_2`, ... suffix). See
 | No SOP UID | unchanged: skipped as `not_an_image` |
 
 Broken images follow the same rules. A rejected archive rolls back its
-transaction (studies, series, clusters, images) and removes every file it
+transaction (studies, series, images) and removes every file it
 placed. The decision is taken before any file is placed.
 
 The persistence phase of every import (one transaction: hierarchy,
@@ -327,7 +331,7 @@ Authoritative records:
 | `patient_image_review_votes`       | the current vote of each reviewer per image (unique `patientImageId, reviewerId`)                 |
 | `patient_image_review_vote_events` | append-only vote history (`cast` / `changed`, previous and new vote/comment, reviewer, time)      |
 | `patient_image_review_resolutions` | admin resolutions (`label` NORMAL/ABNORMAL/UNCERTAIN), append-only: a new one or a removal supersedes the active one (at most one active, `supersededAt IS NULL`); `origin` `admin`, `legacy_confirmed`, `legacy_unlabeled` |
-| `patient_image_review_completions` | "Finish review" provenance: `runId`, `scopeClusterId`, `completedById/Name`, `createdAt` (one per image) |
+| `patient_image_review_completions` | "Finish review" provenance: `runId`, `scopeSeriesId` (or historical `legacyScopeClusterId`), `completedById/Name`, `createdAt` (one per image) |
 | `review_freezes`                   | review freezes (at most one active; kept as history)                                             |
 
 **Effective state** (`patients_images.reviewState` / `reviewStateSource`,
@@ -357,16 +361,15 @@ commits after it.
 
 The same protocol (`withReviewFreezeGuard`) also guards the operations that
 remove reviewed images or change which patients are active, so a frozen
-review cannot lose data: deleting a cluster (`DELETE
-/patients/clusters/:id`), trashing a patient (`DELETE /patients/:id`),
+review cannot lose data: trashing a patient (`DELETE /patients/:id`),
 permanently deleting or restoring one (`POST /patients/:id/trash?type=delete
 | restore`). Trashing counts because trashed patients are excluded like
 deleted ones (patient list, file access, maintenance commands by default).
 All of them return 409 `REVIEW_FROZEN` while frozen; their authorization is
-unchanged. Files of a deleted patient/cluster/image are removed only after
-the deletion is committed. Not guarded: reads, patient/cluster metadata
-(`PATCH`, e.g. `inReview`) and imports (they only add `NOT_REVIEWED` images;
-no general dataset locking). There is no endpoint deleting a single image.
+unchanged. Files of a deleted patient are removed only after the deletion
+is committed (never after a rollback). Not guarded: reads, patient metadata
+(`PATCH`) and imports (they only add `NOT_REVIEWED` images; no general
+dataset locking). There is no endpoint deleting a Study, Series or image.
 `cleanup duplicate-sop` deletes rows only before
 `202609301800-patient-image-sop-unique`; once the review tables exist that
 unique index already rules out duplicates, so it has nothing to delete.
@@ -377,8 +380,7 @@ of that image (anything else: 404); `PUT` / `DELETE
 /patients/images/:id/review/resolution` (`dashboard:admin`);
 `POST /patients/:patientId/series/:seriesId/review/finish` (any reviewer:
 completes images without votes, active resolution or completion as NORMAL;
-broken images are skipped; see below; the legacy
-`POST /patients/clusters/:id/review/finish` still works); `GET /review/freeze`, `POST /review/freeze` `{reason}` and
+broken images are skipped; see below); `GET /review/freeze`, `POST /review/freeze` `{reason}` and
 `POST /review/unfreeze` (`dashboard:admin`).
 
 ### Rollout: `audit review-state` / `backfill review-state`
@@ -392,7 +394,7 @@ three, so it cannot run on half-migrated data.
 
 - `node migrate.js audit review-state [--report <file.json>]` (read-only):
   images without a derived state, ambiguous legacy resolutions (image id,
-  cluster id, which legacy fields are set, vote counts), derived images whose
+  series id, which legacy fields are set, vote counts), derived images whose
   caches differ from a recomputation, votes without history. Exit code 1
   while anything is not derived or a cache mismatches.
 - `node migrate.js backfill review-state [--apply] [--report <file.json>]`:
@@ -438,15 +440,14 @@ Production order:
 ## Study/Series navigation (API)
 
 The GUI browses Patient → Study → Series (`hierarchy.api.routes.ts`,
-`services/hierarchy.service.ts`); the cluster routes are legacy (kept
-working for rollback, no longer used by the GUI). All routes need
+`services/hierarchy.service.ts`). All routes need
 authentication; every lookup checks Series → Study → Patient (not trashed):
 a foreign, unknown or trashed one is the same 404.
 
 | Route | Returns |
 | --- | --- |
-| `GET /patients/:patientId/studies` | studies (date, time, series/image counts, review summary) and `unassigned: {images, broken}` (images with `seriesId IS NULL`) |
-| `GET /patients/:patientId/studies/:studyId/series` | the study and its series (number, description, modality, image type, kernel, slice thickness, counts, review summary, `orientationCount`, `multiFrameImageCount`) |
+| `GET /patients/:patientId/studies` | studies (date, time, series/image counts, review summary) |
+| `GET /patients/:patientId/studies/:studyId/series` | the study and its series (number, description, modality, image type, kernel, slice thickness, counts, review summary, `orientationCount`, `multiFrameImageCount`, `geometryCount`, `geometryIncompleteCount`, `reviewable`) |
 | `GET /patients/:patientId/series/:seriesId` | the series and its images in display order: `fileUrl` (the authenticated file route), `instanceNumber`, `orientationGroup`, `isBroken`, `brokenReason`, `reviewState`, `reviewStateSource`, the compatibility caches, votes |
 | `POST /patients/:patientId/series/:seriesId/review/finish` `{presentedImageIds}` | Finish review of the series |
 
@@ -460,25 +461,95 @@ a foreign, unknown or trashed one is the same 404.
   ImagePositionPatient · normal, then instance number, then id; broken
   images last.
 - A series is viewable and can be finished as a whole only when it is one
-  simple stack: `orientationCount ≤ 1` and no multi-frame image (non-broken
-  images). Otherwise the GUI shows a warning and no viewer, and the server
-  refuses Finish review with 409 `SERIES_NOT_FULLY_REVIEWABLE`. It also
+  complete simple stack (non-broken images): `orientationCount == 1 &&
+  multiFrameImageCount == 0 && geometryCount == 1 && geometryIncompleteCount
+  == 0` (geometry = rows, columns, pixel spacing to 1e-6 mm; incomplete = one
+  of them or IOP / IPP missing). The server derives `reviewable` with the
+  same rule (`isSimpleStack`) for the API, and the GUI only displays it;
+  otherwise the GUI shows a warning and no viewer, and the server refuses
+  Finish review with 409 `SERIES_NOT_FULLY_REVIEWABLE`. It also
   refuses with 409 `SERIES_CHANGED` unless `presentedImageIds` are exactly
   the series' non-broken images (images added since the viewer loaded are
   never completed unseen); the GUI enables the button only once the viewer
   loaded every image without errors.
-- Series completions record `scopeSeriesId`; completions from before
-  migration `202609302100-review-completion-series-scope` (and the legacy
-  cluster endpoint) keep `scopeClusterId`. Exactly one is set. That
-  migration's `down` refuses once series-scoped completions exist.
-- Images without a series are not shown in the new navigation: production
-  requires `backfill study-series` (see above); the remaining ones are only
-  counted (`unassigned`) and stay reachable through the legacy cluster
-  route.
+- Series completions record `scopeSeriesId`; completions made per cluster
+  (before `202609302100-review-completion-series-scope`, or by the removed
+  cluster endpoint) keep their value in `legacyScopeClusterId`. Exactly one
+  is set; no code writes the legacy column.
+- `POST /llm/check-items` `{patientId, seriesId, imageIds}`: every image must
+  belong to that Series of that (active) patient, else 404 (the same for
+  unknown and foreign ids); only then are the files sent to the LLM service.
 - Read-only readiness check (counts only: series with several orientations
   or multi-frame images, images without a series, broken images):
   `db/queries/series-readiness.sql` (e.g. `psql "<connection>" -f
   series-readiness.sql`). Run it only where you are allowed to query.
+
+## Legacy clusters removed
+
+Migration `202610010000-drop-patient-image-clusters` (**irreversible**)
+removed the heuristic image clusters:
+
+- dropped `patient_images_clusters`, `patients_images."clusterId"` and
+  `patients_images.details` (the cluster heuristic's geometry and outliers,
+  including temporary extraction paths);
+- `patients_images."seriesId"` NOT NULL, ON DELETE CASCADE;
+- `patient_image_review_completions."scopeClusterId"` renamed to
+  `legacyScopeClusterId` (values kept; not mapped to Series: a cluster could
+  hold several Series).
+
+**Preflight** (inside the migration, table locked; it refuses without
+changes): every image must have a Series (`seriesId`) and verified metadata
+(`fileSha256`), broken images included. It lists the counts and up to 50
+image UUIDs. Nothing deletes such images automatically: they need a
+decision. `node migrate.js audit cluster-removal [--report <file.json>]`
+(read-only; counts and image UUIDs only) reports the same checks (exit 0
+when ready).
+
+**Removed**: the cluster API (`GET /patients/slug/:slug/clusters/cluster/:n`,
+`PATCH` / `DELETE /patients/clusters/:id`, `POST /patients/clusters/:id/review/finish`)
+answers **410 Gone** `{code: 'CLUSTERS_REMOVED'}` with guidance (no redirect:
+a cluster could hold several Series); `GET /patients` returns
+`studyCount` / `imageCount` instead of clusters; the GUI cluster page,
+`inReview` switch and cluster deletion are gone (old bookmarks
+`/patients/:slug/:cluster` show a notice linking to the patient).
+
+**Import**: no grouping, no cluster; every image with valid pixel data and
+Study / Series UIDs is stored under its Series, whatever its geometry (the
+old heuristic silently dropped "geometry outliers"). New files go to
+`/uploads/<patientId>/<seriesId>/<imageId>.dcm` (database UUIDs only: no
+file name, no DICOM UID). Existing files are **not moved**: their `source`
+keeps the old `/uploads/<patientId>/<clusterId>/<name>` location. `source` is
+only a storage locator; ownership is always image -> Series -> Study ->
+Patient.
+
+**Maintenance commands**: `backfill dicom-metadata`, `backfill study-series`
+and `cleanup duplicate-sop` read the clusters; they work until the removal
+and refuse after it (`This command is obsolete since migration
+202610010000-...`): the preflight guarantees they have nothing left to do.
+`audit` / `backfill review-state` keep working.
+
+**Legacy artifacts that remain (historical, no active use)**: stored file
+paths naming an old cluster folder, `legacyScopeClusterId` of old
+completions, and `slicePosition` values computed along an old cluster normal.
+
+**Rollback**: `down` refuses (clusters cannot be reconstructed). Restore the
+pre-migration backup; files were not moved, so the previous build works on
+the restored database.
+
+Production order (the database must be at `202609302100`, i.e. PR6):
+
+1. Back up the database (`pg_dump -Fc ...`).
+2. Deploy without restarting, then
+   `node migrate.js up --to 202609302100-review-completion-series-scope`.
+3. If needed: `backfill dicom-metadata` and `backfill study-series`
+   (dry-run, review, `--apply`), see above.
+4. Read-only checks, reviewed before going on:
+   `psql ... -f db/queries/series-readiness.sql` and
+   `node migrate.js audit cluster-removal --report ~/cluster-removal.json`
+   (must say ready; otherwise stop and decide about the listed images).
+5. `node migrate.js up` (the irreversible removal), then
+   `node migrate.js status` (exit 0).
+6. Restart the backend.
 
 ## Commands
 
@@ -500,6 +571,7 @@ directory, and `apps/be/.env.local` when run through Nx).
 | `npm run be:backfill:study-series:apply` | `node migrate.js backfill study-series --apply` | Study/Series linking, write             |
 | `npm run be:cleanup:duplicate-sop` | `node migrate.js cleanup duplicate-sop` | duplicate SOP audit, dry-run                        |
 | `npm run be:cleanup:duplicate-sop:apply` | `node migrate.js cleanup duplicate-sop --apply` | clean SAFE_IDENTICAL duplicate groups   |
+| `npm run be:audit:cluster-removal` | `node migrate.js audit cluster-removal` | cluster removal readiness (read-only)                 |
 | `npm run be:audit:review-state` | `node migrate.js audit review-state` | review state verification (read-only)                      |
 | `npm run be:backfill:review-state` | `node migrate.js backfill review-state` | review state derivation, dry-run                    |
 | `npm run be:backfill:review-state:apply` | `node migrate.js backfill review-state --apply` | derive review states (legacy decisions: use `node migrate.js` directly) |

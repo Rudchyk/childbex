@@ -6,7 +6,9 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { guiRoutes } from '@libs/constants';
+import { LegacyClusterNotice } from '../LegacyClusterPage/LegacyClusterPage';
 import type { PatientStudiesResponse, StudySeriesResponse } from '@libs/schemas';
 import { StudySeriesList } from './StudyPage';
 import { PatientStudies } from '../PatientPage/PatientStudies';
@@ -35,7 +37,6 @@ describe('hierarchy navigation', () => {
       studies: [
         { id: STUDY, studyDate: '2026-01-02', studyTime: '101500', seriesCount: 2, imageCount: 4, review: summary },
       ],
-      unassigned: { images: 3, broken: 1 },
     };
     const { container } = render(
       <MemoryRouter>
@@ -45,8 +46,6 @@ describe('hierarchy navigation', () => {
     expect(screen.getByText('Study 2026-01-02 10:15')).toBeTruthy();
     expect(screen.getByText('2 series')).toBeTruthy();
     expect(screen.getByText('reviewed 2/3')).toBeTruthy();
-    // Unassigned images are counted, not hidden.
-    expect(screen.getByText(/not linked to a DICOM series/)).toBeTruthy();
     expect(links(container)).toEqual([`/patients/${PATIENT}/studies/${STUDY}`]);
   });
 
@@ -54,8 +53,8 @@ describe('hierarchy navigation', () => {
     const data: StudySeriesResponse = {
       study: { id: STUDY, studyDate: null, studyTime: null, seriesCount: 2, imageCount: 4, review: summary },
       series: [
-        { id: 's1', studyId: STUDY, seriesNumber: 1, seriesDescription: 'LOCALIZER', modality: 'CT', imageType: null, convolutionKernel: null, sliceThickness: null, imageCount: 3, review: summary, orientationCount: 3, multiFrameImageCount: 0 },
-        { id: 's2', studyId: STUDY, seriesNumber: 2, seriesDescription: 'AXIAL', modality: 'CT', imageType: null, convolutionKernel: null, sliceThickness: null, imageCount: 1, review: summary, orientationCount: 1, multiFrameImageCount: 0 },
+        { id: 's1', studyId: STUDY, seriesNumber: 1, seriesDescription: 'LOCALIZER', modality: 'CT', imageType: null, convolutionKernel: null, sliceThickness: null, imageCount: 3, review: summary, orientationCount: 3, multiFrameImageCount: 0, geometryCount: 1, geometryIncompleteCount: 0, reviewable: false },
+        { id: 's2', studyId: STUDY, seriesNumber: 2, seriesDescription: 'AXIAL', modality: 'CT', imageType: null, convolutionKernel: null, sliceThickness: null, imageCount: 1, review: summary, orientationCount: 1, multiFrameImageCount: 0, geometryCount: 1, geometryIncompleteCount: 0, reviewable: true },
       ],
     };
     const { container } = render(
@@ -72,14 +71,26 @@ describe('hierarchy navigation', () => {
     ]);
   });
 
-  it('no page outside the legacy cluster page uses the cluster routes or queries', () => {
+  it('old cluster bookmarks get a notice linking to the patient (no guessed Series)', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/patients/synthetic/0']}>
+        <Routes>
+          <Route path={guiRoutes.legacyClusterPage} element={<LegacyClusterNotice />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    expect(screen.getByText('This page no longer exists')).toBeTruthy();
+    expect(links(container)).toEqual(['/patients/synthetic']);
+  });
+
+  it('no page uses cluster routes, queries, the inReview switch or cluster deletion', () => {
     const pages = path.join(__dirname, '..');
     const files: string[] = [];
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {
         const full = path.join(dir, name);
         if (statSync(full).isDirectory()) {
-          if (name !== 'PatientImagesClusterPage') walk(full);
+          walk(full);
         } else if (/\.tsx?$/.test(name) && !/\.spec\.tsx?$/.test(name)) {
           files.push(full);
         }
@@ -87,7 +98,7 @@ describe('hierarchy navigation', () => {
     };
     walk(pages);
     const offenders = files.filter((file) =>
-      /patientImagesCluster\b|patientSlugImagesClustersCluster|useGetPatientImagesClusterQuery|useDeletePatientImagesClusterMutation|useUpdatePatientImagesClusterMutation/.test(
+      /patientImagesCluster|ImagesCluster|clusterId|inReview|\/clusters\//i.test(
         readFileSync(file, 'utf8')
       )
     );

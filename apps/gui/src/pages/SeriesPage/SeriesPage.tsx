@@ -8,11 +8,7 @@ import { PageTmpl } from '../../templates';
 import { WithLoader } from '../../hoc';
 import { useGetPatientSeriesQuery } from '../../store/apis';
 import { ReviewSummaryChips } from '../hierarchy/ReviewSummaryChips';
-import {
-  formatStudyDateTime,
-  isSimpleStackSeries,
-  seriesTitle,
-} from '../hierarchy/hierarchy.utils';
+import { formatStudyDateTime, seriesTitle } from '../hierarchy/hierarchy.utils';
 import { SeriesImages } from './SeriesImages';
 
 const BrokenImages: FC<{ data: PatientSeriesResponse }> = ({ data }) => {
@@ -35,7 +31,8 @@ const BrokenImages: FC<{ data: PatientSeriesResponse }> = ({ data }) => {
 
 export const SeriesContent = WithLoader<PatientSeriesResponse>(({ data }) => {
   const { series } = data;
-  const simple = isSimpleStackSeries(series);
+  // Server-derived: the same rule as Series Finish review.
+  const simple = series.reviewable;
   return (
     <Stack spacing={2}>
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
@@ -50,12 +47,16 @@ export const SeriesContent = WithLoader<PatientSeriesResponse>(({ data }) => {
         <Alert severity="error">
           <AlertTitle>This series cannot be reviewed as a whole yet</AlertTitle>
           It has {series.orientationCount}{' '}
-          {pluralize('orientation', series.orientationCount)} and{' '}
-          {series.multiFrameImageCount} multi-frame{' '}
+          {pluralize('orientation', series.orientationCount)},{' '}
+          {series.geometryCount} image{' '}
+          {pluralize('geometry', series.geometryCount)},{' '}
+          {series.geometryIncompleteCount} image(s) with incomplete geometry
+          and {series.multiFrameImageCount} multi-frame{' '}
           {pluralize('image', series.multiFrameImageCount)}. The viewer shows
-          one stack of single-frame images only, so it would not show the
-          complete series: it is not displayed, and Finish review is not
-          available. Its images still count in the review summaries.
+          one stack of single-frame images of one orientation and geometry
+          only, so it would not show the complete series: it is not displayed,
+          and Finish review is not available. Its images still count in the
+          review summaries.
         </Alert>
       )}
     </Stack>

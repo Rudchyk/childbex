@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { clusterByOrientation } from '../dicom.service';
+import { parseArchiveFiles } from '../dicom.service';
 import {
   buildTar,
   buildZip,
@@ -174,12 +174,10 @@ describe('DICOM discovery', () => {
     const candidates = await listCandidateFiles(dest);
     expect(basenames(candidates)).toEqual(basenames(result.files));
 
-    const { clusters, broken, skipped } =
-      await clusterByOrientation(candidates);
-    expect(clusters.map((c) => [c.group, c.files.length]).sort()).toEqual([
-      ['SYNTHETIC AXIAL', 2],
-      ['SYNTHETIC RAW', 1],
-    ]);
+    const { images, broken, skipped } = await parseArchiveFiles(candidates);
+    expect(
+      images.map((image) => image.metadata.image.seriesDescription).sort()
+    ).toEqual(['SYNTHETIC AXIAL', 'SYNTHETIC AXIAL', 'SYNTHETIC RAW']);
     expect(broken).toHaveLength(0);
     // Unrelated files (incl. the nested archive, which is not extracted) are skipped.
     expect(basenames(skipped.map((s) => s.file))).toEqual([
@@ -205,10 +203,10 @@ describe('DICOM discovery', () => {
       ]),
       'study.tar'
     );
-    const { clusters, broken } = await clusterByOrientation(
+    const { images, broken } = await parseArchiveFiles(
       await listCandidateFiles(dest)
     );
-    expect(clusters).toHaveLength(1);
+    expect(images).toHaveLength(1);
     expect(broken).toHaveLength(1);
   });
 });

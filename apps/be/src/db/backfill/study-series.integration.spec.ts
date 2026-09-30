@@ -90,11 +90,18 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
     hierarchy = require('../../services/dicom-hierarchy.service');
   });
 
+  /** The last migration before the clusters were removed. */
+  const PRE_CLUSTER_REMOVAL = '202609302100-review-completion-series-scope';
+  const upToPreClusterRemoval = () =>
+    migrations.slice(0, migrations.findIndex(({ name }) => name === PRE_CLUSTER_REMOVAL) + 1);
+
   beforeEach(async () => {
     await sequelize.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
     await rm(uploadRoot, { recursive: true, force: true });
     await mkdir(uploadRoot, { recursive: true });
-    await migrator.migrateUp(sequelize);
+    // The command works on the schema before the cluster removal (it refuses
+    // after it: cluster-removal.integration.spec.ts).
+    await migrator.migrateUp(sequelize, undefined, { to: PRE_CLUSTER_REMOVAL });
   });
 
   afterAll(async () => {
@@ -210,7 +217,7 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
 
     it('can be rolled back and applied again', async () => {
       // Later migrations first, then this one.
-      const later = migrations.length - upToStudySeries().length;
+      const later = upToPreClusterRemoval().length - upToStudySeries().length;
       for (let i = 0; i < later; i++) await migrator.migrateDown(sequelize);
 
       const reverted = await migrator.migrateDown(sequelize, upToStudySeries());
@@ -220,14 +227,20 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
       expect(columns.studies).toBeUndefined();
       expect(columns.series).toBeUndefined();
       expect(columns.patients_images).not.toHaveProperty('seriesId');
-      expect(await migrator.migrateUp(sequelize)).toHaveLength(later + 1);
+      expect(
+        await migrator.migrateUp(sequelize, undefined, { to: PRE_CLUSTER_REMOVAL })
+      ).toHaveLength(later + 1);
     });
   });
 
   // --- New imports -------------------------------------------------------------
 
   describe('import', () => {
-    beforeEach(() => addPatient(P1));
+    // Imports use the current schema (no clusters).
+    beforeEach(async () => {
+      await migrator.migrateUp(sequelize);
+      await addPatient(P1);
+    });
 
     it('creates one study and one series for one UID each, and links every image', async () => {
       const result = await importSlices(P1, [{ instance: 1 }, { instance: 2 }]);
@@ -257,9 +270,8 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
         },
       ]);
       expect(await count('patients_images', `"seriesId" = '${series[0].id}'`)).toBe(2);
-      // The clusters work as before.
-      expect(await count('patient_images_clusters')).toBe(1);
-      expect(await count('patients_images', '"clusterId" IS NOT NULL')).toBe(2);
+      // No image without its series.
+      expect(await count('patients_images', '"seriesId" IS NULL')).toBe(0);
     });
 
     it('creates one series per Series UID under one study', async () => {
@@ -304,7 +316,6 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
         studies: await count('studies'),
         series: await count('series'),
         images: await count('patients_images'),
-        clusters: await count('patient_images_clusters'),
       };
 
       // Same Study UID, another patient, another (new) series.
@@ -317,7 +328,6 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
         studies: await count('studies'),
         series: await count('series'),
         images: await count('patients_images'),
-        clusters: await count('patient_images_clusters'),
       }).toEqual(before);
       const [study] = await sequelize.query<{ patientId: string }>(
         `SELECT "patientId" FROM studies`,
@@ -350,7 +360,7 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
 
       expect(await count('studies')).toBe(0);
       expect(await count('series')).toBe(0);
-      expect(await count('patient_images_clusters')).toBe(0);
+      expect(await count('patients_images')).toBe(0);
     });
 
     it('creates the hierarchy once for concurrent imports of one study', async () => {
@@ -480,6 +490,27 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
         }
       );
     };
+    /**
+     * What an import left before the clusters were removed: the study and
+     * series of the synthetic UIDs and one linked image (instance 9).
+     */
+    const addImportedStudy = async () => {
+      await sequelize.query(
+        `INSERT INTO studies (id, "patientId", "studyInstanceUid", "createdAt", "updatedAt")
+         VALUES ('77777777-7777-4777-8777-000000000001', $1, $2, now(), now())`,
+        { bind: [P1, SYNTHETIC_STUDY_UID] }
+      );
+      await sequelize.query(
+        `INSERT INTO series (id, "studyId", "seriesInstanceUid", "createdAt", "updatedAt")
+         VALUES ('77777777-7777-4777-8777-000000000002', '77777777-7777-4777-8777-000000000001', $1, now(), now())`,
+        { bind: [SYNTHETIC_SERIES_UID] }
+      );
+      await addImage({ n: 9, file: false });
+      await sequelize.query(
+        `UPDATE patients_images SET "seriesId" = '77777777-7777-4777-8777-000000000002' WHERE id = $1`,
+        { bind: [imageId(9)] }
+      );
+    };
     const addCluster = (id: string, patientId: string) =>
       sequelize.query(
         `INSERT INTO patient_images_clusters (id, name, cluster, "patientId", "createdAt", "updatedAt")
@@ -587,7 +618,7 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
 
     it('does not fix a series UID found under two studies, nor one owned by an existing study', async () => {
       // An imported study already owns the default series.
-      await importSlices(P1, [{ instance: 9 }]);
+      await addImportedStudy();
       await addImage({ n: 1, study: STUDY_B });
 
       const report = await run({ apply: true });
@@ -598,7 +629,7 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
     });
 
     it('reuses a study created by an import for the same patient', async () => {
-      await importSlices(P1, [{ instance: 9 }]);
+      await addImportedStudy();
       await addImage({ n: 1 });
 
       const report = await run({ apply: true });
@@ -639,7 +670,7 @@ describeWithDatabase('DICOM Study / Series (PostgreSQL)', () => {
     });
 
     it('refuses to run before the Study/Series migration is applied', async () => {
-      const toRevert = migrations.length - upToStudySeries().length + 1;
+      const toRevert = upToPreClusterRemoval().length - upToStudySeries().length + 1;
       for (let i = 0; i < toRevert; i++) await migrator.migrateDown(sequelize);
 
       await expect(run({ apply: true })).rejects.toThrow(

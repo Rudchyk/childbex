@@ -9,9 +9,6 @@ import {
   TrashedPatientsActionParam,
   SlugProperty,
   GetPatientResponse,
-  UpdatePatientAssetRequestBody,
-  GetPatientClusterResponse,
-  GetPatientClusterParams,
   PatientImageReviewVoteRequestBody,
   PatientImageReviewVoteParams,
   LLMServiceHealthResponse,
@@ -122,38 +119,6 @@ export const apiStore = createApi({
       }),
       providesTags: [TagTypesEnum.PATIENT],
     }),
-    updatePatientImagesCluster: builder.mutation<
-      void,
-      IDProperty & UpdatePatientAssetRequestBody
-    >({
-      query: ({ id, ...body }) => ({
-        url: generatePath(apiRoutes.patientImagesCluster, { id }),
-        body,
-        method: 'PATCH',
-      }),
-      invalidatesTags: [TagTypesEnum.PATIENT],
-    }),
-    getPatientImagesCluster: builder.query<
-      GetPatientClusterResponse,
-      GetPatientClusterParams
-    >({
-      query: ({ slug, cluster }) => ({
-        url: generatePath(apiRoutes.patientSlugImagesClustersCluster, {
-          slug,
-          cluster,
-        }),
-      }),
-      providesTags: [TagTypesEnum.PATIENT],
-    }),
-    deletePatientImagesCluster: builder.mutation<void, IDProperty>({
-      query: ({ id }) => ({
-        url: generatePath(apiRoutes.patientImagesCluster, {
-          id,
-        }),
-        method: 'DELETE',
-      }),
-      invalidatesTags: [TagTypesEnum.PATIENT],
-    }),
     addPatientImageReviewVote: builder.mutation<
       void,
       IDProperty & PatientImageReviewVoteRequestBody
@@ -256,11 +221,8 @@ export const {
   useDeleteOrRestoreTrashedPatientMutation,
   useGetPatientQuery,
   useGetPatientBySlugQuery,
-  useUpdatePatientImagesClusterMutation,
-  useGetPatientImagesClusterQuery,
   useAddPatientImageReviewVoteMutation,
   useUpdatePatientImageReviewVoteMutation,
-  useDeletePatientImagesClusterMutation,
   useGetPatientStudiesQuery,
   useGetStudySeriesQuery,
   useGetPatientSeriesQuery,
