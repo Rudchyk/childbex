@@ -1,11 +1,18 @@
 import { DefaultLayout } from '../../layouts';
 import { useGetPatientBySlugQuery } from '../../store/apis';
 import { PageTmpl } from '../../templates';
-import { PatientImagesClusters } from './PatientImagesClusters';
+import { PatientStudies } from './PatientStudies';
 import { useParams } from 'react-router-dom';
 import { SlugProperty } from '@libs/schemas';
 import { PageTitle } from '../../components';
 import { AddPatientImagesCluster } from './AddPatientImagesCluster/AddPatientImagesCluster';
+import { WithLoader } from '../../hoc';
+
+// The patient's (legacy) clusters in this response are not used: the page
+// lists DICOM Studies.
+const PatientContent = WithLoader<{ id: string }>(({ data }) => (
+  <PatientStudies patientId={data.id} />
+));
 
 export const Component = () => {
   const { slug = '' } = useParams<SlugProperty>();
@@ -24,8 +31,7 @@ export const Component = () => {
           </PageTitle>
         }
       >
-        <PatientImagesClusters
-          slug={slug}
+        <PatientContent
           data={data}
           isLoading={isLoading}
           isError={isError}

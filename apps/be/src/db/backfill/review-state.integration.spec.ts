@@ -403,7 +403,8 @@ describeWithDatabase('review-state rollout (PostgreSQL)', () => {
     expect(await images()).toEqual(after);
     expect(await resolutions()).toHaveLength(2);
 
-    expect((await migrator.migrateUp(sequelize)).map(({ name }) => name)).toEqual([REVIEW_REQUIRED]);
+    // (Later migrations follow it.)
+    expect((await migrator.migrateUp(sequelize)).map(({ name }) => name)[0]).toBe(REVIEW_REQUIRED);
     await expect(migrator.assertSchemaUpToDate(sequelize)).resolves.toBeTruthy();
 
     const audit = await backfill.runReviewStateAudit(sequelize);

@@ -44,6 +44,12 @@ interface DicomViewerProps {
   onCurrentItemChange?: (source: string) => void;
   toolbar?: ReactElement | ReactNode;
   sidebarItemIcon?: (source: string) => ReactElement;
+  /**
+   * Called when loading `list` ended or failed: the slices in the loaded
+   * volume and the load errors so far (to tell whether everything in
+   * `list` is actually shown).
+   */
+  onLoadResult?: (result: { sliceCount: number; errorCount: number }) => void;
 }
 
 /**
@@ -60,6 +66,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   onCurrentItemChange,
   toolbar,
   sidebarItemIcon,
+  onLoadResult,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<App>(null);
@@ -316,6 +323,15 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       setItems(_loadedItems);
     }
   }, [isDataLoaded]);
+
+  useEffect(() => {
+    if (onLoadResult && (isDataLoaded || loadErrorEvents.length)) {
+      onLoadResult({
+        sliceCount: isDataLoaded ? sliceCount : 0,
+        errorCount: loadErrorEvents.length,
+      });
+    }
+  }, [isDataLoaded, sliceCount, loadErrorEvents.length, onLoadResult]);
 
   useEffect(() => {
     if (currentImageId && onCurrentItemChange) {

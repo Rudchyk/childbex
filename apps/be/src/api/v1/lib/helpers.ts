@@ -94,6 +94,20 @@ export const getReviewHttpError = (error: ReviewError) =>
     { message: error.message, code: error.code }
   );
 
+/**
+ * The JSON request body, or null when there is none (or it is `{}`, or it
+ * is not JSON). An empty body is never read: behind express.json() reading
+ * it would wait forever.
+ */
+export const readJsonBody = async (request: {
+  headers: Headers;
+  json(): Promise<unknown>;
+}): Promise<unknown> => {
+  const contentLength = request.headers.get('content-length');
+  if (!contentLength || +contentLength <= 2) return null;
+  return request.json().catch(() => null);
+};
+
 export const getInvalidRequestError = (msg?: string) =>
   new HTTPError(
     400,

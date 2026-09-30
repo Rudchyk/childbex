@@ -375,9 +375,10 @@ API: `POST /patients/images/:id/review-votes` casts or changes the caller's
 own vote; `PATCH .../review-votes/:voteId` changes only the caller's own vote
 of that image (anything else: 404); `PUT` / `DELETE
 /patients/images/:id/review/resolution` (`dashboard:admin`);
-`POST /patients/clusters/:id/review/finish` (any reviewer: completes images
-without votes, active resolution or completion as NORMAL; broken images are
-skipped); `GET /review/freeze`, `POST /review/freeze` `{reason}` and
+`POST /patients/:patientId/series/:seriesId/review/finish` (any reviewer:
+completes images without votes, active resolution or completion as NORMAL;
+broken images are skipped; see below; the legacy
+`POST /patients/clusters/:id/review/finish` still works); `GET /review/freeze`, `POST /review/freeze` `{reason}` and
 `POST /review/unfreeze` (`dashboard:admin`).
 
 ### Rollout: `audit review-state` / `backfill review-state`
@@ -433,6 +434,51 @@ Production order:
 8. `node migrate.js up` (applies `202609302020-review-state-required`), then
    `node migrate.js status` (exit 0).
 9. Restart the backend.
+
+## Study/Series navigation (API)
+
+The GUI browses Patient → Study → Series (`hierarchy.api.routes.ts`,
+`services/hierarchy.service.ts`); the cluster routes are legacy (kept
+working for rollback, no longer used by the GUI). All routes need
+authentication; every lookup checks Series → Study → Patient (not trashed):
+a foreign, unknown or trashed one is the same 404.
+
+| Route | Returns |
+| --- | --- |
+| `GET /patients/:patientId/studies` | studies (date, time, series/image counts, review summary) and `unassigned: {images, broken}` (images with `seriesId IS NULL`) |
+| `GET /patients/:patientId/studies/:studyId/series` | the study and its series (number, description, modality, image type, kernel, slice thickness, counts, review summary, `orientationCount`, `multiFrameImageCount`) |
+| `GET /patients/:patientId/series/:seriesId` | the series and its images in display order: `fileUrl` (the authenticated file route), `instanceNumber`, `orientationGroup`, `isBroken`, `brokenReason`, `reviewState`, `reviewStateSource`, the compatibility caches, votes |
+| `POST /patients/:patientId/series/:seriesId/review/finish` `{presentedImageIds}` | Finish review of the series |
+
+- No DICOM UIDs, hashes, stored paths (`source`) or file names are returned.
+- Review summaries (`total`, `broken`, `notReviewed`, `normal`, `abnormal`,
+  `uncertain`, `conflicted`) are counted in SQL from `reviewState`; the state
+  counts are of non-broken images, so `total = broken + states`.
+- Image order (`services/series-stack.ts`): non-broken images by orientation
+  group (parallel slice normals, |dot| ≥ 1 − 1e-3; groups in the order of
+  their first image by instance number), within a group by
+  ImagePositionPatient · normal, then instance number, then id; broken
+  images last.
+- A series is viewable and can be finished as a whole only when it is one
+  simple stack: `orientationCount ≤ 1` and no multi-frame image (non-broken
+  images). Otherwise the GUI shows a warning and no viewer, and the server
+  refuses Finish review with 409 `SERIES_NOT_FULLY_REVIEWABLE`. It also
+  refuses with 409 `SERIES_CHANGED` unless `presentedImageIds` are exactly
+  the series' non-broken images (images added since the viewer loaded are
+  never completed unseen); the GUI enables the button only once the viewer
+  loaded every image without errors.
+- Series completions record `scopeSeriesId`; completions from before
+  migration `202609302100-review-completion-series-scope` (and the legacy
+  cluster endpoint) keep `scopeClusterId`. Exactly one is set. That
+  migration's `down` refuses once series-scoped completions exist.
+- Images without a series are not shown in the new navigation: production
+  requires `backfill study-series` (see above); the remaining ones are only
+  counted (`unassigned`) and stay reachable through the legacy cluster
+  route.
+- Read-only readiness check (counts only: series with several orientations
+  or multi-frame images, images without a series, broken images):
+  `db/queries/series-readiness.sql` (e.g. `psql "<connection>" -f
+  series-readiness.sql`). Run it only where you are allowed to query.
 
 ## Commands
 

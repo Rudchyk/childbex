@@ -19,6 +19,14 @@ import {
   LLMServiceCheckItemsRequestBody,
   LLMServiceInferenceResponse,
   LLMServiceInferenceRequestBody,
+  PatientStudiesResponse,
+  PatientStudiesParams,
+  StudySeriesResponse,
+  PatientStudyParams,
+  PatientSeriesResponse,
+  PatientSeriesParams,
+  FinishReviewResponse,
+  FinishSeriesReviewRequestBody,
 } from '@libs/schemas';
 import { generatePath } from 'react-router-dom';
 import { createReauthBaseQuery, keycloakRefresher } from '../../../auth/reauth';
@@ -173,6 +181,40 @@ export const apiStore = createApi({
       }),
       invalidatesTags: [TagTypesEnum.PATIENT],
     }),
+    // Patient -> Study -> Series (review data changes invalidate PATIENT).
+    getPatientStudies: builder.query<PatientStudiesResponse, PatientStudiesParams>(
+      {
+        query: ({ patientId }) =>
+          generatePath(apiRoutes.patientStudies, { patientId }),
+        providesTags: [TagTypesEnum.PATIENT],
+      }
+    ),
+    getStudySeries: builder.query<StudySeriesResponse, PatientStudyParams>({
+      query: ({ patientId, studyId }) =>
+        generatePath(apiRoutes.patientStudySeries, { patientId, studyId }),
+      providesTags: [TagTypesEnum.PATIENT],
+    }),
+    getPatientSeries: builder.query<PatientSeriesResponse, PatientSeriesParams>(
+      {
+        query: ({ patientId, seriesId }) =>
+          generatePath(apiRoutes.patientSeries, { patientId, seriesId }),
+        providesTags: [TagTypesEnum.PATIENT],
+      }
+    ),
+    finishSeriesReview: builder.mutation<
+      FinishReviewResponse,
+      PatientSeriesParams & FinishSeriesReviewRequestBody
+    >({
+      query: ({ patientId, seriesId, presentedImageIds }) => ({
+        url: generatePath(apiRoutes.patientSeriesFinishReview, {
+          patientId,
+          seriesId,
+        }),
+        method: 'POST',
+        body: { presentedImageIds },
+      }),
+      invalidatesTags: [TagTypesEnum.PATIENT],
+    }),
     llmServiceHealth: builder.mutation<LLMServiceHealthResponse, void>({
       query: () => ({
         url: apiRoutes.llmServiceHealth,
@@ -219,6 +261,10 @@ export const {
   useAddPatientImageReviewVoteMutation,
   useUpdatePatientImageReviewVoteMutation,
   useDeletePatientImagesClusterMutation,
+  useGetPatientStudiesQuery,
+  useGetStudySeriesQuery,
+  useGetPatientSeriesQuery,
+  useFinishSeriesReviewMutation,
   useLlmServiceHealthMutation,
   useLlmServiceCheckItemsMutation,
   useLlmServiceInferenceMutation,

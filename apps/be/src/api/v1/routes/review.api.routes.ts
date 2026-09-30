@@ -7,7 +7,7 @@ import {
   Value,
 } from '@libs/schemas';
 import { defaultResponses, unauthorizedResponse } from '../schemas/schemas';
-import { getInvalidRequestError } from '../lib/helpers';
+import { getInvalidRequestError, readJsonBody } from '../lib/helpers';
 import { getKeycloakSecurity } from '../lib/security.service';
 import { Tags } from '../lib/tags.service';
 import type { Ctx } from '../lib/types';
@@ -59,7 +59,7 @@ router
     },
     async handler(request, ctx) {
       const admin = getReviewer(ctx as Ctx);
-      const body = await request.json().catch(() => null);
+      const body = await readJsonBody(request);
       if (!Value.Check(ReviewFreezeRequestBodySchema, body)) {
         throw getInvalidRequestError();
       }

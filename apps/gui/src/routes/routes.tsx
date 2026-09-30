@@ -100,6 +100,17 @@ export default createBrowserRouter([
             ...defaultOptions,
           },
           {
+            path: guiRoutes.patientStudy,
+            lazy: () => import('../pages/StudyPage/StudyPage'),
+            ...defaultOptions,
+          },
+          {
+            path: guiRoutes.patientSeries,
+            lazy: () => import('../pages/SeriesPage/SeriesPage'),
+            ...defaultOptions,
+          },
+          {
+            // Legacy cluster page: still routable (old links), never linked.
             path: guiRoutes.patientImagesCluster,
             lazy: () =>
               import(

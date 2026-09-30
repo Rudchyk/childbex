@@ -22,17 +22,28 @@ const patients = {
   patient: '/patients/:id',
   patientSlug: '/patients/slug/:slug',
   patientUploadSessions: '/patients/:id/upload-sessions',
+  /** Legacy (cluster-based; the GUI uses the Study/Series routes). */
   patientImagesCluster: '/patients/clusters/:id',
+  /** Legacy (cluster-based; the GUI uses the Study/Series routes). */
   patientSlugImagesClustersCluster:
     '/patients/slug/:slug/clusters/cluster/:cluster',
   /** DICOM file of a patient image (authenticated; `id` is the patient id). */
   patientImageFile: '/patients/:id/images/:imageId/file',
   /** Admin resolution of an image (PUT / DELETE). */
   patientImageReviewResolution: '/patients/images/:id/review/resolution',
-  /** Finish review of a cluster (completes untouched images as NORMAL). */
+  /** Legacy Finish review of a cluster (the GUI uses the Series route). */
   patientImagesClusterFinishReview: '/patients/clusters/:id/review/finish',
   patientImagesReviewsVotes: '/patients/images/:id/review-votes',
   patientImageReviewVote: '/patients/images/:id/review-votes/:voteId',
+};
+
+/** Patient -> Study -> Series (the GUI's hierarchy; ids, never DICOM UIDs). */
+const hierarchy = {
+  patientStudies: '/patients/:patientId/studies',
+  patientStudySeries: '/patients/:patientId/studies/:studyId/series',
+  patientSeries: '/patients/:patientId/series/:seriesId',
+  /** Finish review of a Series (completes untouched images as NORMAL). */
+  patientSeriesFinishReview: '/patients/:patientId/series/:seriesId/review/finish',
 };
 
 const review = {
@@ -51,6 +62,7 @@ const uploadSessions = {
 export const apiRoutes = {
   ...security,
   ...patients,
+  ...hierarchy,
   ...review,
   ...uploadSessions,
   ...llmService,
@@ -73,5 +85,8 @@ export const guiRoutes = {
   dwv: '/dwv',
   patients: '/patients',
   patient: '/patients/:slug',
+  /** Legacy cluster page (still routable; no longer linked). */
   patientImagesCluster: '/patients/:slug/:cluster',
+  patientStudy: '/patients/:patientId/studies/:studyId',
+  patientSeries: '/patients/:patientId/studies/:studyId/series/:seriesId',
 };

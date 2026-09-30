@@ -31,6 +31,13 @@ import { PatientImageReviewVoteEvent } from '../db/models/PatientImageReviewVote
 import { PatientImageReviewResolution } from '../db/models/PatientImageReviewResolution.model';
 import { PatientImageReviewCompletion } from '../db/models/PatientImageReviewCompletion.model';
 import { ReviewFreeze } from '../db/models/ReviewFreeze.model';
+import {
+  findOwnedSeries,
+  stackImageColumns,
+  toStackImage,
+  type StackImageRow,
+} from './hierarchy.service';
+import { isSimpleStack, orderSeriesImages } from './series-stack';
 
 /** Advisory lock guarding review data against a freeze (shared/exclusive). */
 export const REVIEW_FREEZE_LOCK_KEY = 4_352_002;
@@ -47,6 +54,9 @@ export type ReviewErrorCode =
   | 'IMAGE_NOT_FOUND'
   | 'VOTE_NOT_FOUND'
   | 'CLUSTER_NOT_FOUND'
+  | 'SERIES_NOT_FOUND'
+  | 'SERIES_NOT_FULLY_REVIEWABLE'
+  | 'SERIES_CHANGED'
   | 'NO_ACTIVE_RESOLUTION'
   | 'NOTHING_TO_UPDATE';
 
@@ -57,6 +67,9 @@ const errorStatus: Record<ReviewErrorCode, 400 | 404 | 409> = {
   IMAGE_NOT_FOUND: 404,
   VOTE_NOT_FOUND: 404,
   CLUSTER_NOT_FOUND: 404,
+  SERIES_NOT_FOUND: 404,
+  SERIES_NOT_FULLY_REVIEWABLE: 409,
+  SERIES_CHANGED: 409,
   NO_ACTIVE_RESOLUTION: 404,
   NOTHING_TO_UPDATE: 400,
 };
@@ -399,10 +412,62 @@ export const removeResolution = (imageId: string, admin: Reviewer) =>
 // --- Finish review -----------------------------------------------------------
 
 /**
- * "Finish review" of a cluster: every non-broken image without votes, an
- * active resolution or an earlier completion is completed as NORMAL (one
- * completion record per image, sharing a run id). Images with any review
- * data are left as they are.
+ * Completes as NORMAL every non-broken image (rows locked by the caller)
+ * without votes, an active resolution or an earlier completion: one
+ * completion record per image, sharing a run id, with the given scope.
+ * Images with any review data are left as they are.
+ */
+const completeUntouchedImages = async (
+  images: readonly { id: string; isBrocken: boolean }[],
+  scope: { scopeClusterId: string } | { scopeSeriesId: string },
+  reviewer: Reviewer,
+  transaction: Transaction
+): Promise<FinishReviewResponse> => {
+  const reviewable = images.filter((image) => !image.isBrocken);
+  const ids = reviewable.map(({ id }) => id);
+  const reviewed = new Set<string>();
+  if (ids.length) {
+    const rows = await sequelize.query<{ id: string }>(
+      `SELECT "patientImageId" AS id FROM patient_image_review_votes
+         WHERE "patientImageId" IN (:ids)
+       UNION
+       SELECT "patientImageId" FROM patient_image_review_resolutions
+         WHERE "patientImageId" IN (:ids) AND "supersededAt" IS NULL
+       UNION
+       SELECT "patientImageId" FROM patient_image_review_completions
+         WHERE "patientImageId" IN (:ids)`,
+      { replacements: { ids }, type: QueryTypes.SELECT, transaction }
+    );
+    for (const { id } of rows) reviewed.add(id);
+  }
+  const toComplete = ids.filter((id) => !reviewed.has(id));
+  const runId = randomUUID();
+  const createdAt = new Date();
+  await PatientImageReviewCompletion.bulkCreate(
+    toComplete.map((patientImageId) => ({
+      patientImageId,
+      runId,
+      scopeClusterId: null,
+      scopeSeriesId: null,
+      ...scope,
+      completedById: reviewer.id,
+      completedByName: reviewer.name,
+      createdAt,
+    })),
+    { transaction }
+  );
+  await recomputeReviewCaches(toComplete, transaction);
+  return {
+    runId,
+    completed: toComplete.length,
+    alreadyReviewed: reviewed.size,
+    skippedBroken: images.length - reviewable.length,
+  };
+};
+
+/**
+ * Legacy "Finish review" of a cluster (kept for older clients during the
+ * move to Series; the GUI uses `finishSeriesReview`).
  */
 export const finishClusterReview = (
   clusterId: string,
@@ -424,44 +489,64 @@ export const finishClusterReview = (
        WHERE "clusterId" = :clusterId ORDER BY id FOR UPDATE`,
       { replacements: { clusterId }, type: QueryTypes.SELECT, transaction }
     );
-    const reviewable = images.filter((image) => !image.isBrocken);
-    const ids = reviewable.map(({ id }) => id);
-    const reviewed = new Set<string>();
-    if (ids.length) {
-      const rows = await sequelize.query<{ id: string }>(
-        `SELECT "patientImageId" AS id FROM patient_image_review_votes
-           WHERE "patientImageId" IN (:ids)
-         UNION
-         SELECT "patientImageId" FROM patient_image_review_resolutions
-           WHERE "patientImageId" IN (:ids) AND "supersededAt" IS NULL
-         UNION
-         SELECT "patientImageId" FROM patient_image_review_completions
-           WHERE "patientImageId" IN (:ids)`,
-        { replacements: { ids }, type: QueryTypes.SELECT, transaction }
-      );
-      for (const { id } of rows) reviewed.add(id);
-    }
-    const toComplete = ids.filter((id) => !reviewed.has(id));
-    const runId = randomUUID();
-    const createdAt = new Date();
-    await PatientImageReviewCompletion.bulkCreate(
-      toComplete.map((patientImageId) => ({
-        patientImageId,
-        runId,
-        scopeClusterId: clusterId,
-        completedById: reviewer.id,
-        completedByName: reviewer.name,
-        createdAt,
-      })),
-      { transaction }
+    return completeUntouchedImages(
+      images,
+      { scopeClusterId: clusterId },
+      reviewer,
+      transaction
     );
-    await recomputeReviewCaches(toComplete, transaction);
-    return {
-      runId,
-      completed: toComplete.length,
-      alreadyReviewed: reviewed.size,
-      skippedBroken: images.length - reviewable.length,
-    };
+  });
+
+/**
+ * "Finish review" of a DICOM Series of the patient. Only for a Series the
+ * viewer shows completely (one orientation, no multi-frame image), and only
+ * when the non-broken images are exactly those the reviewer was shown
+ * (`presentedImageIds`): an image that was not presented is never
+ * completed. Checked on the locked rows.
+ */
+export const finishSeriesReview = (
+  patientId: string,
+  seriesId: string,
+  reviewer: Reviewer,
+  presentedImageIds: readonly string[]
+): Promise<FinishReviewResponse> =>
+  reviewMutation(async (transaction) => {
+    if (!(await findOwnedSeries(patientId, seriesId, transaction))) {
+      throw new ReviewError('SERIES_NOT_FOUND', 'The series does not exist.');
+    }
+    // In id order: concurrent runs never deadlock on the rows.
+    const rows = await sequelize.query<StackImageRow>(
+      `SELECT ${stackImageColumns} FROM patients_images
+       WHERE "seriesId" = :seriesId ORDER BY id FOR UPDATE`,
+      { replacements: { seriesId }, type: QueryTypes.SELECT, transaction }
+    );
+    const stack = orderSeriesImages(rows.map(toStackImage));
+    if (!isSimpleStack(stack)) {
+      throw new ReviewError(
+        'SERIES_NOT_FULLY_REVIEWABLE',
+        'The series has several orientations or multi-frame images; the ' +
+          'viewer cannot show it completely, so it cannot be finished as a whole.'
+      );
+    }
+    const displayed = new Set(
+      stack.images.filter(({ image }) => !image.isBroken).map(({ image }) => image.id)
+    );
+    const presented = new Set(presentedImageIds);
+    if (
+      displayed.size !== presented.size ||
+      [...displayed].some((id) => !presented.has(id))
+    ) {
+      throw new ReviewError(
+        'SERIES_CHANGED',
+        'The series images differ from the images that were presented; reload the series.'
+      );
+    }
+    return completeUntouchedImages(
+      rows.map(({ id, isBrocken }) => ({ id, isBrocken })),
+      { scopeSeriesId: seriesId },
+      reviewer,
+      transaction
+    );
   });
 
 // --- Freeze ------------------------------------------------------------------

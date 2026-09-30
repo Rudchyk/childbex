@@ -8,11 +8,11 @@ import {
 } from '@mui/material';
 import { FC } from 'react';
 import { useToggle } from '../../hooks';
-import { GetPatientClusterResponse } from '@libs/schemas';
+import { SeriesImage } from '@libs/schemas';
 import { UIDialog } from '../../components';
 
 interface PatientImageVotesProps {
-  data: GetPatientClusterResponse['images'][0]['votes'];
+  data: SeriesImage['votes'];
 }
 
 export const PatientImageVotes: FC<PatientImageVotesProps> = ({ data }) => {

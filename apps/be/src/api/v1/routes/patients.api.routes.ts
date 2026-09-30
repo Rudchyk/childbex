@@ -40,6 +40,7 @@ import {
   getInvalidRequestError,
   getNotFoundError,
   getReviewHttpError,
+  readJsonBody,
 } from '../lib/helpers';
 import { PatientImagesCluster } from '../../../db/models/PatientImagesCluster.model';
 import { PatientImage } from '../../../db/models/PatientImage.model';
@@ -408,7 +409,8 @@ router
   })
   // Update patient cluster
   .route({
-    description: 'Update patient cluster',
+    description:
+      'Update patient cluster (legacy: use the Study/Series routes)',
     method: 'PATCH',
     path: apiRoutes.patientImagesCluster,
     tags: [Tags.PATIENTS],
@@ -440,7 +442,8 @@ router
   })
   // Delete patient cluster
   .route({
-    description: 'Delete patient cluster',
+    description:
+      'Delete patient cluster (legacy: use the Study/Series routes)',
     method: 'DELETE',
     path: apiRoutes.patientImagesCluster,
     tags: [Tags.PATIENTS],
@@ -470,7 +473,8 @@ router
   })
   // Get patient images cluster
   .route({
-    description: 'Get patient images cluster',
+    description:
+      'Get patient images cluster (legacy: use the Study/Series routes)',
     method: 'GET',
     path: apiRoutes.patientSlugImagesClustersCluster,
     tags: [Tags.PATIENTS],
@@ -641,7 +645,7 @@ router
     async handler(request, ctx) {
       const { id } = request.params;
       const admin = getReviewer(ctx as Ctx);
-      const body = await request.json().catch(() => null);
+      const body = await readJsonBody(request);
       if (!Value.Check(ReviewResolutionRequestBodySchema, body)) {
         throw getInvalidRequestError();
       }
@@ -680,7 +684,7 @@ router
   // Finish the review of a cluster
   .route({
     description:
-      'Finish the review of a cluster: images without votes or a resolution are completed as NORMAL (recorded as FINISH_REVIEW, overridden by any later vote)',
+      'Legacy (use the Series route): finish the review of a cluster: images without votes or a resolution are completed as NORMAL (recorded as FINISH_REVIEW, overridden by any later vote)',
     method: 'POST',
     path: apiRoutes.patientImagesClusterFinishReview,
     tags: [Tags.PATIENTS],

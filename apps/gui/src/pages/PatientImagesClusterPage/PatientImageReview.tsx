@@ -13,11 +13,33 @@ import { FC } from 'react';
 import { PatientImageVotes } from './PatientImageVotes';
 import { PatientImageVote } from './PatientImageVote';
 import { useAuth } from '../../auth/useAuth';
-import { GetPatientClusterResponse, PatientImageStatus } from '@libs/schemas';
+import { PatientImageStatus, SeriesImage } from '@libs/schemas';
 import { defaultDateFormat } from '@libs/constants';
 
+/** The review fields of an image (a Series image or a legacy cluster image). */
+export type ReviewPanelImage = Pick<
+  SeriesImage,
+  | 'id'
+  | 'status'
+  | 'isAbnormal'
+  | 'votesCount'
+  | 'normalVotes'
+  | 'abnormalVotes'
+  | 'uncertainVotes'
+  | 'adminResolutionId'
+  | 'adminResolutionName'
+  | 'resolutionComment'
+  | 'votes'
+> & {
+  resolvedAt?: string | null;
+  /** Legacy cluster images only. */
+  notes?: string;
+  reviewState?: SeriesImage['reviewState'];
+  reviewStateSource?: SeriesImage['reviewStateSource'];
+};
+
 interface PatientImageReviewProps {
-  item?: GetPatientClusterResponse['images'][0];
+  item?: ReviewPanelImage;
 }
 
 export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
@@ -55,6 +77,14 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
     },
   ];
   const info = [
+    ...(item?.reviewState
+      ? [
+          {
+            label: 'Review state',
+            value: `${item.reviewState} (${item.reviewStateSource})`,
+          },
+        ]
+      : []),
     {
       label: 'Is abnormal?',
       value: (

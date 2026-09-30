@@ -7,11 +7,15 @@ import { DicomViewer } from './DicomViewer';
 
 const mockLoadURLs = jest.fn();
 const mockReset = jest.fn();
+/** Listeners the viewer registered on the (fake) dwv App, by event. */
+const mockListeners: Record<string, (event: unknown) => void> = {};
 
 jest.mock('dwv', () => ({
   App: jest.fn().mockImplementation(() => ({
     init: jest.fn(),
-    addEventListener: jest.fn(),
+    addEventListener: (name: string, listener: (event: unknown) => void) => {
+      mockListeners[name] = listener;
+    },
     loadURLs: mockLoadURLs,
     loadFiles: jest.fn(),
     reset: mockReset,
@@ -74,6 +78,17 @@ describe('DicomViewer', () => {
 
     expect(mockLoadURLs).not.toHaveBeenCalled();
     expect(mockReset).toHaveBeenCalled();
+  });
+
+  it('reports load errors so callers know not everything is shown', async () => {
+    const onLoadResult = jest.fn();
+    render(<DicomViewer list={urls} onLoadResult={onLoadResult} />);
+    await waitFor(() => expect(mockLoadURLs).toHaveBeenCalledTimes(1));
+    expect(onLoadResult).not.toHaveBeenCalled();
+
+    act(() => mockListeners.loaderror({ error: new Error('404') }));
+
+    expect(onLoadResult).toHaveBeenLastCalledWith({ sliceCount: 0, errorCount: 1 });
   });
 
   it('loads nothing without a list (local files mode)', async () => {
