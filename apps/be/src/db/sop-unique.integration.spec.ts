@@ -34,6 +34,8 @@ if (!databaseUrl) {
 jest.setTimeout(60_000);
 
 const UNIQUE_MIGRATION = '202609301800-patient-image-sop-unique';
+/** Later migrations (review state) need their own backfill first. */
+const upToUnique = { to: UNIQUE_MIGRATION };
 const BEFORE_UNIQUE = '202609301200-patient-image-instance-indexes';
 const HMAC_KEY = 'synthetic-test-key-synthetic-test-key';
 const P1 = '11111111-1111-4111-8111-111111111111';
@@ -177,7 +179,7 @@ describeWithDatabase('unique SOP Instance UID (PostgreSQL)', () => {
     await addRow(3, null);
     expect(await indexes()).toEqual(['patients_images_sop_instance_uid']);
 
-    await migrator.migrateUp(sequelize);
+    await migrator.migrateUp(sequelize, undefined, upToUnique);
 
     expect(await executed()).toContain(UNIQUE_MIGRATION);
     expect(await indexes()).toEqual(['patients_images_sop_instance_uid_unique (unique)']);
@@ -196,7 +198,7 @@ describeWithDatabase('unique SOP Instance UID (PostgreSQL)', () => {
     await addRow(3, '2.25.77');
     await addRow(4, '2.25.77', undefined, C2);
 
-    const error = await migrator.migrateUp(sequelize).catch((e: Error) => e);
+    const error = await migrator.migrateUp(sequelize, undefined, upToUnique).catch((e: Error) => e);
 
     expect(error).toBeInstanceOf(Error);
     const message = String((error as Error).message);
@@ -216,7 +218,7 @@ describeWithDatabase('unique SOP Instance UID (PostgreSQL)', () => {
   it('succeeds after the duplicates were cleaned up', async () => {
     await addRow(1, DUPLICATE_SOP);
     await addRow(2, DUPLICATE_SOP, undefined, C2);
-    await expect(migrator.migrateUp(sequelize)).rejects.toThrow(/duplicate group/);
+    await expect(migrator.migrateUp(sequelize, undefined, upToUnique)).rejects.toThrow(/duplicate group/);
 
     const cleanup: typeof CleanupModule = require('./cleanup/duplicate-sop.cleanup');
     const report = await cleanup.runDuplicateSopCleanup(sequelize, {
@@ -230,14 +232,14 @@ describeWithDatabase('unique SOP Instance UID (PostgreSQL)', () => {
       apply: false, group: null, uploadRoot, hmacKey: HMAC_KEY,
     })).summary.duplicateGroups).toBe(0);
 
-    await migrator.migrateUp(sequelize);
+    await migrator.migrateUp(sequelize, undefined, upToUnique);
 
     expect(await executed()).toContain(UNIQUE_MIGRATION);
   });
 
   it('makes PostgreSQL reject a duplicate SOP UID (23505)', async () => {
     await addRow(1, DUPLICATE_SOP);
-    await migrator.migrateUp(sequelize);
+    await migrator.migrateUp(sequelize, undefined, upToUnique);
 
     await expect(addRow(2, DUPLICATE_SOP, undefined, C2)).rejects.toMatchObject({
       parent: { code: '23505', constraint: 'patients_images_sop_instance_uid_unique' },
@@ -246,7 +248,7 @@ describeWithDatabase('unique SOP Instance UID (PostgreSQL)', () => {
 
   it('rolls back to the non-unique index without touching data; can be applied again', async () => {
     await addRow(1, DUPLICATE_SOP);
-    await migrator.migrateUp(sequelize);
+    await migrator.migrateUp(sequelize, undefined, upToUnique);
 
     const reverted = await migrator.migrateDown(sequelize);
 
@@ -256,7 +258,7 @@ describeWithDatabase('unique SOP Instance UID (PostgreSQL)', () => {
     await addRow(2, DUPLICATE_SOP, undefined, C2);
     await sequelize.query(`DELETE FROM patients_images WHERE id = $1`, { bind: [id(2)] });
 
-    expect((await migrator.migrateUp(sequelize)).map(({ name }) => name)).toEqual([
+    expect((await migrator.migrateUp(sequelize, undefined, upToUnique)).map(({ name }) => name)).toEqual([
       UNIQUE_MIGRATION,
     ]);
     expect(await indexes()).toEqual(['patients_images_sop_instance_uid_unique (unique)']);
@@ -264,7 +266,7 @@ describeWithDatabase('unique SOP Instance UID (PostgreSQL)', () => {
 
   it('lets maintenance commands run while the unique migration is still pending', async () => {
     const status = await migrator.getMigrationStatus(sequelize);
-    expect(status.pending).toEqual([UNIQUE_MIGRATION]);
+    expect(status.pending[0]).toBe(UNIQUE_MIGRATION);
 
     const cleanup: typeof CleanupModule = require('./cleanup/duplicate-sop.cleanup');
     await expect(
@@ -412,6 +414,6 @@ describeWithDatabase('unique SOP Instance UID (PostgreSQL)', () => {
     });
 
     expect(report.summary).toMatchObject({ updated: 2, duplicateSopInstanceUidGroups: 1 });
-    await expect(migrator.migrateUp(sequelize)).rejects.toThrow(/1 duplicate group/);
+    await expect(migrator.migrateUp(sequelize, undefined, upToUnique)).rejects.toThrow(/1 duplicate group/);
   });
 });

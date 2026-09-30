@@ -3,6 +3,9 @@ import { patientImageDicomMetadataMigration } from './202609281200-patient-image
 import { studySeriesMigration } from './202609291200-study-series';
 import { patientImageInstanceIndexesMigration } from './202609301200-patient-image-instance-indexes';
 import { patientImageSopUniqueMigration } from './202609301800-patient-image-sop-unique';
+import { reviewStatusUncertainMigration } from './202609302000-review-status-uncertain';
+import { reviewSemanticsSchemaMigration } from './202609302010-review-semantics-schema';
+import { reviewStateRequiredMigration } from './202609302020-review-state-required';
 import type { Migration } from './types';
 
 export type { Migration, MigrationContext } from './types';
@@ -18,4 +21,7 @@ export const migrations: Migration[] = [
   studySeriesMigration,
   patientImageInstanceIndexesMigration,
   patientImageSopUniqueMigration,
+  reviewStatusUncertainMigration,
+  reviewSemanticsSchemaMigration,
+  reviewStateRequiredMigration,
 ];

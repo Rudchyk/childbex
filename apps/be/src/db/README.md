@@ -317,6 +317,123 @@ Production order: back up, apply the migration, run
 `backfill study-series --report ~/study-series-dry-run.json`, review, then
 `--apply --report ~/study-series-apply.json`.
 
+## Review semantics
+
+Review data is written only by `services/review.service.ts` (no model hooks).
+Authoritative records:
+
+| Table                              | What it holds                                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `patient_image_review_votes`       | the current vote of each reviewer per image (unique `patientImageId, reviewerId`)                 |
+| `patient_image_review_vote_events` | append-only vote history (`cast` / `changed`, previous and new vote/comment, reviewer, time)      |
+| `patient_image_review_resolutions` | admin resolutions (`label` NORMAL/ABNORMAL/UNCERTAIN), append-only: a new one or a removal supersedes the active one (at most one active, `supersededAt IS NULL`); `origin` `admin`, `legacy_confirmed`, `legacy_unlabeled` |
+| `patient_image_review_completions` | "Finish review" provenance: `runId`, `scopeClusterId`, `completedById/Name`, `createdAt` (one per image) |
+| `review_freezes`                   | review freezes (at most one active; kept as history)                                             |
+
+**Effective state** (`patients_images.reviewState` / `reviewStateSource`,
+derived in `services/review-state.ts`):
+
+1. an active resolution with a label → that label (`RESOLUTION`);
+2. otherwise votes: exactly one distinct label → that label; more than one
+   distinct label → `CONFLICTED` (no majority; uncertain-only is
+   `UNCERTAIN`) (`VOTES`);
+3. otherwise a completion → `NORMAL` (`FINISH_REVIEW`);
+4. otherwise `NOT_REVIEWED` (`NONE`) — zero votes never mean normal.
+
+A later vote therefore overrides a completion (the completion record stays).
+`status`, `isAbnormal`, the vote counters and `adminResolutionId/Name`,
+`resolutionComment`, `resolvedAt` are **compatibility caches** recomputed in
+the same transaction as every change (`status`: `broken` for broken images,
+`admin_resolved` for a resolution, else the state in lower case; `isAbnormal`
+only for `ABNORMAL`). Ground truth (e.g. ML labels) must use `reviewState` /
+`reviewStateSource` and the records above, never `isAbnormal`.
+
+Every mutation (vote, resolution, finish review) runs in one transaction:
+review-freeze advisory lock (key 4352002) in **shared** mode, refuse with
+409 `REVIEW_FROZEN` while frozen, lock the image row(s) `FOR UPDATE`, change
+the records, append history, recompute the caches. Freezing takes the same
+lock in **exclusive** mode: it waits for mutations in flight, and no mutation
+commits after it.
+
+The same protocol (`withReviewFreezeGuard`) also guards the operations that
+remove reviewed images or change which patients are active, so a frozen
+review cannot lose data: deleting a cluster (`DELETE
+/patients/clusters/:id`), trashing a patient (`DELETE /patients/:id`),
+permanently deleting or restoring one (`POST /patients/:id/trash?type=delete
+| restore`). Trashing counts because trashed patients are excluded like
+deleted ones (patient list, file access, maintenance commands by default).
+All of them return 409 `REVIEW_FROZEN` while frozen; their authorization is
+unchanged. Files of a deleted patient/cluster/image are removed only after
+the deletion is committed. Not guarded: reads, patient/cluster metadata
+(`PATCH`, e.g. `inReview`) and imports (they only add `NOT_REVIEWED` images;
+no general dataset locking). There is no endpoint deleting a single image.
+`cleanup duplicate-sop` deletes rows only before
+`202609301800-patient-image-sop-unique`; once the review tables exist that
+unique index already rules out duplicates, so it has nothing to delete.
+
+API: `POST /patients/images/:id/review-votes` casts or changes the caller's
+own vote; `PATCH .../review-votes/:voteId` changes only the caller's own vote
+of that image (anything else: 404); `PUT` / `DELETE
+/patients/images/:id/review/resolution` (`dashboard:admin`);
+`POST /patients/clusters/:id/review/finish` (any reviewer: completes images
+without votes, active resolution or completion as NORMAL; broken images are
+skipped); `GET /review/freeze`, `POST /review/freeze` `{reason}` and
+`POST /review/unfreeze` (`dashboard:admin`).
+
+### Rollout: `audit review-state` / `backfill review-state`
+
+Three migrations: `202609302000-review-status-uncertain` (enum value, no data
+change), `202609302010-review-semantics-schema` (tables and nullable
+`reviewState` / `reviewStateSource`; existing rows stay NULL = not derived
+yet) and `202609302020-review-state-required` (NOT NULL; **refuses without
+changes** while any image has no derived state). The backend requires all
+three, so it cannot run on half-migrated data.
+
+- `node migrate.js audit review-state [--report <file.json>]` (read-only):
+  images without a derived state, ambiguous legacy resolutions (image id,
+  cluster id, which legacy fields are set, vote counts), derived images whose
+  caches differ from a recomputation, votes without history. Exit code 1
+  while anything is not derived or a cache mismatches.
+- `node migrate.js backfill review-state [--apply] [--report <file.json>]`:
+  derives the state of every image whose `reviewState` is NULL from its votes
+  and stores all caches (`updatedAt` unchanged). Dry-run unless `--apply`;
+  idempotent (derived images are skipped); never creates completions.
+- Legacy admin resolutions never recorded a label, so an image with any
+  legacy resolution field (`status = admin_resolved`, `adminResolutionId`,
+  `adminResolutionName`, `resolutionComment`, `resolvedAt`) is **left
+  untouched and reported** until an operator decides per image:
+  `--legacy-resolution <imageId>=NORMAL|ABNORMAL|UNCERTAIN|IGNORE` (repeatable)
+  with the mandatory `--operator "<name>"`:
+  - a label: an active resolution with origin `legacy_confirmed`; the
+    historical resolver id/name, comment and time (`legacyResolvedAt`) are
+    kept as recorded (NULL when unknown — never invented);
+    `confirmedByName` = the operator;
+  - `IGNORE`: the same historical data as inactive history (origin
+    `legacy_unlabeled`, `supersededByName` = the operator); the state comes
+    from the votes and the legacy cache fields are cleared.
+  Every decision is validated before anything is written and listed in the
+  report (image id, decision, operator, outcome).
+- Output and reports contain internal ids, field names, codes and counters
+  only (no resolver names, comments or DICOM data).
+
+Production order:
+
+1. Back up the database (`pg_dump -Fc ...`).
+2. Deploy without restarting, then
+   `node migrate.js up --to 202609302010-review-semantics-schema`.
+3. `node migrate.js audit review-state --report ~/review-audit.json`.
+4. `node migrate.js backfill review-state --report ~/review-dry-run.json`;
+   review the planned states and `statusTransitions` (e.g.
+   `normal->not_reviewed` for images without votes).
+5. Decide every ambiguous legacy resolution with a physician/admin.
+6. `node migrate.js backfill review-state --apply --legacy-resolution <id>=<...> ... --operator "<name>" --report ~/review-apply.json`
+   (decisions can also be applied in several runs).
+7. `node migrate.js audit review-state` — must exit 0 (`notDerived: 0`,
+   `cacheMismatches: 0`).
+8. `node migrate.js up` (applies `202609302020-review-state-required`), then
+   `node migrate.js status` (exit 0).
+9. Restart the backend.
+
 ## Commands
 
 The CLI is bundled as `migrate.js` next to `main.js` and uses the same
@@ -337,6 +454,9 @@ directory, and `apps/be/.env.local` when run through Nx).
 | `npm run be:backfill:study-series:apply` | `node migrate.js backfill study-series --apply` | Study/Series linking, write             |
 | `npm run be:cleanup:duplicate-sop` | `node migrate.js cleanup duplicate-sop` | duplicate SOP audit, dry-run                        |
 | `npm run be:cleanup:duplicate-sop:apply` | `node migrate.js cleanup duplicate-sop --apply` | clean SAFE_IDENTICAL duplicate groups   |
+| `npm run be:audit:review-state` | `node migrate.js audit review-state` | review state verification (read-only)                      |
+| `npm run be:backfill:review-state` | `node migrate.js backfill review-state` | review state derivation, dry-run                    |
+| `npm run be:backfill:review-state:apply` | `node migrate.js backfill review-state --apply` | derive review states (legacy decisions: use `node migrate.js` directly) |
 
 The `npm run` commands build the backend first. To target another database
 than the one in `apps/be/.env.local`, set the variable in the shell (it takes

@@ -30,6 +30,8 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
         return 'error';
       case PatientImageStatus.ADMIN_RESOLVED:
         return 'warning';
+      case PatientImageStatus.UNCERTAIN:
+        return 'info';
       default:
         return 'default';
     }

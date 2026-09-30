@@ -13,6 +13,13 @@
  *   node migrate.js backfill study-series [--apply] [...]
  *                                       link images to Study / Series
  *                                       (dry-run unless --apply)
+ *   node migrate.js audit review-state [--report <file>]
+ *                                       verify the review state of images
+ *                                       (read-only)
+ *   node migrate.js backfill review-state [--apply] [--legacy-resolution
+ *       <imageId>=<NORMAL|ABNORMAL|UNCERTAIN|IGNORE> --operator <name>] [...]
+ *                                       derive the review state of existing
+ *                                       images (dry-run unless --apply)
  *   node migrate.js cleanup duplicate-sop [--apply] [--group k-...] [...]
  *                                       audit / clean legacy duplicate SOP
  *                                       instances (dry-run unless --apply)
@@ -36,6 +43,12 @@ import {
   studySeriesUsage,
 } from './db/backfill/study-series.cli';
 import {
+  reviewStateAuditUsage,
+  reviewStateBackfillUsage,
+  runReviewStateAuditCli,
+  runReviewStateBackfillCli,
+} from './db/backfill/review-state.cli';
+import {
   duplicateSopUsage,
   runDuplicateSopCli,
 } from './db/cleanup/duplicate-sop.cli';
@@ -43,6 +56,7 @@ import {
 const usage =
   'Usage: node migrate.js <up [--to <migration>] | status | down | baseline --check | baseline --apply' +
   ' | backfill dicom-metadata [options] | backfill study-series [options]' +
+  ' | backfill review-state [options] | audit review-state [options]' +
   ' | cleanup duplicate-sop [options]>';
 
 const printComparison = ({ errors, warnings }: SchemaComparison) => {
@@ -64,10 +78,20 @@ const run = async (
       console.error(duplicateSopUsage);
       return 2;
     }
+    case 'audit': {
+      if (flag === 'review-state') return runReviewStateAuditCli(sequelize, rest);
+      console.error(reviewStateAuditUsage);
+      return 2;
+    }
     case 'backfill': {
       if (flag === 'dicom-metadata') return runBackfillCli(sequelize, rest);
       if (flag === 'study-series') return runStudySeriesCli(sequelize, rest);
-      console.error(`${backfillUsage}\n${studySeriesUsage}`);
+      if (flag === 'review-state') {
+        return runReviewStateBackfillCli(sequelize, rest);
+      }
+      console.error(
+        `${backfillUsage}\n${studySeriesUsage}\n${reviewStateBackfillUsage}`
+      );
       return 2;
     }
     case 'up': {

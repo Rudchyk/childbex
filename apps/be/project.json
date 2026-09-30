@@ -189,6 +189,27 @@
       "options": {
         "command": "node dist/apps/be/migrate.js cleanup duplicate-sop --apply"
       }
+    },
+    "audit-review-state": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js audit review-state"
+      }
+    },
+    "backfill-review-state": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js backfill review-state --dry-run"
+      }
+    },
+    "backfill-review-state-apply": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node dist/apps/be/migrate.js backfill review-state --apply"
+      }
     }
   }
 }

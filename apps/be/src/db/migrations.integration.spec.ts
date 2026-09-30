@@ -105,6 +105,13 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
       require('./models/PatientImagesCluster.model').PatientImagesCluster,
       PatientImage,
       require('./models/PatientImageReviewVote.model').PatientImageReviewVote,
+      require('./models/PatientImageReviewVoteEvent.model')
+        .PatientImageReviewVoteEvent,
+      require('./models/PatientImageReviewResolution.model')
+        .PatientImageReviewResolution,
+      require('./models/PatientImageReviewCompletion.model')
+        .PatientImageReviewCompletion,
+      require('./models/ReviewFreeze.model').ReviewFreeze,
     ];
   });
 

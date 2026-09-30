@@ -8,6 +8,7 @@ import { SecuritiesKeysEnum } from './lib/SecuritiesKeysEnum';
 import './routes/config.api.routes';
 import './routes/llm.api.routes';
 import './routes/patients.api.routes';
+import './routes/review.api.routes';
 import './routes/upload-sessions.api.routes';
 
 /**

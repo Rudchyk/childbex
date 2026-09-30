@@ -10,6 +10,7 @@ import { Patient } from './Patient.model';
 import { PatientImage } from './PatientImage.model';
 import { PatientImagesCluster as IPatientImagesCluster } from '@libs/schemas';
 import { timestampFields } from '../helpers/timestamps';
+import { afterCommit } from '../helpers/after-commit';
 import { access, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { uploadRoot } from '../../services/patients.service';
@@ -94,19 +95,22 @@ PatientImagesCluster.init(
       },
     ],
     hooks: {
-      async afterDestroy(cluster) {
+      async afterDestroy(cluster, options) {
         const destDir = path.join(uploadRoot, cluster.patientId, cluster.id);
-        try {
-          await access(destDir);
-          await rm(destDir, {
-            recursive: true,
-            force: true,
-            maxRetries: 3, // optional (helps on Windows)
-            retryDelay: 100, // optional (ms)
-          });
-        } catch {
-          return;
-        }
+        // Only once the deletion is committed (never after a rollback).
+        await afterCommit(options.transaction, async () => {
+          try {
+            await access(destDir);
+            await rm(destDir, {
+              recursive: true,
+              force: true,
+              maxRetries: 3, // optional (helps on Windows)
+              retryDelay: 100, // optional (ms)
+            });
+          } catch {
+            return;
+          }
+        });
       },
     },
   }

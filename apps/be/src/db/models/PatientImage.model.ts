@@ -9,14 +9,16 @@ import {
 } from 'sequelize';
 import { sequelize } from '../sequelize';
 import {
-  PatientImageReviewVoteTypes,
   PatientImageStatus,
   PatientImage as IPatientImage,
+  ReviewState,
+  ReviewStateSource,
 } from '@libs/schemas';
 import { Patient } from './Patient.model';
 import { PatientImagesCluster } from './PatientImagesCluster.model';
 import { PatientImageReviewVote } from './PatientImageReviewVote.model';
 import { timestampFields } from '../helpers/timestamps';
+import { afterCommit } from '../helpers/after-commit';
 import { access, unlink } from 'node:fs/promises';
 import { logger } from '../../services/logger.service';
 import path from 'path';
@@ -53,6 +55,11 @@ export class PatientImage
   declare normalVotes: IPatientImage['normalVotes'];
   declare abnormalVotes: IPatientImage['abnormalVotes'];
   declare uncertainVotes: IPatientImage['uncertainVotes'];
+  // Effective review state (ground truth for review / ML labels). The fields
+  // above (status, isAbnormal, the counters and the resolution fields) are
+  // compatibility caches; all are written only by review.service.ts.
+  declare reviewState: ReviewState;
+  declare reviewStateSource: ReviewStateSource;
 
   // DICOM metadata (backend-internal, null for images imported before it
   // was recorded):
@@ -102,77 +109,6 @@ export class PatientImage
     votes: Association<PatientImage, PatientImageReviewVote>;
   };
 
-  public calculateStatus(): PatientImageStatus {
-    const totalVotes = this.votesCount || 0;
-
-    // Якщо немає голосів - зображення нормальне по замовчуванні
-    if (totalVotes === 0) {
-      return PatientImageStatus.NORMAL;
-    }
-
-    const normalCount = this.normalVotes || 0;
-    const abnormalCount = this.abnormalVotes || 0;
-    const uncertainCount = this.uncertainVotes || 0;
-
-    // Якщо є резолюція адміна
-    if (this.resolvedAt) {
-      return PatientImageStatus.ADMIN_RESOLVED;
-    }
-
-    // Перевіряємо рівність голосів між normal і abnormal
-    if (normalCount === abnormalCount && normalCount > 0) {
-      return PatientImageStatus.CONFLICTED;
-    }
-
-    // Логіка визначення конфлікту (можна налаштувати)
-    const significantVotes = normalCount + abnormalCount;
-    const conflictThreshold = 0.3; // 30% від загальної кількості значущих голосів
-
-    if (significantVotes >= 3) {
-      const minority = Math.min(normalCount, abnormalCount);
-      const majorityRatio = minority / significantVotes;
-
-      if (majorityRatio >= conflictThreshold) {
-        return PatientImageStatus.CONFLICTED;
-      }
-    }
-
-    if (abnormalCount > normalCount && abnormalCount > uncertainCount) {
-      return PatientImageStatus.ABNORMAL;
-    } else if (normalCount > abnormalCount && normalCount > uncertainCount) {
-      return PatientImageStatus.NORMAL;
-    } else {
-      // Якщо uncertain має найбільше голосів або інші рівності
-      return PatientImageStatus.CONFLICTED;
-    }
-  }
-
-  public async updateVoteCounts(): Promise<void> {
-    const votes = await this.getVotes();
-    this.normalVotes = votes.filter(
-      (v) => v.vote === PatientImageReviewVoteTypes.NORMAL
-    ).length;
-    this.abnormalVotes = votes.filter(
-      (v) => v.vote === PatientImageReviewVoteTypes.ABNORMAL
-    ).length;
-    this.uncertainVotes = votes.filter(
-      (v) => v.vote === PatientImageReviewVoteTypes.UNCERTAIN
-    ).length;
-    this.votesCount = votes.length;
-    const status = this.calculateStatus();
-    this.status = status;
-
-    switch (status) {
-      case PatientImageStatus.ABNORMAL:
-        this.isAbnormal = true;
-        break;
-      default:
-        this.isAbnormal = false;
-        break;
-    }
-
-    await this.save();
-  }
 }
 
 PatientImage.init(
@@ -256,6 +192,17 @@ PatientImage.init(
       allowNull: false,
       defaultValue: 0,
     },
+    // Migrations 202609302010-review-semantics-schema / -review-state-required.
+    reviewState: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+      defaultValue: ReviewState.NOT_REVIEWED,
+    },
+    reviewStateSource: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+      defaultValue: ReviewStateSource.NONE,
+    },
     // DICOM metadata, see migration 202609281200-patient-image-dicom-metadata.
     studyInstanceUid: { type: DataTypes.STRING(64), allowNull: true },
     seriesInstanceUid: { type: DataTypes.STRING(64), allowNull: true },
@@ -316,30 +263,18 @@ PatientImage.init(
       { name: 'patients_images_file_sha256', fields: ['fileSha256'] },
     ],
     hooks: {
-      async afterDestroy({ source }) {
+      async afterDestroy({ source }, options) {
         const root = uploadRoot.replace('uploads', '');
         const url = path.join(root, source);
-        try {
-          await access(url);
-          await unlink(url);
-        } catch {
-          return;
-        }
-      },
-      afterUpdate: async (instance) => {
-        // Автоматично оновлюємо статус після зміни голосів
-        if (
-          instance.changed('votesCount') ||
-          instance.changed('normalVotes') ||
-          instance.changed('abnormalVotes') ||
-          instance.changed('uncertainVotes')
-        ) {
-          const newStatus = instance.calculateStatus();
-          if (newStatus !== instance.status) {
-            instance.status = newStatus;
-            await instance.save({ hooks: false });
+        // Only once the deletion is committed (never after a rollback).
+        await afterCommit(options.transaction, async () => {
+          try {
+            await access(url);
+            await unlink(url);
+          } catch {
+            return;
           }
-        }
+        });
       },
     },
   }

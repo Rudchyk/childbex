@@ -27,8 +27,18 @@ const patients = {
     '/patients/slug/:slug/clusters/cluster/:cluster',
   /** DICOM file of a patient image (authenticated; `id` is the patient id). */
   patientImageFile: '/patients/:id/images/:imageId/file',
+  /** Admin resolution of an image (PUT / DELETE). */
+  patientImageReviewResolution: '/patients/images/:id/review/resolution',
+  /** Finish review of a cluster (completes untouched images as NORMAL). */
+  patientImagesClusterFinishReview: '/patients/clusters/:id/review/finish',
   patientImagesReviewsVotes: '/patients/images/:id/review-votes',
   patientImageReviewVote: '/patients/images/:id/review-votes/:voteId',
+};
+
+const review = {
+  /** Global review freeze: GET state, POST freeze. */
+  reviewFreeze: '/review/freeze',
+  reviewUnfreeze: '/review/unfreeze',
 };
 
 const uploadSessions = {
@@ -41,6 +51,7 @@ const uploadSessions = {
 export const apiRoutes = {
   ...security,
   ...patients,
+  ...review,
   ...uploadSessions,
   ...llmService,
 };

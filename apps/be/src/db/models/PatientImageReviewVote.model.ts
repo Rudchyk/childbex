@@ -81,25 +81,9 @@ PatientImageReviewVote.init(
   {
     sequelize,
     tableName: 'patient_image_review_votes',
-    hooks: {
-      afterCreate: async (vote) => {
-        // Оновлюємо лічильники голосів в PatientImage
-        const patientImage = await vote.getPatientImage();
-        await patientImage.updateVoteCounts();
-      },
-      afterUpdate: async (vote) => {
-        if (vote.changed('vote')) {
-          const patientImage = await vote.getPatientImage();
-          await patientImage.updateVoteCounts();
-        }
-      },
-      afterDestroy: async (vote) => {
-        const patientImage = await PatientImage.findByPk(vote.patientImageId);
-        if (patientImage) {
-          await patientImage.updateVoteCounts();
-        }
-      },
-    },
+    // No hooks: votes are written only by services/review.service.ts, which
+    // records the vote history and recomputes the image's review state in
+    // the same transaction.
     indexes: [
       {
         unique: true,

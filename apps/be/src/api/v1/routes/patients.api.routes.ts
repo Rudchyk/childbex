@@ -29,6 +29,8 @@ import {
   PatientImageReviewVoteRequestBody,
   PatientImageReviewVoteParamsSchema,
   PatientImageFileParamsSchema,
+  ReviewResolutionRequestBodySchema,
+  FinishReviewResponseSchema,
 } from '@libs/schemas';
 import { getKeycloakSecurity } from '../lib/security.service';
 import { Tags } from '../lib/tags.service';
@@ -37,6 +39,7 @@ import {
   getInternalServerRequestError,
   getInvalidRequestError,
   getNotFoundError,
+  getReviewHttpError,
 } from '../lib/helpers';
 import { PatientImagesCluster } from '../../../db/models/PatientImagesCluster.model';
 import { PatientImage } from '../../../db/models/PatientImage.model';
@@ -50,6 +53,35 @@ import {
   openUploadFile,
 } from '../../../services/patient-image-file.service';
 import { patientImageDicomMetadataAttributes } from '../../../services/dicom.metadata';
+import {
+  castVote,
+  changeOwnVote,
+  finishClusterReview,
+  removeResolution,
+  ReviewError,
+  setResolution,
+  withReviewFreezeGuard,
+} from '../../../services/review.service';
+import { getReviewer, runReviewAction } from '../lib/review.helpers';
+
+/** The vote request body; an empty body is an invalid request. */
+const readVoteBody = async (request: {
+  headers: Headers;
+  json(): Promise<PatientImageReviewVoteRequestBody>;
+}) => {
+  let body = {} as PatientImageReviewVoteRequestBody;
+  const contentLength = request.headers.get('content-length');
+  if (contentLength && +contentLength > 2) {
+    body = await request.json();
+  }
+  if (
+    !Object.keys(body).length ||
+    !Value.Check(PatientImageReviewVoteRequestBodySchema, body)
+  ) {
+    throw getInvalidRequestError();
+  }
+  return body;
+};
 
 /**
  * Unfinished uploads of a trashed/deleted patient can never be imported;
@@ -66,10 +98,18 @@ const cancelUploadSessions = async (patientId: string) => {
   }
 };
 
+/**
+ * Trash (`force` false) or permanently delete a patient. Both change the
+ * reviewed data (trashed patients are excluded like deleted ones), so they
+ * are refused while review is frozen (409 REVIEW_FROZEN).
+ */
 const destroyPatient = async (patient: Patient, force: boolean) => {
   try {
-    await patient.destroy({ force });
+    await withReviewFreezeGuard((transaction) =>
+      patient.destroy({ force, transaction })
+    );
   } catch (error) {
+    if (error instanceof ReviewError) throw getReviewHttpError(error);
     logger.error({ err: error, patientId: patient.id }, 'patient delete failed');
     throw getInternalServerRequestError('Failed to delete the patient.');
   }
@@ -352,7 +392,12 @@ router
           await destroyPatient(patient, true);
           break;
         case TrashedPatientsActionTypes.RESTORE:
-          await patient.restore();
+          // Restoring makes the patient's images active again.
+          await runReviewAction(() =>
+            withReviewFreezeGuard((transaction) =>
+              patient.restore({ transaction })
+            )
+          );
           break;
         default:
           break;
@@ -416,7 +461,10 @@ router
       if (!result) {
         throw getNotFoundError('cluster');
       }
-      await result.destroy();
+      // Removes the cluster's images and their review data.
+      await runReviewAction(() =>
+        withReviewFreezeGuard((transaction) => result.destroy({ transaction }))
+      );
       return Response.json(null, { status: 204 });
     },
   })
@@ -517,9 +565,10 @@ router
       });
     },
   })
-  // Add patient image review vote
+  // Cast (or change) the own review vote on an image
   .route({
-    description: 'Add patient image review vote',
+    description:
+      "Cast the reviewer's vote on an image, or change it (one vote per reviewer and image)",
     method: 'POST',
     path: apiRoutes.patientImagesReviewsVotes,
     tags: [Tags.PATIENTS],
@@ -537,32 +586,16 @@ router
     },
     async handler(request, ctx) {
       const { id } = request.params;
-      const result = await PatientImage.findByPk(id);
-      const content = getSecurityContentFromResponse(ctx as Ctx);
-      if (!result) {
-        throw getNotFoundError('patient image');
-      }
-      let body = {} as PatientImageReviewVoteRequestBody;
-      const contentLength = request.headers.get('content-length');
-      if (contentLength && +contentLength > 2) {
-        body = await request.json();
-      }
-      if (!Object.keys(body).length) {
-        throw getInvalidRequestError();
-      }
-      await PatientImageReviewVote.create({
-        reviewerId: content.sub,
-        reviewerName:
-          content.name || content.preferred_username || content.email || '',
-        patientImageId: id,
-        ...body,
-      });
+      const reviewer = getReviewer(ctx as Ctx);
+      const body = await readVoteBody(request);
+      await runReviewAction(() => castVote(id, reviewer, body));
       return Response.json(null, { status: 204 });
     },
   })
-  // Update patient image review vote
+  // Change the own review vote
   .route({
-    description: 'Update patient image review vote',
+    description:
+      "Change the reviewer's own vote on this image (any other vote: 404)",
     method: 'PATCH',
     path: apiRoutes.patientImageReviewVote,
     tags: [Tags.PATIENTS],
@@ -578,38 +611,96 @@ router
         ...defaultResponses,
       },
     },
-    async handler(request) {
+    async handler(request, ctx) {
       const { id, voteId } = request.params;
-      const result = await PatientImage.findByPk(id);
-      if (!result) {
-        throw getNotFoundError('patient image');
-      }
-      const patientImageReviewVote = await PatientImageReviewVote.findByPk(
-        voteId
-      );
-      if (!patientImageReviewVote) {
-        throw getNotFoundError('patient image review vote');
-      }
-      let body = {} as PatientImageReviewVoteRequestBody;
-      const contentLength = request.headers.get('content-length');
-      if (contentLength && +contentLength > 2) {
-        body = await request.json();
-      }
-      if (!Object.keys(body).length) {
-        throw getInvalidRequestError();
-      }
-      const update: Partial<Pick<PatientImageReviewVote, 'comment' | 'vote'>> =
-        {};
-      if (body.comment !== patientImageReviewVote.comment) {
-        update.comment = body.comment;
-      }
-      if (body.vote !== patientImageReviewVote.vote) {
-        update.vote = body.vote;
-      }
-      if (!Object.keys(update).length) {
-        throw getInvalidRequestError();
-      }
-      await patientImageReviewVote.update(update);
+      const reviewer = getReviewer(ctx as Ctx);
+      const body = await readVoteBody(request);
+      await runReviewAction(() => changeOwnVote(id, voteId, reviewer, body));
       return Response.json(null, { status: 204 });
+    },
+  })
+  // Set the admin resolution of an image
+  .route({
+    description:
+      'Set the admin resolution of an image (takes precedence over votes; the previous resolution is kept as history)',
+    method: 'PUT',
+    path: apiRoutes.patientImageReviewResolution,
+    tags: [Tags.PATIENTS],
+    ...getKeycloakSecurity(['dashboard:admin']),
+    schemas: {
+      request: {
+        params: IDPropertySchema,
+        json: ReviewResolutionRequestBodySchema,
+      },
+      responses: {
+        204: { description: 'success' },
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request, ctx) {
+      const { id } = request.params;
+      const admin = getReviewer(ctx as Ctx);
+      const body = await request.json().catch(() => null);
+      if (!Value.Check(ReviewResolutionRequestBodySchema, body)) {
+        throw getInvalidRequestError();
+      }
+      const { label, comment } = body;
+      await runReviewAction(() =>
+        setResolution(id, admin, { label, comment: comment ?? null })
+      );
+      return Response.json(null, { status: 204 });
+    },
+  })
+  // Remove the admin resolution of an image
+  .route({
+    description:
+      'Remove the active admin resolution of an image (kept as history; votes decide again)',
+    method: 'DELETE',
+    path: apiRoutes.patientImageReviewResolution,
+    tags: [Tags.PATIENTS],
+    ...getKeycloakSecurity(['dashboard:admin']),
+    schemas: {
+      request: {
+        params: IDPropertySchema,
+      },
+      responses: {
+        204: { description: 'success' },
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request, ctx) {
+      const { id } = request.params;
+      const admin = getReviewer(ctx as Ctx);
+      await runReviewAction(() => removeResolution(id, admin));
+      return Response.json(null, { status: 204 });
+    },
+  })
+  // Finish the review of a cluster
+  .route({
+    description:
+      'Finish the review of a cluster: images without votes or a resolution are completed as NORMAL (recorded as FINISH_REVIEW, overridden by any later vote)',
+    method: 'POST',
+    path: apiRoutes.patientImagesClusterFinishReview,
+    tags: [Tags.PATIENTS],
+    ...getKeycloakSecurity(),
+    schemas: {
+      request: {
+        params: IDPropertySchema,
+      },
+      responses: {
+        200: FinishReviewResponseSchema,
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request, ctx) {
+      const { id } = request.params;
+      const reviewer = getReviewer(ctx as Ctx);
+      const result = await runReviewAction(() =>
+        finishClusterReview(id, reviewer)
+      );
+      return Response.json(result);
     },
   });

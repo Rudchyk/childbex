@@ -1,6 +1,7 @@
 import { HTTPError } from 'fets';
 import type { ArchiveError } from '../../../services/archive/archive.errors';
 import type { UploadSessionError } from '../../../services/upload-sessions/upload-session.errors';
+import type { ReviewError } from '../../../services/review.service';
 
 export const getSecurityServiceUnavailableError = () =>
   new HTTPError(
@@ -78,6 +79,19 @@ export const getUploadSessionHttpError = (error: UploadSessionError) =>
       code: error.code,
       ...(error.details ?? {}),
     }
+  );
+
+/** Maps a review error to a client-safe HTTP error (409 REVIEW_FROZEN, ...). */
+export const getReviewHttpError = (error: ReviewError) =>
+  new HTTPError(
+    error.status,
+    error.status === 404
+      ? 'Not found'
+      : error.status === 409
+        ? 'Conflict'
+        : 'Invalid request',
+    {},
+    { message: error.message, code: error.code }
   );
 
 export const getInvalidRequestError = (msg?: string) =>

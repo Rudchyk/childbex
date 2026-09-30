@@ -11,6 +11,7 @@ import {
   Patient as IPatient,
 } from '@libs/schemas';
 import { timestampFields, deletedAtPropertyField } from '../helpers/timestamps';
+import { afterCommit } from '../helpers/after-commit';
 import { toSlugIfCyr } from '@libs/helpers';
 import { PatientImagesCluster } from './PatientImagesCluster.model';
 import { removePath } from '../../utils';
@@ -133,16 +134,19 @@ Patient.init(
       },
       async afterDestroy(instance, options) {
         if (!options.force) return;
-        // Runs after the row was deleted: a cleanup problem must not turn the
-        // completed deletion into an error (a missing directory is fine).
-        try {
-          await removePath(path.join(uploadRoot, instance.id));
-        } catch (error) {
-          logger.error(
-            { err: error, patientId: instance.id },
-            'patient deleted, but removing its upload directory failed'
-          );
-        }
+        // Runs after the row was deleted (and committed): a cleanup problem
+        // must not turn the completed deletion into an error (a missing
+        // directory is fine).
+        await afterCommit(options.transaction, async () => {
+          try {
+            await removePath(path.join(uploadRoot, instance.id));
+          } catch (error) {
+            logger.error(
+              { err: error, patientId: instance.id },
+              'patient deleted, but removing its upload directory failed'
+            );
+          }
+        });
       },
     },
   }
