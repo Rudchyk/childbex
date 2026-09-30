@@ -23,6 +23,10 @@
  *   node migrate.js audit cluster-removal [--report <file>]
  *                                       whether the legacy clusters can be
  *                                       removed (read-only)
+ *   node migrate.js dataset-snapshot preview <id> [--report <file>]
+ *   node migrate.js dataset-snapshot finalize <id> --operator <name>
+ *                                       ML dataset snapshots (finalize
+ *                                       re-hashes every included file)
  *   node migrate.js cleanup duplicate-sop [--apply] [--group k-...] [...]
  *                                       audit / clean legacy duplicate SOP
  *                                       instances (dry-run unless --apply)
@@ -56,6 +60,10 @@ import {
   runClusterRemovalAuditCli,
 } from './db/audit/cluster-removal.audit';
 import {
+  datasetSnapshotUsage,
+  runDatasetSnapshotCli,
+} from './db/snapshot/dataset-snapshot.cli';
+import {
   duplicateSopUsage,
   runDuplicateSopCli,
 } from './db/cleanup/duplicate-sop.cli';
@@ -64,7 +72,7 @@ const usage =
   'Usage: node migrate.js <up [--to <migration>] | status | down | baseline --check | baseline --apply' +
   ' | backfill dicom-metadata [options] | backfill study-series [options]' +
   ' | backfill review-state [options] | audit review-state [options]' +
-  ' | audit cluster-removal [options]' +
+  ' | audit cluster-removal [options] | dataset-snapshot <preview|finalize> <id> [options]' +
   ' | cleanup duplicate-sop [options]>';
 
 const printComparison = ({ errors, warnings }: SchemaComparison) => {
@@ -81,6 +89,13 @@ const run = async (
   ...rest: string[]
 ): Promise<number> => {
   switch (command) {
+    case 'dataset-snapshot': {
+      if (!flag) {
+        console.error(datasetSnapshotUsage);
+        return 2;
+      }
+      return runDatasetSnapshotCli(sequelize, [flag, ...rest]);
+    }
     case 'cleanup': {
       if (flag === 'duplicate-sop') return runDuplicateSopCli(sequelize, rest);
       console.error(duplicateSopUsage);

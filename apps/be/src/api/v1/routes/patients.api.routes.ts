@@ -35,8 +35,13 @@ import {
   getInvalidRequestError,
   getNotFoundError,
   getReviewHttpError,
+  getDatasetSnapshotHttpError,
   readJsonBody,
 } from '../lib/helpers';
+import {
+  assertPatientNotInDatasetSnapshots,
+  DatasetSnapshotError,
+} from '../../../services/dataset-snapshot/snapshot.service';
 import { getSecurityContentFromResponse } from '../lib/security.service';
 import { Op } from 'sequelize';
 import { uploadSessionService } from '../../../services/upload-sessions';
@@ -109,11 +114,29 @@ const cancelUploadSessions = async (patientId: string) => {
  */
 const destroyPatient = async (patient: Patient, force: boolean) => {
   try {
-    await withReviewFreezeGuard((transaction) =>
-      patient.destroy({ force, transaction })
-    );
+    await withReviewFreezeGuard(async (transaction) => {
+      // Source images of a finalized dataset snapshot are never deleted
+      // (the snapshot items' FK RESTRICT is the database backstop).
+      if (force) await assertPatientNotInDatasetSnapshots(patient.id, transaction);
+      await patient.destroy({ force, transaction });
+    });
   } catch (error) {
     if (error instanceof ReviewError) throw getReviewHttpError(error);
+    if (error instanceof DatasetSnapshotError) {
+      throw getDatasetSnapshotHttpError(error);
+    }
+    // Backstop: the snapshot items' FK RESTRICT (reached through the cascade).
+    if (
+      (error as { parent?: { constraint?: string } }).parent?.constraint ===
+      'dataset_snapshot_items_patientImageId_fkey'
+    ) {
+      throw getDatasetSnapshotHttpError(
+        new DatasetSnapshotError(
+          'PATIENT_IN_DATASET_SNAPSHOT',
+          'The patient has images in finalized dataset snapshots; it cannot be deleted permanently.'
+        )
+      );
+    }
     logger.error({ err: error, patientId: patient.id }, 'patient delete failed');
     throw getInternalServerRequestError('Failed to delete the patient.');
   }

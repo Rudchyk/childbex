@@ -551,6 +551,83 @@ Production order (the database must be at `202609302100`, i.e. PR6):
    `node migrate.js status` (exit 0).
 6. Restart the backend.
 
+## ML dataset snapshots
+
+Migration `202610020000-dataset-snapshots`; code in
+`services/dataset-snapshot/`. A snapshot is an immutable, versioned dataset
+for one ML experiment ("model X was trained from snapshot Y").
+
+- **Lifecycle**: `DRAFT` (configuration and seed only, no membership; can be
+  edited, previewed, deleted) -> `FINALIZED` (membership stored once;
+  immutable) -> `ARCHIVED`. A finalized snapshot is never rebuilt or
+  deleted. Database triggers refuse any change of finalized rows (SQLSTATE
+  55000); only `FINALIZED -> ARCHIVED` is allowed.
+- **Tables**: `dataset_snapshots` (configuration, seed, creator, finalizer,
+  review freeze id, counts, exclusion counts), `dataset_snapshot_patients`
+  (the split unit: one split per patient), `dataset_snapshot_items` (the
+  included images: label, frozen review state / source, active resolution /
+  completion id, vote counts, order in the series, verified SHA-256 and size;
+  a composite FK makes an image carry its patient's split),
+  `dataset_snapshot_exclusions` (every other image with its reason). Never
+  stored: `source` paths, file names, DICOM UIDs, PHI.
+- **Configuration v1** (stored fully resolved; an unknown version is
+  rejected): task `CT_SLICE_BINARY_CLASSIFICATION`, labels NORMAL /
+  ABNORMAL, `includeReviewSources` (default VOTES, RESOLUTION,
+  FINISH_REVIEW), `requireFullyReviewableSeries`, `excludeBroken`, split
+  ratios (default 0.70 / 0.15 / 0.15, summing to 1), `seed`,
+  `minPatientsPerSplit`.
+- **Eligibility**: `reviewState` NORMAL / ABNORMAL (the authoritative
+  result; votes are never re-counted) from an included source, patient not
+  in the trash, image not broken, Series fully reviewable (the shared
+  `isSimpleStack` rule), file verified. Otherwise the first matching reason:
+  `PATIENT_TRASHED`, `BROKEN`, `SERIES_NOT_FULLY_REVIEWABLE`,
+  `NOT_REVIEWED`, `UNCERTAIN`, `CONFLICTED`, `REVIEW_SOURCE_NOT_INCLUDED`,
+  `MISSING_FILE_HASH`, `MISSING_FILE`, `FILE_SIZE_MISMATCH`,
+  `FILE_HASH_MISMATCH`.
+- **Split** (`GLOBAL_QUOTAS_STRATIFIED_SHA256_RANK_V1`, by patient; no
+  randomness): global patient quotas from the ratios (largest remainder;
+  `minPatientsPerSplit` enforced on them); strata NORMAL_ONLY /
+  ABNORMAL_ONLY / MIXED share every split's capacity in proportion (exact
+  totals); within a stratum patients are ordered by
+  `SHA-256("dataset-split:v1:" + seed + ":" + patientGroupKey)` and fill TEST,
+  VALIDATION, then TRAIN. The grouping key is the internal Patient id (a
+  future de-identified key can take its place).
+- **Preview** (DRAFT, no writes, no freeze needed): eligible patients /
+  images, labels, sources, exclusions by reason, strata, quotas, per-split
+  counts. Only cheap file checks (hash recorded, file exists, size).
+- **Finalization** (one REPEATABLE READ transaction): first statement
+  `pg_try_advisory_xact_lock_shared` on the review-freeze lock (not granted:
+  409 `REVIEW_FREEZE_CHANGING`), an active global review freeze is required
+  (409 `REVIEW_NOT_FROZEN`), the snapshot row `FOR UPDATE`, then every
+  included file is resolved safely and **re-hashed (SHA-256, streamed)**
+  against `fileSha256` (`fileVerification = SHA256_REHASHED`), and
+  patients, items and exclusions are stored. The shared lock keeps
+  unfreeze out until the commit; review mutations and patient trash /
+  restore / delete are refused while frozen.
+- **Source deletion**: items reference `patients_images` with ON DELETE
+  RESTRICT. Permanent patient deletion is refused with 409
+  `PATIENT_IN_DATASET_SNAPSHOT` (the snapshot ids and names) when any of its
+  images is in a finalized / archived snapshot; drafts never block it.
+  There is no erasure / retirement procedure yet.
+- **Consumers** must verify each file against the item's `fileSha256`
+  before use; the bytes are reproducible only while they match.
+
+API (`dashboard:admin`): `POST /dataset-snapshots`, `GET /dataset-snapshots`,
+`GET | PATCH | DELETE /dataset-snapshots/:id`, `POST /dataset-snapshots/:id/preview`,
+`POST /dataset-snapshots/:id/finalize`, `POST /dataset-snapshots/:id/archive`,
+`GET /dataset-snapshots/:id/items?split=&after=&limit=` (the manifest; the
+only response with file hashes).
+
+CLI (the same service; **preferred for finalizing large datasets**, as
+every file is re-hashed):
+
+```sh
+node migrate.js dataset-snapshot preview <snapshotId> [--report ~/preview.json]
+# enable the review freeze first (POST /review/freeze), then:
+node migrate.js dataset-snapshot finalize <snapshotId> --operator "<name>"
+# unfreeze afterwards (POST /review/unfreeze)
+```
+
 ## Commands
 
 The CLI is bundled as `migrate.js` next to `main.js` and uses the same

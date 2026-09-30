@@ -111,6 +111,15 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
       require('./models/PatientImageReviewCompletion.model')
         .PatientImageReviewCompletion,
       require('./models/ReviewFreeze.model').ReviewFreeze,
+      ...(() => {
+        const snapshots = require('./models/DatasetSnapshot.model');
+        return [
+          snapshots.DatasetSnapshot,
+          snapshots.DatasetSnapshotPatient,
+          snapshots.DatasetSnapshotItem,
+          snapshots.DatasetSnapshotExclusion,
+        ];
+      })(),
     ];
   });
 
@@ -183,6 +192,11 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
     await syncModels();
     const synced = await migrator.readActualSchema(sequelize);
 
+    // Sequelize cannot declare this composite FK: it exists in the
+    // migration only (an item carries its patient's split).
+    migrated.foreignKeys = migrated.foreignKeys.filter(
+      ({ name }) => name !== 'dataset_snapshot_items_patient_split_fkey'
+    );
     const normalize = (schema: MigratorModule.ActualSchema) => ({
       ...schema,
       uniqueIndexes: [...schema.uniqueIndexes].sort((a, b) =>

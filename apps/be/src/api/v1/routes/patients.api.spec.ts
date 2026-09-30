@@ -22,6 +22,11 @@ const mockLogger = {
 jest.mock('../../../services/logger.service', () => ({ logger: mockLogger }));
 // No database here: run the guarded change directly (the review-freeze
 // protocol itself is covered by services/review.integration.spec.ts).
+// (The dataset snapshot pre-check is covered by dataset-snapshot.integration.spec.ts.)
+jest.mock('../../../services/dataset-snapshot/snapshot.service', () => ({
+  ...jest.requireActual('../../../services/dataset-snapshot/snapshot.service'),
+  assertPatientNotInDatasetSnapshots: async () => undefined,
+}));
 jest.mock('../../../services/review.service', () => ({
   ...jest.requireActual('../../../services/review.service'),
   withReviewFreezeGuard: (run: (transaction: undefined) => unknown) =>

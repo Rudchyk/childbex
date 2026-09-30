@@ -2,6 +2,7 @@ import { HTTPError } from 'fets';
 import type { ArchiveError } from '../../../services/archive/archive.errors';
 import type { UploadSessionError } from '../../../services/upload-sessions/upload-session.errors';
 import type { ReviewError } from '../../../services/review.service';
+import type { DatasetSnapshotError } from '../../../services/dataset-snapshot/snapshot.service';
 
 export const getSecurityServiceUnavailableError = () =>
   new HTTPError(
@@ -92,6 +93,21 @@ export const getReviewHttpError = (error: ReviewError) =>
         : 'Invalid request',
     {},
     { message: error.message, code: error.code }
+  );
+
+/** Maps a dataset snapshot error to a client-safe HTTP error (ids / names only). */
+export const getDatasetSnapshotHttpError = (error: DatasetSnapshotError) =>
+  new HTTPError(
+    error.status,
+    error.status === 404
+      ? 'Not found'
+      : error.status === 409
+        ? 'Conflict'
+        : error.status === 422
+          ? 'Unprocessable'
+          : 'Invalid request',
+    {},
+    { message: error.message, code: error.code, ...(error.details ?? {}) }
   );
 
 /**

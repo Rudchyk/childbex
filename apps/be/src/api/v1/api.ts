@@ -12,6 +12,7 @@ import './routes/review.api.routes';
 // After the patient routes: /patients/slug/:slug takes precedence.
 import './routes/hierarchy.api.routes';
 import './routes/legacy-clusters.api.routes';
+import './routes/dataset-snapshots.api.routes';
 import './routes/upload-sessions.api.routes';
 
 /**

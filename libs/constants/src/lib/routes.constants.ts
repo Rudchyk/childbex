@@ -39,6 +39,16 @@ const hierarchy = {
   patientSeriesFinishReview: '/patients/:patientId/series/:seriesId/review/finish',
 };
 
+/** ML dataset snapshots (dashboard:admin). */
+const datasetSnapshots = {
+  datasetSnapshots: '/dataset-snapshots',
+  datasetSnapshot: '/dataset-snapshots/:id',
+  datasetSnapshotPreview: '/dataset-snapshots/:id/preview',
+  datasetSnapshotFinalize: '/dataset-snapshots/:id/finalize',
+  datasetSnapshotArchive: '/dataset-snapshots/:id/archive',
+  datasetSnapshotItems: '/dataset-snapshots/:id/items',
+};
+
 const review = {
   /** Global review freeze: GET state, POST freeze. */
   reviewFreeze: '/review/freeze',
@@ -57,6 +67,7 @@ export const apiRoutes = {
   ...patients,
   ...hierarchy,
   ...review,
+  ...datasetSnapshots,
   ...uploadSessions,
   ...llmService,
 };

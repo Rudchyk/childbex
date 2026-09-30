@@ -235,7 +235,9 @@ describeWithDatabase('legacy cluster removal (PostgreSQL)', () => {
       const votesBefore = await rows('SELECT * FROM patient_image_review_votes');
       const [completionBefore] = await rows('SELECT * FROM patient_image_review_completions');
 
-      expect((await migrator.migrateUp(sequelize)).map(({ name }) => name)).toEqual([DROP]);
+      expect(
+        (await migrator.migrateUp(sequelize, undefined, { to: DROP })).map(({ name }) => name)
+      ).toEqual([DROP]);
 
       const schema = await migrator.readActualSchema(sequelize);
       expect(schema.columns.patient_images_clusters).toBeUndefined();
@@ -275,11 +277,12 @@ describeWithDatabase('legacy cluster removal (PostgreSQL)', () => {
         ready: true,
         info: { images: 3, clusters: null, clusterScopedCompletions: 1 },
       });
-      await expect(migrator.assertSchemaUpToDate(sequelize)).resolves.toBeTruthy();
+      await expect(migrator.assertMigratedThrough(sequelize, DROP)).resolves.toBeUndefined();
     });
 
     it('cannot be reverted (no fake reconstruction of clusters)', async () => {
-      await migrator.migrateUp(sequelize);
+      // (Up to this migration: it is then the latest applied one.)
+      await migrator.migrateUp(sequelize, undefined, { to: DROP });
       await expect(migrator.migrateDown(sequelize)).rejects.toThrow(/cannot be reverted/);
       expect(await executed()).toContain(DROP);
       expect(await tableExists('patient_images_clusters')).toBe(false);
