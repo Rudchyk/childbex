@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "task": "CT_SLICE_BINARY_CLASSIFICATION",
+  "mode": "MULTI_WINDOW_3CH",
+  "hu": { "method": "RESCALE_SLOPE_INTERCEPT_V1" },
+  "padding": { "policy": "DECLARED_PIXEL_PADDING_TO_HU_V1", "paddingHu": -2048 },
+  "windowFormula": "LINEAR_CLIP_V1",
+  "windows": [
+    { "name": "soft_tissue", "center": 40, "width": 400 },
+    { "name": "lung", "center": -600, "width": 1500 },
+    { "name": "bone", "center": 500, "width": 2000 }
+  ],
+  "order": "WINDOW_THEN_RESIZE",
+  "resize": {
+    "height": 224,
+    "width": 224,
+    "interpolation": "AREA_V1",
+    "aspectRatioBasis": "PIXEL_SPACING_V1",
+    "placement": "CENTER",
+    "fillValue": 0.0
+  },
+  "orientation": "AS_STORED",
+  "output": { "channels": 3, "dtype": "float32", "range": [0.0, 1.0] }
+}

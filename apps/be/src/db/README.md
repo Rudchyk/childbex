@@ -611,6 +611,11 @@ for one ML experiment ("model X was trained from snapshot Y").
   There is no erasure / retirement procedure yet.
 - **Consumers** must verify each file against the item's `fileSha256`
   before use; the bytes are reproducible only while they match.
+- **Not guaranteed preprocessable**: snapshot schema v1 does not check
+  modality, SOP Class, transfer syntax or rescale metadata. CT
+  preprocessing v1 (`apps/ml`) rejects such items with a machine-readable
+  code; a training run must first run a deterministic preprocessing
+  preflight over the whole snapshot and never silently skip an item.
 
 API (`dashboard:admin`): `POST /dataset-snapshots`, `GET /dataset-snapshots`,
 `GET | PATCH | DELETE /dataset-snapshots/:id`, `POST /dataset-snapshots/:id/preview`,
