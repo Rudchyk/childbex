@@ -8,6 +8,10 @@ The ML side of ChildBEx:
 - `childbex_ml.dataset` (PR10): validation of a materialized DatasetSnapshot
   export, the preprocessing **preflight** over every item, and the lazy
   training-ready loader.
+- `childbex_ml.privacy` + `childbex_ml.cloud_artifact` (PR10.5): the
+  **privacy-minimized tensor artifact**, the only approved path for external /
+  cloud training (PIXEL_GATE_V1, structured pixel-review attestation,
+  NumPy-only reader for PR11).
 
 No training, inference, augmentation or model code yet.
 
@@ -496,10 +500,199 @@ the exported files are the **original DICOM bytes and may contain PHI**. A
 PR10 export is not de-identified and is sensitive medical data:
 
 - a PR10 export may be used in a controlled environment;
-- before a real-patient export is transferred to Google Colab or another
-  external cloud environment, ChildBEx requires a separate, explicit
-  de-identification / data-governance decision;
+- a PR10 export never leaves the controlled environment: external / cloud
+  training uses only the PR10.5 cloud artifact (below), which contains no
+  DICOM; sending DICOM itself outside would require the separate,
+  not-implemented de-identified DICOM capability (Architecture A);
 - nothing in this package uploads, syncs or publishes data, and there is no
   public dataset endpoint;
 - synthetic or properly de-identified datasets are not subject to that
   restriction (the tests use synthetic DICOM only).
+
+## Cloud training artifact (PR10.5)
+
+| | PR10 export | PR10.5 cloud artifact |
+|---|---|---|
+| Content | original DICOM files (all metadata, full resolution) + manifest | PR9 tensors (`float32`, 224 × 224 × 3) + minimal manifest |
+| DICOM bytes / metadata | yes / yes | **none / none** |
+| Identifiers | ChildBEx UUIDs | artifact-scoped tokens only |
+| Classification | sensitive medical data, not de-identified | **pseudonymous, privacy-minimized** medical pixel data — not anonymous, not de-identified |
+| Where | controlled environment only | the only approved input for external / cloud training (PR11) |
+
+```
+FINALIZED DatasetSnapshot → PR10 verified export → passing PR10 preflight (this runtime)
+  → structured pixel-review attestation → PIXEL_GATE_V1 on every original DICOM
+  → canonical PR9 tensors (locally) → .npy shards → manifest → marker → atomic rename
+  → controlled provenance file (outside the artifact)
+```
+
+```sh
+.venv/Scripts/python -m childbex_ml.cloud_artifact build --root <pr10-export> --preset ct-multi-window-v1 \
+    --output <artifact-dir> --provenance <controlled-provenance.json> \
+    --attestation <controlled-attestation.json> [--shard-size 256]
+.venv/Scripts/python -m childbex_ml.cloud_artifact verify --root <artifact-dir>
+.venv/Scripts/python -m childbex_ml.cloud_artifact inspect --root <artifact-dir>
+```
+
+There is no upload, Google Drive or Colab command: moving an artifact is a
+deliberate step under the data-governance decision for external training.
+Exit codes: `0` ok, `2` rejected / invalid, `1` usage or configuration error.
+Output never contains paths, DICOM UIDs, patient identifiers, reviewer
+identity or attestation contents (a failed build lists the controlled-side
+`patientImageId`s with their codes so the operator can act).
+
+### Scope: chest CT, 2D slices
+
+- **Chest CT only.** Head CT is out of scope for v1 (facial re-identification
+  from slice stacks); external training on head CT needs its own governance
+  decision and possibly a defacing workflow (not implemented). There is no
+  automatic anatomy classification: the attestation carries the assertion.
+- **2D slices only.** The artifact deliberately has no study / series id,
+  slice position, `seriesOrderIndex`, DICOM geometry or original slice order;
+  within a patient, samples are ordered by
+  `SHA-256("childbex-cloud:v1:" + manifestSha256 + ":" + patientImageId)`.
+  PR11 is a 2D slice classifier; patient grouping (for leakage checks and
+  patient-level metrics) is available only as `patientToken`.
+
+### PIXEL_GATE_V1 (`childbex_ml.privacy.pixel_gate`)
+
+Evaluated on every verified original DICOM (parsed with the PR9 parser) before
+any tensor is made; every failing image is reported and nothing is written:
+
+| Rule | Rejection |
+|---|---|
+| SOP Class UID = CT Image Storage | `UNSUPPORTED_SOP_CLASS` |
+| BurnedInAnnotation absent, empty or `NO` (`YES` or anything else fails) | `BURNED_IN_ANNOTATION` |
+| RecognizableVisualFeatures absent, empty or `NO` | `RECOGNIZABLE_VISUAL_FEATURES` |
+| ImageType has ≥ 3 values: `ORIGINAL`, `PRIMARY`, `AXIAL` (further values allowed, never proof of safety); missing / DERIVED / SECONDARY / LOCALIZER / other fails | `UNSAFE_IMAGE_TYPE` |
+
+An absent or `NO` BurnedInAnnotation is not evidence of safety. The gate plus
+the human attestation **mitigate** burned-in text risk; they do not eliminate
+it (no OCR). A localizer or derived image fails the build — it is never
+skipped; DatasetSnapshot eligibility is unchanged (a future dataset schema
+version may exclude such images earlier).
+
+### Structured pixel-review attestation (controlled side only)
+
+```json
+{
+  "attestationSchemaVersion": 1,
+  "manifestSha256": "<PR10 manifest hash>",
+  "scope": "ALL_INCLUDED_IMAGES",
+  "pixelReview": "NO_VISIBLE_IDENTIFIERS_OBSERVED",
+  "bodyRegion": "CHEST",
+  "headCtIncluded": false,
+  "reviewedAt": "2026-10-01T09:15:00Z",
+  "reviewerReference": "REV-0042"
+}
+```
+
+Exactly these fields and types (unknown or missing fields, duplicate keys
+rejected); `manifestSha256` must equal the export being processed
+(`ATTESTATION_MANIFEST_MISMATCH`); scope, review, body region and head CT
+values other than the above → `ATTESTATION_SCOPE_UNSUPPORTED`;
+`reviewerReference` is an opaque internal reference
+(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`: no spaces, `@` or path separators).
+`attestationSha256` = SHA-256 of its canonical JSON. The attestation is never
+copied into the artifact; the artifact states only `pixelGate:
+"PIXEL_GATE_V1"` and `attestationVerified: true`.
+
+### Artifact layout and manifest (`CHILDBEX_CT_SLICE_TENSORS_V1`)
+
+```
+<artifact>/manifest.json                   canonical JSON; SHA-256 = artifactSha256
+<artifact>/CLOUD_ARTIFACT_COMPLETE.json    written last
+<artifact>/README-SENSITIVE.txt
+<artifact>/tensors/<SPLIT>-<NNNNN>.npy     e.g. tensors/TRAIN-00000.npy
+```
+
+Shards: standard NumPy `.npy` (format 1.0, written with `numpy.lib.format`),
+dtype `<f4`, C order, shape `(N, H, W, 3)` (N ≤ shard size, default 256),
+uncompressed, no object dtype; read with `allow_pickle=False`. One shard
+sequence per split, in sample order.
+
+```
+{ "artifactSchemaVersion": 1, "kind": "CHILDBEX_CT_SLICE_TENSORS_V1",
+  "privacy": { "containsDicom": false, "dicomMetadata": "NONE", "pixelContent": "PRESENT",
+               "classification": "PSEUDONYMOUS_PRIVACY_MINIMIZED", "pixelGate": "PIXEL_GATE_V1",
+               "attestationVerified": true },
+  "source": { "manifestSha256", "preflightIdentity" },
+  "preprocessing": { "schemaVersion": 1, "configHash", "config" },
+  "producedBy": { childbexMlVersion, pythonImplementation, pythonVersion, numpyVersion, pydicomVersion },
+  "labelEncoding": { "NORMAL": 0, "ABNORMAL": 1 },
+  "tensor": { "shape": [224, 224, 3], "dtype": "float32", "byteOrder": "little", "layout": "HWC" },
+  "counts": { "<SPLIT>": { patients, samples, NORMAL, ABNORMAL } },
+  "patients": [ { "patientToken": "p00001", "split" } ],
+  "shards":   [ { "file": "tensors/TRAIN-00000.npy", "split", "count", "sha256" } ],
+  "samples":  [ { "sampleToken": "s000001", "patientToken", "split", "label", "labelIndex",
+                  "shard", "index", "tensorSha256" } ] }
+```
+
+Never in the artifact: snapshot id, ChildBEx UUIDs (patient group key,
+patient, study, series, image), review provenance, split seed, DICOM UIDs or
+attributes, file names, paths, reviewer data, the attestation or its hash.
+
+**Tokens** are artifact-scoped. Patients are ordered by split (TRAIN,
+VALIDATION, TEST), then by the salted
+`SHA-256("childbex-cloud-patient:v1:" + manifestSha256 + ":" + patientGroupKey)`,
+and numbered `p00001…`: the same PR10 manifest always gives the same tokens,
+but the same patient in another snapshot is not expected to get the same
+token (no ordering by the stable `patientGroupKey`). Samples are numbered
+`s000001…` in artifact order (salted sample key within each patient). The
+ordering keys are never written to the artifact.
+
+**Integrity:** `tensorSha256` = SHA-256 of one sample's raw little-endian
+float32 bytes; shard `sha256` = SHA-256 of the whole `.npy` file;
+`artifactSha256` = SHA-256 of the canonical manifest JSON, so any change of a
+tensor, its position, label, split, token, shard membership or order changes
+the identity. The same PR10 export, configuration and runtime produce the
+same `artifactSha256`. The marker holds `artifactSha256`, sample / shard
+counts, `totalTensorBytes`, `containsDicom: false` and `createdAt` (not part
+of the identity).
+
+**Atomic build:** temporary sibling directory → each shard streamed (one
+tensor in memory), flushed, re-opened and re-verified, then renamed → canonical
+manifest → README → marker last → controlled provenance written to a
+temporary file → artifact directory renamed into place → provenance made
+final. Any failure removes the temporary directory and the temporary
+provenance; if the provenance cannot be finalized, the artifact is removed
+again. The output and the provenance file must not exist; the provenance must
+not be inside the artifact, and the artifact not inside the PR10 export.
+
+**Controlled provenance file** (never inside the artifact; 0600 where
+supported): `artifactSha256`, `snapshotId`, `manifestSha256`,
+`preflightIdentity`, `preprocessingConfigHash`, `attestationSha256`, the
+attestation fields, `createdAt`, and the mappings `patientToken →
+patientGroupKey` and `sampleToken → patientImageId`, so any model output can
+be traced back to its ChildBEx image inside the controlled environment.
+
+### Reader for PR11 (`childbex_ml.cloud_artifact`)
+
+NumPy-only (imports neither pydicom nor the PR9 / PR10 modules) and needs no
+ChildBEx backend or database:
+
+```python
+from childbex_ml.cloud_artifact import CloudArtifact
+
+artifact = CloudArtifact.open(root)   # marker, manifest schema, artifactSha256, exact file set, shard headers + SHA-256
+for sample in artifact.iter_split("TRAIN"):   # deterministic manifest order; no shuffling
+    sample.tensor, sample.label, sample.label_index, sample.patient_token, sample.sample_token
+artifact.verify()                     # additionally re-hashes every tensor
+```
+
+Validation rejects: missing / extra files or folders, symlinks and non-regular
+files, malformed `.npy` headers, wrong dtype, byte order, shape or memory
+order, object arrays, wrong shard or tensor hashes, marker mismatches, and
+manifests violating the schema, token uniqueness, patient-level split
+integrity (`SPLIT_INTEGRITY_ERROR`) or counts. Seeded shuffling and
+augmentation belong to PR11.
+
+### Not implemented (future, separate decisions)
+
+- **Architecture A — de-identified DICOM export:** designed (allowlist rebuild
+  per DICOM PS3.15 Annex E Basic Profile with Clean Descriptors and Clean
+  Graphics options, deterministic UID replacement, zeroed unused high bits,
+  `preprocess(original) == preprocess(deidentified)` byte-for-byte), not
+  implemented; only for a concrete need to move DICOM itself outside.
+- OCR for burned-in text, defacing, head CT, automatic anatomy detection.
+- A DatasetSnapshot schema version excluding localizer / derived images.

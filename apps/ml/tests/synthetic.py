@@ -55,6 +55,9 @@ def ct_dataset(
     bits_allocated: int = 16,
     samples_per_pixel: int = 1,
     high_bit: int | None = None,
+    image_type=("ORIGINAL", "PRIMARY", "AXIAL"),
+    burned_in_annotation: str | None = None,
+    recognizable_visual_features: str | None = None,
 ) -> Dataset:
     """A CT Image Storage data set; `stored` holds signed/unsigned stored
     values, `raw_words` the exact 16-bit words (e.g. garbage high bits)."""
@@ -103,6 +106,12 @@ def ct_dataset(
     # Display windows that must never be used by preprocessing.
     ds.WindowCenter = 12345
     ds.WindowWidth = 3
+    if image_type is not None:
+        ds.ImageType = list(image_type)
+    if burned_in_annotation is not None:
+        ds.BurnedInAnnotation = burned_in_annotation
+    if recognizable_visual_features is not None:
+        ds.RecognizableVisualFeatures = recognizable_visual_features
     if padding_value is not None:
         ds.PixelPaddingValue = padding_value
     if padding_limit is not None:
