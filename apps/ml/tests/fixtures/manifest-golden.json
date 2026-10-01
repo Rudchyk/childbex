@@ -1,0 +1,45 @@
+{
+  "snapshot": {
+    "totalImages": 5,
+    "id": "dddddddd-dddd-4ddd-8ddd-000000000001",
+    "datasetSchemaVersion": 1,
+    "datasetConfiguration": {
+      "datasetSchemaVersion": 1,
+      "task": "CT_SLICE_BINARY_CLASSIFICATION",
+      "labels": ["NORMAL", "ABNORMAL"],
+      "includeReviewSources": ["VOTES", "RESOLUTION", "FINISH_REVIEW"],
+      "requireFullyReviewableSeries": true,
+      "excludeBroken": true,
+      "finalizationFileVerification": "SHA256_REHASHED",
+      "split": {
+        "train": 0.7,
+        "validation": 0.15,
+        "test": 0.15,
+        "seed": "golden-seed-ü",
+        "stratifyBy": "PATIENT_LABEL_MIX",
+        "minPatientsPerSplit": 1,
+        "algorithm": "GLOBAL_QUOTAS_STRATIFIED_SHA256_RANK_V1"
+      }
+    },
+    "splitSeed": "golden-seed-ü",
+    "finalizedAt": "2026-10-01T08:00:00.000Z",
+    "reviewFreezeId": "eeeeeeee-eeee-4eee-8eee-000000000001",
+    "fileVerification": "SHA256_REHASHED",
+    "totalPatients": 3,
+    "normalImages": 3,
+    "abnormalImages": 2
+  },
+  "manifestSchemaVersion": 1,
+  "patients": [
+    { "patientGroupKey": "11111111-1111-4111-8111-000000000003", "patientId": "11111111-1111-4111-8111-000000000003", "split": "TEST", "stratum": "ABNORMAL_ONLY", "imageCount": 1, "normalImages": 0, "abnormalImages": 1 },
+    { "patientGroupKey": "11111111-1111-4111-8111-000000000001", "patientId": "11111111-1111-4111-8111-000000000001", "split": "TRAIN", "stratum": "MIXED", "imageCount": 3, "normalImages": 2, "abnormalImages": 1 },
+    { "patientGroupKey": "11111111-1111-4111-8111-000000000002", "patientId": "11111111-1111-4111-8111-000000000002", "split": "VALIDATION", "stratum": "NORMAL_ONLY", "imageCount": 1, "normalImages": 1, "abnormalImages": 0 }
+  ],
+  "items": [
+    { "patientImageId": "33333333-3333-4333-8333-000000000005", "patientGroupKey": "11111111-1111-4111-8111-000000000003", "patientId": "11111111-1111-4111-8111-000000000003", "studyId": "44444444-4444-4444-8444-000000000003", "seriesId": "55555555-5555-4555-8555-000000000003", "split": "TEST", "label": "ABNORMAL", "reviewStateAtSnapshot": "ABNORMAL", "reviewStateSourceAtSnapshot": "RESOLUTION", "seriesOrderIndex": 0, "fileSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "fileSize": 4096 },
+    { "patientImageId": "33333333-3333-4333-8333-000000000003", "patientGroupKey": "11111111-1111-4111-8111-000000000001", "patientId": "11111111-1111-4111-8111-000000000001", "studyId": "44444444-4444-4444-8444-000000000001", "seriesId": "55555555-5555-4555-8555-000000000001", "split": "TRAIN", "label": "ABNORMAL", "reviewStateAtSnapshot": "ABNORMAL", "reviewStateSourceAtSnapshot": "VOTES", "seriesOrderIndex": 10, "fileSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "fileSize": 1024 },
+    { "patientImageId": "33333333-3333-4333-8333-000000000001", "patientGroupKey": "11111111-1111-4111-8111-000000000001", "patientId": "11111111-1111-4111-8111-000000000001", "studyId": "44444444-4444-4444-8444-000000000001", "seriesId": "55555555-5555-4555-8555-000000000001", "split": "TRAIN", "label": "NORMAL", "reviewStateAtSnapshot": "NORMAL", "reviewStateSourceAtSnapshot": "VOTES", "seriesOrderIndex": 2, "fileSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fileSize": 1024 },
+    { "patientImageId": "33333333-3333-4333-8333-000000000004", "patientGroupKey": "11111111-1111-4111-8111-000000000002", "patientId": "11111111-1111-4111-8111-000000000002", "studyId": "44444444-4444-4444-8444-000000000002", "seriesId": "55555555-5555-4555-8555-000000000002", "split": "VALIDATION", "label": "NORMAL", "reviewStateAtSnapshot": "NORMAL", "reviewStateSourceAtSnapshot": "FINISH_REVIEW", "seriesOrderIndex": 0, "fileSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "fileSize": 2048 },
+    { "patientImageId": "33333333-3333-4333-8333-000000000002", "patientGroupKey": "11111111-1111-4111-8111-000000000001", "patientId": "11111111-1111-4111-8111-000000000001", "studyId": "44444444-4444-4444-8444-000000000001", "seriesId": "55555555-5555-4555-8555-000000000001", "split": "TRAIN", "label": "NORMAL", "reviewStateAtSnapshot": "NORMAL", "reviewStateSourceAtSnapshot": "VOTES", "seriesOrderIndex": 3, "fileSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "fileSize": 1024 }
+  ]
+}

@@ -12,7 +12,6 @@ values need a new configuration (and so a new hash) or a new version.
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import math
 import re
@@ -20,6 +19,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from ..canonical import canonical_json, hash_canonical  # noqa: F401 (re-exported)
 from .errors import ConfigError
 
 SCHEMA_VERSION = 1
@@ -193,47 +193,6 @@ def resolve_config(raw: Any) -> dict:
         "orientation": ORIENTATION,
         "output": copy.deepcopy(OUTPUT),
     }
-
-
-def _canonical_value(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {key: _canonical_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_canonical_value(item) for item in value]
-    if isinstance(value, bool) or value is None or isinstance(value, str):
-        return value
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ConfigError("non-finite numbers cannot be serialized")
-        if value.is_integer() and abs(value) < 2**53:
-            return int(value)
-        text = repr(value)
-        if "e" in text or "E" in text:
-            raise ConfigError("numbers needing an exponent are not supported in the canonical form")
-        return value
-    raise ConfigError("unsupported value type in configuration")
-
-
-def canonical_json(value: Any) -> str:
-    """Canonical JSON: sorted keys, no whitespace, UTF-8, integral numbers
-    written as integers (40.0 -> 40), other numbers in the shortest
-    round-trip decimal form; non-finite numbers and exponents are rejected.
-    For the values schema version 1 allows this matches RFC 8785 (JCS).
-    """
-    return json.dumps(
-        _canonical_value(value),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
-
-
-def hash_canonical(value: Any) -> str:
-    """Lowercase hex SHA-256 of the canonical JSON (UTF-8) of any value."""
-    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
 def config_hash(config: Any) -> str:

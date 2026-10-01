@@ -616,6 +616,19 @@ for one ML experiment ("model X was trained from snapshot Y").
   preprocessing v1 (`apps/ml`) rejects such items with a machine-readable
   code; a training run must first run a deterministic preprocessing
   preflight over the whole snapshot and never silently skip an item.
+- **Export for ML** (`services/dataset-snapshot/export.ts`, CLI below):
+  FINALIZED / ARCHIVED only; membership read in one read-only REPEATABLE
+  READ transaction (no writes). Writes `manifest.json` (manifest schema v1:
+  canonical JSON, only immutable non-identifying fields; no status, names,
+  paths, file names or UIDs), `dicom/<patientImageId>.dcm` (byte copies,
+  never links; source hashed while copying, copy re-hashed),
+  `README-SENSITIVE.txt` and, last, `EXPORT_COMPLETE.json` (snapshot id,
+  `manifestSha256`, status at export). Everything is built in a hidden
+  temporary sibling directory and renamed to `<output>` only when complete;
+  any failure (every failing file is reported) removes it. The target must
+  not exist and must be outside the upload / archive storage. The export is
+  **sensitive medical data** (original DICOM, not de-identified); see
+  `apps/ml/README.md` for the manifest schema, preflight and loader.
 
 API (`dashboard:admin`): `POST /dataset-snapshots`, `GET /dataset-snapshots`,
 `GET | PATCH | DELETE /dataset-snapshots/:id`, `POST /dataset-snapshots/:id/preview`,
@@ -631,6 +644,7 @@ node migrate.js dataset-snapshot preview <snapshotId> [--report ~/preview.json]
 # enable the review freeze first (POST /review/freeze), then:
 node migrate.js dataset-snapshot finalize <snapshotId> --operator "<name>"
 # unfreeze afterwards (POST /review/unfreeze)
+node migrate.js dataset-snapshot export <snapshotId> --output <new-directory>
 ```
 
 ## Commands

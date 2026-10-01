@@ -72,7 +72,7 @@ const usage =
   'Usage: node migrate.js <up [--to <migration>] | status | down | baseline --check | baseline --apply' +
   ' | backfill dicom-metadata [options] | backfill study-series [options]' +
   ' | backfill review-state [options] | audit review-state [options]' +
-  ' | audit cluster-removal [options] | dataset-snapshot <preview|finalize> <id> [options]' +
+  ' | audit cluster-removal [options] | dataset-snapshot <preview|finalize|export> <id> [options]' +
   ' | cleanup duplicate-sop [options]>';
 
 const printComparison = ({ errors, warnings }: SchemaComparison) => {

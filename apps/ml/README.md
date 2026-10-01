@@ -1,9 +1,15 @@
 # childbex-ml
 
-The ML side of ChildBEx. PR9 contains only the **canonical, versioned CT
-slice preprocessing**: one original CT DICOM instance → one `H × W × 3`
-float32 tensor for a future slice classifier (EfficientNetV2B0). No
-training, inference, augmentation or model code yet.
+The ML side of ChildBEx:
+
+- `childbex_ml.preprocessing` (PR9): the **canonical, versioned CT slice
+  preprocessing**: one original CT DICOM instance → one `H × W × 3` float32
+  tensor for a future slice classifier (EfficientNetV2B0);
+- `childbex_ml.dataset` (PR10): validation of a materialized DatasetSnapshot
+  export, the preprocessing **preflight** over every item, and the lazy
+  training-ready loader.
+
+No training, inference, augmentation or model code yet.
 
 The Node backend owns DICOM storage, review and immutable DatasetSnapshots;
 this package owns pixel decoding, HU conversion, windowing and
@@ -43,7 +49,8 @@ pydicom warnings are suppressed because they quote element values), and
 writes no images. Exit codes: `0` preprocessable, `2` not preprocessable
 (`errorCode` set), `1` usage / configuration / read error.
 
-Library entry points (`childbex_ml.preprocessing`): `load_preset`,
+Library entry points (`childbex_ml.preprocessing`; the dataset API is
+described below): `load_preset`,
 `load_config_file`, `resolve_config`, `config_hash`, `canonical_json`,
 `load_verified_bytes`, `preprocess_dicom_bytes`, `preprocess_ct_slice`,
 `PreprocessedSlice`, `PreprocessingError` (`.code`), `ConfigError`.
@@ -317,9 +324,182 @@ agree within float32 rounding.
 A DatasetSnapshot item (`patientImageId`, `split`, `label`, `fileSha256`,
 `fileSize`) is **not guaranteed to be preprocessable**: snapshot schema v1
 does not check modality, SOP Class, transfer syntax or rescale metadata.
-The training work (PR10) must run a deterministic preprocessing preflight
-over the whole snapshot before training (per item: supported or the error
-code) and must never silently skip unsupported items. A TrainingRun then
-references: snapshot id, preprocessing `configHash` (plus the resolved
-configuration), package version, and its own explicit model input
-adaptation.
+A deterministic preprocessing preflight over the whole snapshot is
+therefore required before training (below); unsupported items are never
+silently skipped. A future TrainingRun references: snapshot id,
+`manifestSha256`, preprocessing `configHash` (plus the resolved
+configuration), the `preflightIdentity` (which binds the runtime), and its
+own explicit model input adaptation.
+
+## Snapshot export, preflight and training loader (PR10)
+
+```
+FINALIZED DatasetSnapshot (PostgreSQL, immutable)
+  → node migrate.js dataset-snapshot export <id> --output <dir>   (backend)
+  → <dir>/manifest.json + dicom/<patientImageId>.dcm + EXPORT_COMPLETE.json
+  → python -m childbex_ml.dataset preflight --root <dir> --preset …
+  → SnapshotDataset.open(<dir>, config).iter_split("TRAIN") → samples
+```
+
+Python never queries the database, never sees `PatientImage.source` and
+never reads live review state: labels and splits come only from the frozen
+manifest.
+
+### Export layout (format version 1)
+
+```
+<root>/manifest.json            canonical manifest (schema v1)
+<root>/EXPORT_COMPLETE.json     completion marker, written last
+<root>/README-SENSITIVE.txt
+<root>/dicom/<patientImageId>.dcm
+<root>/preflight/<preprocessingConfigHash>.json   (written by preflight)
+```
+
+The backend builds the export in a hidden temporary sibling directory:
+every file is streamed from storage while its SHA-256 is computed, checked
+against the snapshot, re-hashed after writing and only then renamed into
+place; the manifest and then the marker are written only when every file
+succeeded, and the directory is renamed to `<root>` in one step. Any
+failure (all failing files are reported as `patientImageId` + code) removes
+the temporary directory, so an incomplete export never looks complete.
+Files are byte copies (never hard links, which would share bytes with the
+storage); directories are created 0700 and files 0600 where supported. The
+DICOM file location is structural (`dicom/<patientImageId>.dcm`), never a
+stored path; the whole directory can be moved or copied.
+
+`EXPORT_COMPLETE.json`: `exportFormatVersion` 1, `manifestSchemaVersion` 1,
+`snapshotId`, `manifestSha256`, `snapshotStatusAtExport` (FINALIZED or
+ARCHIVED; mutable, so kept out of the manifest), `itemCount`, `totalBytes`,
+`exportedAt`, `sensitive: true`, `deidentified: false`.
+
+### Manifest schema v1
+
+```
+{ "manifestSchemaVersion": 1,
+  "snapshot": { id, datasetSchemaVersion (1), datasetConfiguration (resolved),
+                splitSeed, finalizedAt, reviewFreezeId, fileVerification
+                ("SHA256_REHASHED"), totalPatients, totalImages,
+                normalImages, abnormalImages },
+  "patients": [ { patientGroupKey, patientId, split, stratum, imageCount,
+                  normalImages, abnormalImages } ],
+  "items":    [ { patientImageId, patientGroupKey, patientId, studyId, seriesId,
+                  split, label, reviewStateAtSnapshot, reviewStateSourceAtSnapshot,
+                  seriesOrderIndex, fileSha256, fileSize } ] }
+```
+
+Snapshot → manifest mapping: `snapshot` from `dataset_snapshots` (no
+status, name, description or operator names), `patients` from
+`dataset_snapshot_patients` (no `splitRank`), `items` from
+`dataset_snapshot_items` (no vote counts, no review resolution / completion
+ids). Never: paths, file names, DICOM UIDs, patient names.
+
+**Canonical order:** patients by split (TRAIN, VALIDATION, TEST), then
+`patientGroupKey`; items by split, `patientGroupKey`, `seriesId`,
+`seriesOrderIndex`, `patientImageId` (string comparison; identifiers are
+ASCII). Never SQL default order.
+
+**`manifestSha256`** = SHA-256 of the canonical JSON (`childbex_ml.canonical`:
+sorted keys, no whitespace, integral numbers as integers, shortest
+decimals, no exponents) of the canonically ordered manifest. The backend
+writes exactly these bytes, so `sha256sum manifest.json` equals it; Python
+re-orders and re-canonicalizes before hashing, so a reformatted or
+reordered file hashes the same. Node and Python share the golden vector
+`tests/fixtures/manifest-golden.json`
+(`c05a73e04eba3b3343f22a9f4246b5af405b959d0818538133db063b720a943a`).
+
+**Validation** (independent of the database constraints; the JSON is not
+trusted because it came from our backend):
+
+| Check | Error |
+|---|---|
+| marker present, regular file, format 1 | `EXPORT_INCOMPLETE` |
+| status at export FINALIZED / ARCHIVED; `finalizedAt` set | `SNAPSHOT_NOT_FINALIZED` |
+| exact keys and types; versions 1; lowercase canonical UUIDs; lowercase 64-hex SHA-256; `fileSize > 0`; labels NORMAL / ABNORMAL; splits TRAIN / VALIDATION / TEST; `reviewStateAtSnapshot = label`; no duplicate JSON keys | `INVALID_MANIFEST` |
+| duplicate `patientImageId` or (`seriesId`, `seriesOrderIndex`) | `DUPLICATE_ITEM` |
+| one patient row (one split) per `patientGroupKey`; item split = patient split; item `patientId` = patient's; a series in one study and patient; a study in one patient; no patient in two splits | `SNAPSHOT_SPLIT_INTEGRITY_ERROR` |
+| item / patient / label totals, per-patient counts and stratum | `SNAPSHOT_COUNT_MISMATCH` |
+| recomputed hash = marker `manifestSha256` | `MANIFEST_HASH_MISMATCH` |
+| marker `snapshotId`, `itemCount`, `totalBytes` match the manifest | `EXPORT_MARKER_MISMATCH` |
+| `dicom/` holds exactly one regular file per item: nothing missing | `FILE_MISSING` |
+| … nothing extra, files or directories (counted; names never reported) | `UNEXPECTED_EXPORT_FILE` |
+| … no symlink or non-regular object at an expected name | `EXPORT_FILE_NOT_REGULAR` |
+
+### Preflight
+
+```sh
+.venv/Scripts/python -m childbex_ml.dataset inspect --root <dir>
+.venv/Scripts/python -m childbex_ml.dataset preflight --root <dir> --preset ct-multi-window-v1 [--report-dir <dir>]
+```
+
+The configuration is always explicit (`--preset` or `--config`; no
+default). Folder- and schema-level problems (table above) stop before any
+item is processed. Then **every** item is processed in canonical order:
+regular file, exact size and SHA-256 (before decoding), PR9 validation and
+preprocessing, tensor contract (exactly `(height, width, 3)`, float32,
+finite, within [0, 1]). Every failure is collected (`FILE_MISSING`,
+`FILE_INTEGRITY_MISMATCH`, `EXPORT_FILE_NOT_REGULAR`, the PR9 codes such as
+`UNSUPPORTED_TRANSFER_SYNTAX` or `MISSING_CT_RESCALE`,
+`PREPROCESSING_FAILED`, `TENSOR_CONTRACT_VIOLATION`); nothing is skipped and
+nothing stops early. One item is in memory at a time. Exit codes: `0`
+passed, `2` failed or invalid export, `1` usage / configuration error.
+
+The report is written atomically to
+`preflight/<preprocessingConfigHash>.json`, passing or not:
+`preflightSchemaVersion`, `preflightIdentity`, `ok`, `snapshotId`,
+`manifestSha256`, `preprocessing` (schema version, config hash, resolved
+config), `runtime`, `labelEncoding`, `totalItems`, `passedItems`,
+`failedItems`, `bySplit`, `failuresByCode`, `failures` (`patientImageId`,
+`split`, `code`), `startedAt`, `finishedAt`. No paths, file names, UIDs or
+DICOM values.
+
+```
+preflightIdentity = SHA-256(canonical JSON of {
+  preflightSchemaVersion: 1, snapshotId, manifestSha256, preprocessingConfigHash,
+  runtime: { childbexMlVersion, pythonImplementation, pythonVersion,
+             numpyVersion, pydicomVersion } })
+```
+
+Timestamps are not part of the identity. PR9 preprocessing is
+deterministic only within its runtime, so the identity binds the runtime:
+an export (with its reports) may be copied to another machine, but that
+machine must run its own successful preflight before training. This is a
+runtime check, not an installation constraint.
+
+### Training loader
+
+```python
+from childbex_ml.dataset import SnapshotDataset
+from childbex_ml.preprocessing import load_preset
+
+dataset = SnapshotDataset.open(root, load_preset("ct-multi-window-v1"))
+for sample in dataset.iter_split("TRAIN"):
+    sample.tensor        # (224, 224, 3) float32 in [0, 1], canonical PR9 output
+    sample.label         # "NORMAL" | "ABNORMAL"
+    sample.label_index   # LABEL_ENCODING_V1: NORMAL = 0, ABNORMAL = 1
+    sample.patient_group_key, sample.patient_image_id, sample.series_id, sample.series_order_index
+```
+
+`open()` re-validates the export and requires the report for this
+configuration (`PREFLIGHT_REQUIRED`) to have passed (`PREFLIGHT_FAILED`)
+and to match this snapshot, manifest hash, configuration and the **current
+runtime** exactly (`PREFLIGHT_STALE`). `iter_split("TRAIN" | "VALIDATION" |
+"TEST")` is a generator in canonical order (`patientGroupKey`, `seriesId`,
+`seriesOrderIndex`, `patientImageId`; no shuffling, no tensor cache): each
+sample re-verifies its file and is preprocessed on demand. Any error aborts
+the iteration (`DatasetError` with code and `patientImageId`); a sample is
+never skipped.
+
+### Sensitive data and Colab
+
+The file names and the manifest contain no names, paths or DICOM UIDs, but
+the exported files are the **original DICOM bytes and may contain PHI**. A
+PR10 export is not de-identified and is sensitive medical data:
+
+- a PR10 export may be used in a controlled environment;
+- before a real-patient export is transferred to Google Colab or another
+  external cloud environment, ChildBEx requires a separate, explicit
+  de-identification / data-governance decision;
+- nothing in this package uploads, syncs or publishes data, and there is no
+  public dataset endpoint;
+- synthetic or properly de-identified datasets are not subject to that
+  restriction (the tests use synthetic DICOM only).
