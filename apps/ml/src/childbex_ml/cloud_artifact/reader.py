@@ -164,6 +164,41 @@ class CloudArtifact:
         samples = [sample for sample in self.manifest["samples"] if sample["split"] == split]
         return self._iterate(samples)
 
+    def split_samples(self, split: str) -> list[dict]:
+        """Manifest records of one split, in manifest (canonical) order."""
+        split = self._split(split)
+        return [sample for sample in self.manifest["samples"] if sample["split"] == split]
+
+    def iter_samples(self, split: str, order: list[int] | None = None) -> Iterator[CloudSample]:
+        """Samples of one split in an explicit order (positions into
+        `split_samples(split)`; default canonical order). Shards are opened
+        once (validated memory maps) and kept open for random access; every
+        tensor's SHA-256 is still verified when it is read."""
+        records = self.split_samples(split)
+        if order is None:
+            order = list(range(len(records)))
+        elif sorted(order) != list(range(len(records))):
+            raise ValueError("order must be a permutation of the split's sample positions")
+        return self._iterate_cached([records[i] for i in order])
+
+    def _iterate_cached(self, samples: list[dict]) -> Iterator[CloudSample]:
+        shards: dict[str, np.ndarray] = {}
+        for sample in samples:
+            array = shards.get(sample["shard"])
+            if array is None:
+                array = shards[sample["shard"]] = self._open_shard(self._shards[sample["shard"]])
+            tensor = np.array(array[sample["index"]], dtype=np.float32, copy=True)
+            if tensor_sha256(tensor) != sample["tensorSha256"]:
+                raise CloudArtifactError("TENSOR_HASH_MISMATCH", detail=sample["sampleToken"])
+            yield CloudSample(
+                tensor=tensor,
+                label=sample["label"],
+                label_index=sample["labelIndex"],
+                split=sample["split"],
+                patient_token=sample["patientToken"],
+                sample_token=sample["sampleToken"],
+            )
+
     def _iterate(self, samples: list[dict]) -> Iterator[CloudSample]:
         current_file, current = None, None
         for sample in samples:

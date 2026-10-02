@@ -1,0 +1,50 @@
+{
+  "trainingSchemaVersion": 1,
+  "task": "CT_SLICE_BINARY_CLASSIFICATION",
+  "runtimeProfile": "TRAINING_RUNTIME_V1",
+  "labelEncoding": { "NORMAL": 0, "ABNORMAL": 1 },
+  "model": {
+    "architecture": "EFFICIENTNETV2B0_BINARY_LOGIT_V1",
+    "inputShape": [224, 224, 3],
+    "inputAdapter": "EFFICIENTNETV2_IMAGENET_INPUT_V1",
+    "weights": "EFFICIENTNETV2B0_IMAGENET_KERAS_3_11_3_V1",
+    "pooling": "AVG",
+    "dropout": "0.2",
+    "output": "LOGIT"
+  },
+  "data": {
+    "batchSize": 32,
+    "trainOrder": "EPOCH_SHA256_ORDER_V1",
+    "validationOrder": "CANONICAL"
+  },
+  "augmentation": {
+    "policy": "CT2D_AFFINE_V1",
+    "rotationDegrees": 5,
+    "translationFraction": 0.05,
+    "zoomFraction": 0.05,
+    "interpolation": "BILINEAR",
+    "fill": "CONSTANT_0"
+  },
+  "classWeighting": "NONE",
+  "phases": [
+    {
+      "name": "HEAD",
+      "trainable": "HEAD_ONLY_V1",
+      "optimizer": { "name": "ADAM", "learningRate": "0.001" },
+      "maxEpochs": 15,
+      "earlyStoppingPatience": 3
+    },
+    {
+      "name": "FINE_TUNE",
+      "trainable": "BLOCK6_AND_TOP_CONV_BN_FROZEN_V1",
+      "initFrom": "BEST_HEAD_CHECKPOINT",
+      "optimizer": { "name": "ADAM", "learningRate": "0.00001" },
+      "maxEpochs": 20,
+      "earlyStoppingPatience": 5
+    }
+  ],
+  "checkpoint": { "monitor": "val_pr_auc", "mode": "max" },
+  "metrics": "BINARY_LOGIT_METRICS_V1",
+  "seeds": { "global": 20261001, "trainOrder": 20261002, "augmentation": 20261003 },
+  "determinism": "STRICT"
+}

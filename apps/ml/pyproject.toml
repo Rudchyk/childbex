@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "childbex-ml"
-description = "ChildBEx ML side: versioned CT slice preprocessing (no training yet)."
+description = "ChildBEx ML side: versioned CT preprocessing, cloud artifacts and training."
 requires-python = ">=3.12,<3.13"
 dynamic = ["version"]
 # Exact pins: preprocessing determinism is only claimed for this environment.
 dependencies = ["pydicom==3.0.2", "numpy==2.1.3"]
 
 [project.optional-dependencies]
+# TRAINING_RUNTIME_V1 (childbex_ml.training.runtime): exact pins, checked at run time.
+train = ["tensorflow==2.20.0", "keras==3.11.3"]
 dev = ["pytest==8.4.2"]
 
 [tool.setuptools.dynamic]
@@ -21,6 +23,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "childbex_ml.preprocessing" = ["presets/*.json"]
+"childbex_ml.training" = ["presets/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

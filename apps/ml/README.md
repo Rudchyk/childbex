@@ -12,8 +12,11 @@ The ML side of ChildBEx:
   **privacy-minimized tensor artifact**, the only approved path for external /
   cloud training (PIXEL_GATE_V1, structured pixel-review attestation,
   NumPy-only reader for PR11).
+- `childbex_ml.training` (PR11): EfficientNetV2B0 binary slice training from
+  a cloud artifact only (TRAINING_RUNTIME_V1, explicit input adapter,
+  deterministic TRAIN order, VALIDATION-based checkpoints; TEST untouched).
 
-No training, inference, augmentation or model code yet.
+No evaluation, threshold selection, calibration or inference yet (PR12+).
 
 The Node backend owns DICOM storage, review and immutable DatasetSnapshots;
 this package owns pixel decoding, HU conversion, windowing and
@@ -696,3 +699,175 @@ augmentation belong to PR11.
   implemented; only for a concrete need to move DICOM itself outside.
 - OCR for burned-in text, defacing, head CT, automatic anatomy detection.
 - A DatasetSnapshot schema version excluding localizer / derived images.
+
+## Training (PR11): EfficientNetV2B0 from the cloud artifact
+
+`childbex_ml.training` trains the first 2D CT slice classifier (NORMAL = 0,
+ABNORMAL = 1) from a **PR10.5 cloud artifact only** — never DICOM, the PR10
+export, the database or the backend. The model output is decision support
+for a physician, never a diagnosis. PR11 does not evaluate on TEST, select a
+threshold, calibrate or select a final model (PR12).
+
+### Runtime: TRAINING_RUNTIME_V1
+
+| | |
+|---|---|
+| Python | ≥ 3.12, < 3.13 |
+| TensorFlow | **2.20.0** exactly |
+| Keras | **3.11.3** exactly |
+| NumPy | **2.1.3** exactly |
+
+```sh
+.venv/Scripts/python -m pip install -r requirements-train.txt   # or: pip install childbex-ml[train]
+.venv/Scripts/python -m childbex_ml.training check-runtime
+```
+
+Any other runtime fails before training with `UNSUPPORTED_RUNTIME`; a
+dependency upgrade is a new profile, never a wider V1. The actual runtime
+(versions, TensorFlow CUDA / cuDNN build info, devices) is recorded in
+`runtime.json`. Colab's preinstalled packages are not trusted: the notebook
+installs the exact profile. TensorFlow is imported lazily: the rest of
+`childbex_ml` works without the `train` extra.
+
+### Model: EFFICIENTNETV2B0_BINARY_LOGIT_V1
+
+```
+PR9 tensor 224x224x3 float32 [0,1]
+  -> EFFICIENTNETV2_IMAGENET_INPUT_V1   y_c = (x_c - mean_c) / std_c
+       mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225]   (channel 0 soft tissue, 1 lung, 2 bone)
+  -> EfficientNetV2B0(include_top=False, include_preprocessing=False, pooling="avg"), called with training=False
+  -> Dropout(0.2) -> Dense(1): one raw logit
+```
+
+Exactly one input normalization, no ×255. In the Keras 3.11.3 source the
+B-variant built-in preprocessing is `Rescaling(1/255)` + ImageNet
+`Normalization` (inputs in [0, 255]); the generic docstring's "[-1, 1]
+without preprocessing" applies only to S/M/L. A regression test pins
+`builtin(x·255) == backbone(adapter(x))` (atol 1e-5) and known adapter
+values (`[0,0,0] → [-2.1179, -2.0357, -1.8044]`, `[1,1,1] → [2.2489, 2.4286, 2.6400]`).
+The ImageNet statistics are applied per channel because the pretrained stem
+expects them; the channels remain CT windows, not colours.
+
+Loss `BinaryCrossentropy(from_logits=True)`; metrics
+`BINARY_LOGIT_METRICS_V1`: ROC AUC and PR AUC from logits, and accuracy /
+precision / recall with threshold **0.0 on the logit** (= probability 0.5),
+secondary only. `jit_compile=False`, no mixed precision.
+
+### Phases
+
+| Phase | Trainable | Optimizer | Epochs | Early stopping |
+|---|---|---|---|---|
+| HEAD | dropout + logit only (backbone frozen) | Adam `"0.001"` | ≤ 15 | patience 3 |
+| FINE_TUNE (from best HEAD checkpoint) | `block6a`–`block6h` convolutions + `top_conv` (41 layers, 4,447,405 trainable parameters incl. head); **every BatchNormalization frozen** | Adam `"0.00001"` | ≤ 20 | patience 5 |
+
+The backbone is always called with `training=False` and its BatchNorm layers
+are non-trainable, so moving statistics never change (tested). The
+fine-tuning layer set is pinned by a Keras 3.11.3 regression test; if the
+expected structure is missing, training fails with
+`MODEL_STRUCTURE_MISMATCH` instead of fine-tuning something else.
+
+Checkpoint and early stopping follow **`val_pr_auc` (max)**; `val_loss`,
+`val_roc_auc` and the secondary metrics are recorded. The saved model is the
+best FINE_TUNE checkpoint.
+
+### Data
+
+- TRAIN / VALIDATION are read lazily through `CloudArtifact.iter_samples`
+  (validated memory-mapped shards, SHA-256 per tensor; a failure aborts —
+  nothing is skipped) and fed with `tf.data.Dataset.from_generator` →
+  `batch` → `prefetch`. The reader stays the only artifact parser.
+- **TRAIN order `EPOCH_SHA256_ORDER_V1`** is owned by ChildBEx: for each
+  phase and epoch, positions are sorted by
+  `SHA-256("childbex-train-order:v1:<seed>:<phase>:<epoch>:<sampleToken>")`
+  and a dataset is built for exactly that order (no reliance on Keras
+  re-invoking generators). VALIDATION uses the canonical manifest order.
+- **TEST is never iterated, decoded or counted** (`TEST_ACCESS_FORBIDDEN`);
+  it is covered only by the structural shard verification of
+  `CloudArtifact.open`. (Do not use `cloud_artifact verify` in PR11: it
+  re-hashes every tensor of every split.)
+- Training fails before fitting if TRAIN or VALIDATION is empty or has a
+  single class.
+- Class weighting: `NONE` or `TRAIN_BALANCED_V1` (`w_c = n_train / (2·n_c)`,
+  TRAIN counts only). No oversampling, no synthetic images.
+- Augmentation (TRAIN only, in a training wrapper — never in `model.keras`):
+  `NONE` or `CT2D_AFFINE_V1` = rotation ±5°, translation ±5 %, zoom ±5 %,
+  bilinear, constant fill 0.0, seeded. One spatial transform per image for
+  all three channels; no flips (left/right chest anatomy), no brightness,
+  contrast, hue, saturation or channel permutation.
+
+### Configuration and hashes
+
+The preset `efficientnetv2b0-baseline-v1` (learning rates as canonical
+decimal strings, e.g. `"0.00001"`; the shared canonical JSON is unchanged
+and still rejects exponents). The resolved configuration adds the artifact
+binding (`artifactSha256`, kind, schema version, `manifestSha256`,
+`preflightIdentity`, `preprocessingConfigHash`) taken from the verified
+artifact (a binding written in the file must match: `ARTIFACT_MISMATCH`).
+
+- `trainingConfigSha256` = SHA-256 of the canonical resolved configuration;
+- `trainingRecipeSha256` = the same without the artifact binding.
+
+No timestamps, runtime values or paths are hashed.
+
+**Determinism:** `STRICT` (default) = `keras.utils.set_random_seed`,
+`tf.config.experimental.enable_op_determinism()`, no XLA, no mixed
+precision, explicit TRAIN order, seeded augmentation; if it cannot be
+provided: `DETERMINISM_UNAVAILABLE`. Two strict CPU runs are bit-identical
+(tested); cross-hardware / GPU bit identity is not claimed. `BEST_EFFORT`
+exists only as an explicit configuration value and is recorded with a
+warning.
+
+**Pretrained weights** `EFFICIENTNETV2B0_IMAGENET_KERAS_3_11_3_V1`: the
+official Keras 3.11.3 no-top file `efficientnetv2-b0_notop.h5` from
+`storage.googleapis.com/tensorflow/keras-applications/efficientnet_v2/`,
+resolved with the public `keras.utils.get_file` (official MD5
+`893217f2bb855e2983157299931e43ff` verified), its SHA-256 computed and the
+local path passed explicitly to EfficientNetV2B0. Provenance records the
+specification, source, origin, file name, official checksum and SHA-256.
+Tests never download it.
+
+### Run directory
+
+```
+<run>/training-config.json   runtime.json   provenance.json   history.json   summary.json
+<run>/checkpoints/head.best.weights.h5   checkpoints/finetune.best.weights.h5
+<run>/model/model.keras      (native Keras format: adapter + backbone + head)
+<run>/RUN_COMPLETE.json      written last (SHA-256 of every file)
+```
+
+The run is built in a hidden temporary sibling directory and renamed only
+after `RUN_COMPLETE.json` is written. It contains aggregate metrics and
+counts for TRAIN / VALIDATION only — no tokens, ChildBEx identifiers, DICOM,
+paths or TEST information — and is portable back from Colab for PR12.
+
+```sh
+.venv/Scripts/python -m childbex_ml.training config-hash --preset efficientnetv2b0-baseline-v1 [--artifact <cloud-artifact>]
+.venv/Scripts/python -m childbex_ml.training train --artifact <cloud-artifact> --preset efficientnetv2b0-baseline-v1 --output <new-run-dir>
+```
+
+One command trains one explicit configuration. Errors: `INVALID_TRAINING_CONFIG`,
+`UNSUPPORTED_RUNTIME`, `DETERMINISM_UNAVAILABLE`, `ARTIFACT_INVALID`,
+`ARTIFACT_MISMATCH`, `UNSUPPORTED_ARTIFACT_SCHEMA`,
+`INCOMPATIBLE_TENSOR_CONTRACT` (anything but 224×224×3 float32 HWC),
+`UNSUPPORTED_PREPROCESSING_CONFIG`, `NO_TRAIN_SAMPLES`,
+`NO_VALIDATION_SAMPLES`, `TRAIN_CLASS_MISSING`, `VALIDATION_CLASS_MISSING`,
+`TEST_ACCESS_FORBIDDEN`, `MODEL_INPUT_MISMATCH`, `MODEL_STRUCTURE_MISMATCH`,
+`WEIGHTS_UNAVAILABLE`, `CHECKPOINT_FAILED`, `OUTPUT_EXISTS`.
+
+### Colab
+
+`notebooks/childbex_training_colab.ipynb` is a thin orchestration layer:
+runtime / device info → install the locally built wheel with the exact
+profile (`python -m pip wheel apps/ml --no-deps -w dist/`; upload the wheel
+and the cloud artifact manually) → `check_runtime()` →
+`CloudArtifact.open` + TRAIN / VALIDATION counts → `train(...)` → curves
+from `history.json`. No TEST, no per-sample output, no Drive sync, upload or
+DICOM.
+
+### Single-window vs multi-window
+
+Build one cloud artifact per PR9 preset from the same PR10 export (same
+`manifestSha256`, splits and tokens) and train the same recipe on each:
+`trainingRecipeSha256` is equal, `trainingConfigSha256` differs by the
+artifact binding (`artifactSha256`, `preprocessingConfigHash`). PR12
+compares the runs. Presets are never mixed in one artifact.

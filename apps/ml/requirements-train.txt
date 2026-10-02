@@ -1,0 +1,4 @@
+-r requirements.txt
+# TRAINING_RUNTIME_V1
+tensorflow==2.20.0
+keras==3.11.3
