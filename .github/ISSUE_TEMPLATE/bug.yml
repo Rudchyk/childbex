@@ -1,0 +1,63 @@
+name: Bug
+description: Report a reproducible defect or regression.
+title: "[Bug] "
+projects:
+  - "Rudchyk/1"
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Provide the smallest reliable reproduction you have.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Logs, screenshots, metrics, error messages, affected URLs, versions, or timestamps.
+    validations:
+      required: false
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What is affected and how severely?
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Fix validation
+      description: How will we prove the defect is fixed and has not regressed?
+      placeholder: |
+        Automated:
+        - ...
+
+        Manual:
+        - ...
+    validations:
+      required: false
