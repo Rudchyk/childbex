@@ -1,0 +1,69 @@
+name: Task
+description: Plan and track a concrete piece of work.
+title: "[Task] "
+projects:
+  - "Rudchyk/1"
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What should be true when this task is complete?
+      placeholder: Describe the intended result, not the implementation details.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why is this needed? Add links, decisions, screenshots, or related issues when useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included in this task? Mention important exclusions if they prevent scope creep.
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Concrete conditions that must be satisfied before the issue can be closed.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: How should the result be verified? For manual procedures, reference a .todo checklist when one is created.
+      placeholder: |
+        Automated:
+        - ...
+
+        Manual:
+        - ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Optional implementation notes, constraints, dependencies, or handoff details.
+    validations:
+      required: false
