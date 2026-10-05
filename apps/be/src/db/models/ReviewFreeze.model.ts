@@ -2,9 +2,11 @@ import { DataTypes, Model } from 'sequelize';
 import { sequelize } from '../sequelize';
 
 /**
- * Review freezes (e.g. while a labelled dataset is exported). While one is
- * active (`unfrozenAt` IS NULL) no review data can change. Rows are kept as
- * history.
+ * Review freezes. A manual freeze (admin) is active until unfrozen
+ * (`unfrozenAt` IS NULL); while one is active no review data can change.
+ * A dataset snapshot finalization records the short window its labels were
+ * captured in as a closed row (frozen and unfrozen by the finalizer) when
+ * no manual freeze was active. Rows are kept as history.
  */
 export interface ReviewFreezeAttributes {
   id: string;
@@ -25,7 +27,10 @@ export class ReviewFreeze
     Omit<
       ReviewFreezeAttributes,
       'id' | 'scope' | 'unfrozenAt' | 'unfrozenById' | 'unfrozenByName'
-    >
+    > &
+      Partial<
+        Pick<ReviewFreezeAttributes, 'unfrozenAt' | 'unfrozenById' | 'unfrozenByName'>
+      >
   >
   implements ReviewFreezeAttributes
 {

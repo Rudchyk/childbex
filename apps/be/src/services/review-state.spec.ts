@@ -97,6 +97,63 @@ describe('deriveReviewState', () => {
     });
   });
 
+  describe('implicit NORMAL (completed Series reviews)', () => {
+    const implicit = (votes: Vote[], implicitNormals: number) =>
+      deriveReviewState({ votes, implicitNormals, resolution: null, completed: false });
+
+    it('only implicit NORMALs -> NORMAL / FINISH_REVIEW', () => {
+      expect(implicit([], 2)).toEqual({
+        reviewState: ReviewState.NORMAL,
+        reviewStateSource: ReviewStateSource.FINISH_REVIEW,
+      });
+    });
+
+    it('agrees with explicit NORMAL votes -> NORMAL / VOTES', () => {
+      expect(implicit([Vote.NORMAL], 1)).toEqual({
+        reviewState: ReviewState.NORMAL,
+        reviewStateSource: ReviewStateSource.VOTES,
+      });
+    });
+
+    it.each([[Vote.ABNORMAL], [Vote.UNCERTAIN]])(
+      'disagrees with another reviewer\'s explicit %s -> CONFLICTED',
+      (vote) => {
+        expect(implicit([vote], 1)).toEqual({
+          reviewState: ReviewState.CONFLICTED,
+          reviewStateSource: ReviewStateSource.VOTES,
+        });
+      }
+    );
+
+    it('is not a vote: counters count explicit votes only; isAbnormal is not agreement', () => {
+      const caches = deriveReviewCaches(
+        { votes: [Vote.ABNORMAL], implicitNormals: 1, resolution: null, completed: false },
+        false
+      );
+      expect(caches).toMatchObject({
+        reviewState: ReviewState.CONFLICTED,
+        isAbnormal: false,
+        votesCount: 1,
+        normalVotes: 0,
+        abnormalVotes: 1,
+      });
+    });
+
+    it('a resolution still takes precedence', () => {
+      expect(
+        deriveReviewState({
+          votes: [],
+          implicitNormals: 3,
+          resolution: resolution(ReviewResolutionLabel.ABNORMAL),
+          completed: false,
+        })
+      ).toEqual({
+        reviewState: ReviewState.ABNORMAL,
+        reviewStateSource: ReviewStateSource.RESOLUTION,
+      });
+    });
+  });
+
   it('an unlabelled (set-aside legacy) resolution never decides', () => {
     expect(state([Vote.NORMAL], { resolution: resolution(null) })).toEqual({
       reviewState: ReviewState.NORMAL,

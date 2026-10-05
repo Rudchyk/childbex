@@ -26,6 +26,11 @@ import {
   orderSeriesImages,
   type StackImage,
 } from './series-stack';
+import {
+  findImplicitNormals,
+  findLatestSeriesCompletions,
+  imageSetRevision,
+} from './series-review';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -343,6 +348,8 @@ export const getPatientSeries = async (
     ]);
   }
 
+  const implicitNormals = await findImplicitNormals(rows.map(({ id }) => id));
+
   const stack = orderSeriesImages(rows.map(toStackImage));
   const images: SeriesImage[] = stack.images.map(({ image, orientationGroup }) => ({
     id: image.id,
@@ -365,7 +372,27 @@ export const getPatientSeries = async (
     resolutionComment: image.resolutionComment,
     resolvedAt: image.resolvedAt ? new Date(image.resolvedAt).toISOString() : null,
     votes: votesByImage.get(image.id) ?? [],
+    implicitNormals: (implicitNormals.get(image.id) ?? []).map((implicit) => ({
+      ...implicit,
+      completedAt: new Date(implicit.completedAt).toISOString(),
+    })),
   }));
+
+  // Per-reviewer completion state of the current (non-broken) image set.
+  const current = rows.filter((row) => !row.isBrocken).map(({ id }) => id);
+  const revision = imageSetRevision(current);
+  const completions = (await findLatestSeriesCompletions(seriesId)).map(
+    ({ imageIds, imageSetHash, completedAt, ...completion }) => {
+      const covered = new Set(imageIds);
+      return {
+        ...completion,
+        completedAt: new Date(completedAt).toISOString(),
+        imageSetRevision: imageSetHash,
+        current: imageSetHash === revision,
+        uncoveredImageCount: current.filter((id) => !covered.has(id)).length,
+      };
+    }
+  );
 
   return {
     patient: { id: patientId, slug: owned.patientSlug },
@@ -376,5 +403,6 @@ export const getPatientSeries = async (
     },
     series,
     images,
+    review: { imageSetRevision: revision, completions },
   };
 };

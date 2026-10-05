@@ -1,9 +1,12 @@
 /**
  * ML dataset snapshots against PostgreSQL (and over HTTP with a fake
- * Keycloak): DRAFT previews write nothing; finalization requires an active
- * review freeze, re-hashes every included file, splits by patient without
- * leakage and stores immutable provenance; finalized data survives later
- * review changes, imports and trash; permanent patient deletion is blocked.
+ * Keycloak): DRAFT previews write nothing; finalization re-hashes every
+ * included file with review open, then captures the labels under a short
+ * exclusive review lock (label mutations refused at once with REVIEW_LOCKED,
+ * viewing and non-label writes unaffected, released on success and on
+ * failure), splits by patient without leakage and stores immutable
+ * provenance; finalized data survives later review changes, imports and
+ * trash; permanent patient deletion is blocked.
  * Synthetic data and files only.
  *
  * Runs only when TEST_DATABASE_URL is set, in its own database
@@ -202,7 +205,7 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
       case 'FINISH': {
         const s = seriesId(series ?? patient);
         const ids = images.filter((i) => (i.series ?? i.patient) === (series ?? patient) && !i.broken).map((i) => imageId(i.n));
-        return review.finishSeriesReview(patientId(patient), s, reviewer('f'), ids).catch(() => undefined);
+        return review.completeSeriesReview(patientId(patient), s, reviewer('f'), ids).catch(() => undefined);
       }
       default:
         return undefined;
@@ -309,14 +312,27 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
 
   // --- Finalization ------------------------------------------------------------------------
 
-  it('finalization requires an active review freeze', async () => {
+  it('needs no manual freeze: the short capture window is recorded and review is open again', async () => {
     const snapshot = await draft(SEED);
-    await expect(snapshots.finalizeSnapshot(snapshot.id, ADMIN)).rejects.toMatchObject({
-      code: 'REVIEW_NOT_FROZEN',
-      status: 409,
-    });
-    expect((await snapshots.getSnapshot(snapshot.id)).status).toBe('DRAFT');
-    expect(await count('dataset_snapshot_items')).toBe(0);
+    const result = await snapshots.finalizeSnapshot(snapshot.id, { id: 'sub-final', name: 'Finalizer' });
+    expect(result).toMatchObject({ status: 'FINALIZED', totalImages: 16 });
+    expect(
+      await rows(
+        `SELECT id, reason, "frozenById", "unfrozenById", "frozenAt" <= "unfrozenAt" AS ordered
+         FROM review_freezes`
+      )
+    ).toEqual([
+      {
+        id: result.reviewFreezeId,
+        reason: `Dataset snapshot capture ${snapshot.id}`,
+        frozenById: 'sub-final',
+        unfrozenById: 'sub-final',
+        ordered: true,
+      },
+    ]);
+    // Neither frozen nor locked afterwards.
+    expect(await review.getReviewFreezeState()).toMatchObject({ frozen: false });
+    await review.castVote(imageId(1), reviewer('z'), { vote: Vote.ABNORMAL });
   });
 
   it('re-hashes every included file: same-size modified bytes are excluded (FILE_HASH_MISMATCH)', async () => {
@@ -422,7 +438,6 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
     const item = async (n: number) =>
       (await rows(`SELECT * FROM dataset_snapshot_items WHERE "patientImageId" = $1`, [imageId(n)]))[0];
     const [resolution] = await rows(`SELECT id FROM patient_image_review_resolutions WHERE "patientImageId" = $1 AND "supersededAt" IS NULL`, [imageId(9)]);
-    const [completion] = await rows(`SELECT id FROM patient_image_review_completions WHERE "patientImageId" = $1`, [imageId(4)]);
 
     expect(await item(9)).toMatchObject({
       label: 'ABNORMAL',
@@ -437,12 +452,16 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
       fileSha256: sha(fileBytes(9)),
       fileSize: String(fileBytes(9).length),
     });
+    // Implicit NORMAL of a completed Series review (no vote rows).
     expect(await item(4)).toMatchObject({
       label: 'NORMAL',
       reviewStateSourceAtSnapshot: 'FINISH_REVIEW',
-      reviewCompletionId: completion.id,
+      reviewCompletionId: null,
       reviewResolutionId: null,
+      normalVotes: 0,
+      implicitNormals: 1,
     });
+    expect(await item(1)).toMatchObject({ reviewStateSourceAtSnapshot: 'VOTES', normalVotes: 1, implicitNormals: 0 });
     const [stored] = await rows(`SELECT * FROM dataset_snapshots WHERE id = $1`, [snapshot.id]);
     expect(stored).toMatchObject({
       createdById: 'sub-admin',
@@ -531,62 +550,109 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
     });
   });
 
-  it('unfreeze waits for a finalization in flight; a mutation queued behind it cannot enter the snapshot', async () => {
+  it('during the capture label mutations are refused at once; viewing and other writes work; then released', async () => {
     const snapshot = await draft(SEED);
-    await review.freezeReview(ADMIN, 'dataset');
     const pause = pauseFinalization();
     const finalizing = snapshots.finalizeSnapshot(snapshot.id, ADMIN);
-    await pause.reached.opened;
+    await pause.reached.opened; // inside the capture: exclusive lock held
 
-    const unfreezing = review.unfreezeReview(ADMIN);
-    expect(await settlesWithin(unfreezing, 500)).toBe(false);
-    // Queued behind the unfreeze (PostgreSQL lock queue): it can only run
-    // after the snapshot committed and review was unfrozen.
-    const voting = review.castVote(imageId(1), reviewer('z'), { vote: Vote.ABNORMAL });
-    expect(await settlesWithin(voting, 300)).toBe(false);
+    const locked = { code: 'REVIEW_LOCKED', status: 409 };
+    await expect(review.castVote(imageId(1), reviewer('z'), { vote: Vote.ABNORMAL })).rejects.toMatchObject(locked);
+    await expect(
+      review.castBulkVote(patientId(1), seriesId(1), reviewer('z'), [imageId(2), imageId(3)], Vote.ABNORMAL)
+    ).rejects.toMatchObject(locked);
+    await expect(
+      review.completeSeriesReview(patientId(6), seriesId(6), reviewer('z'), [imageId(15), imageId(16)])
+    ).rejects.toMatchObject(locked);
+    // Reads (the viewer) and non-label writes are not blocked.
+    const { getPatientSeries } = require('../hierarchy.service');
+    expect(await getPatientSeries(patientId(1), seriesId(1))).toMatchObject({ images: expect.any(Array) });
+    await sequelize.query(`UPDATE patients SET notes = 'edited during capture' WHERE id = $1`, { bind: [patientId(2)] });
 
     pause.release.open();
-    const finalized = await finalizing;
-    expect(finalized).toMatchObject({ status: 'FINALIZED' });
-    await expect(unfreezing).resolves.toMatchObject({ frozen: false });
-    await voting;
+    await expect(finalizing).resolves.toMatchObject({ status: 'FINALIZED' });
     pause.restore();
-    // The snapshot has image 1 as it was (NORMAL, one vote).
-    expect(
-      await rows(`SELECT label, "normalVotes", "abnormalVotes" FROM dataset_snapshot_items WHERE "patientImageId" = $1`, [imageId(1)])
-    ).toEqual([{ label: 'NORMAL', normalVotes: 1, abnormalVotes: 0 }]);
+
+    // Released immediately after the snapshot was captured.
+    await review.castVote(imageId(1), reviewer('z'), { vote: Vote.ABNORMAL });
     expect(await rows(`SELECT "reviewState" FROM patients_images WHERE id = $1`, [imageId(1)])).toEqual([
       { reviewState: 'CONFLICTED' },
     ]);
+    // The snapshot keeps image 1 as captured (NORMAL, one vote).
+    expect(
+      await rows(`SELECT label, "normalVotes", "abnormalVotes" FROM dataset_snapshot_items WHERE "patientImageId" = $1`, [imageId(1)])
+    ).toEqual([{ label: 'NORMAL', normalVotes: 1, abnormalVotes: 0 }]);
   });
 
-  it('finalization while a freeze change holds the lock is refused at once (REVIEW_FREEZE_CHANGING)', async () => {
+  it('the capture waits for a label mutation in flight and includes it; newer ones are refused meanwhile', async () => {
     const snapshot = await draft(SEED);
-    await review.freezeReview(ADMIN, 'dataset');
     const release = gate();
     const locked = gate();
-    const changing = sequelize.transaction(async (transaction) => {
-      await sequelize.query('SELECT pg_advisory_xact_lock($1)', { bind: [review.REVIEW_FREEZE_LOCK_KEY], transaction });
+    const inFlight = sequelize.transaction(async (transaction) => {
+      await review.acquireReviewMutationLock(transaction);
+      await sequelize.query(
+        `INSERT INTO patient_image_review_votes (id, "patientImageId", "reviewerId", "reviewerName", vote, "createdAt", "updatedAt")
+         VALUES (gen_random_uuid(), $1, 'sub-x', 'X', 'abnormal', now(), now())`,
+        { bind: [imageId(1)], transaction }
+      );
+      await review.recomputeReviewCaches([imageId(1)], transaction);
       locked.open();
       await release.opened;
     });
     await locked.opened;
 
-    await expect(snapshots.finalizeSnapshot(snapshot.id, ADMIN)).rejects.toMatchObject({ code: 'REVIEW_FREEZE_CHANGING' });
+    const finalizing = snapshots.finalizeSnapshot(snapshot.id, ADMIN);
+    expect(await settlesWithin(finalizing, 1500)).toBe(false); // waits for the mutation
+    // While the capture waits, new label mutations are refused (no starvation).
+    await expect(review.castVote(imageId(2), reviewer('z'), { vote: Vote.ABNORMAL })).rejects.toMatchObject({
+      code: 'REVIEW_LOCKED',
+    });
+
     release.open();
-    await changing;
+    await inFlight;
+    await expect(finalizing).resolves.toMatchObject({ status: 'FINALIZED' });
+    // Image 1 was captured with the committed mutation: NORMAL + ABNORMAL.
+    expect(await rows(`SELECT reason FROM dataset_snapshot_exclusions WHERE "patientImageId" = $1`, [imageId(1)])).toEqual([
+      { reason: 'CONFLICTED' },
+    ]);
+  });
+
+  it('a failed capture publishes nothing and leaves no lock or freeze behind; it can be retried', async () => {
+    const snapshot = await draft(SEED);
+    const { DatasetSnapshotExclusion } = require('../../db/models/DatasetSnapshot.model');
+    const spy = jest.spyOn(DatasetSnapshotExclusion, 'bulkCreate').mockRejectedValueOnce(new Error('disk full'));
+    await expect(snapshots.finalizeSnapshot(snapshot.id, ADMIN)).rejects.toThrow('disk full');
+    spy.mockRestore();
+
     expect((await snapshots.getSnapshot(snapshot.id)).status).toBe('DRAFT');
+    expect(await count('dataset_snapshot_items')).toBe(0);
+    expect(await count('dataset_snapshot_patients')).toBe(0);
+    expect(await count('dataset_snapshot_exclusions')).toBe(0);
+    expect(await count('review_freezes')).toBe(0);
+    // Not locked: a vote goes through at once.
+    await review.castVote(imageId(2), reviewer('z'), { vote: Vote.NORMAL });
+
+    await expect(snapshots.finalizeSnapshot(snapshot.id, ADMIN)).resolves.toMatchObject({ status: 'FINALIZED' });
+  });
+
+  it('an active manual freeze is kept and recorded as the capture freeze', async () => {
+    const snapshot = await draft(SEED);
+    await review.freezeReview(ADMIN, 'dataset');
+    const result = await snapshots.finalizeSnapshot(snapshot.id, ADMIN);
+    const [{ id }] = await rows(`SELECT id FROM review_freezes WHERE "unfrozenAt" IS NULL`);
+    expect(result.reviewFreezeId).toBe(id);
+    expect(await count('review_freezes')).toBe(1);
+    expect(await review.getReviewFreezeState()).toMatchObject({ frozen: true });
   });
 
   it('two concurrent finalizations: exactly one succeeds', async () => {
     const snapshot = await draft(SEED);
-    await review.freezeReview(ADMIN, 'dataset');
     const pause = pauseFinalization();
     const first = snapshots.finalizeSnapshot(snapshot.id, ADMIN);
     await pause.reached.opened;
     pause.restore();
     const second = snapshots.finalizeSnapshot(snapshot.id, ADMIN);
-    expect(await settlesWithin(second, 300)).toBe(false); // waits on the row lock
+    expect(await settlesWithin(second, 300)).toBe(false); // waits for the capture lock
     pause.release.open();
     await expect(first).resolves.toMatchObject({ status: 'FINALIZED' });
     await expect(second).rejects.toMatchObject({ code: 'SNAPSHOT_NOT_DRAFT' });
@@ -661,11 +727,13 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
       const created = await call('POST', '/dataset-snapshots', { name: 'CT v1', configuration: SEED });
       expect(created.status).toBe(200);
       const { id } = await created.json();
-      expect((await call('POST', `/dataset-snapshots/${id}/finalize`)).status).toBe(409); // not frozen
       const previewText = await (await call('POST', `/dataset-snapshots/${id}/preview`)).text();
-      await review.freezeReview(ADMIN, 'dataset');
+      // No manual freeze needed: the labels are captured under a short lock.
       const finalized = await call('POST', `/dataset-snapshots/${id}/finalize`);
       expect(finalized.status).toBe(200);
+      const again = await call('POST', `/dataset-snapshots/${id}/finalize`);
+      expect(again.status).toBe(409);
+      expect(await again.json()).toMatchObject({ code: 'SNAPSHOT_NOT_DRAFT' });
       const summaryText = await finalized.text();
       const listText = await (await call('GET', '/dataset-snapshots')).text();
       const itemsResponse = await call('GET', `/dataset-snapshots/${id}/items?limit=5`);

@@ -35,8 +35,13 @@ const hierarchy = {
   patientStudies: '/patients/:patientId/studies',
   patientStudySeries: '/patients/:patientId/studies/:studyId/series',
   patientSeries: '/patients/:patientId/series/:seriesId',
-  /** Finish review of a Series (completes untouched images as NORMAL). */
-  patientSeriesFinishReview: '/patients/:patientId/series/:seriesId/review/finish',
+  /**
+   * Complete review of a Series by the current reviewer: every presented
+   * image without the reviewer's vote is the reviewer's implicit NORMAL.
+   */
+  patientSeriesCompleteReview: '/patients/:patientId/series/:seriesId/review/complete',
+  /** The current reviewer's vote on many images of a Series (atomic). */
+  patientSeriesReviewVotes: '/patients/:patientId/series/:seriesId/review/votes',
 };
 
 /** ML dataset snapshots (dashboard:admin). */

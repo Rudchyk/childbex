@@ -219,6 +219,12 @@ export interface DatasetSnapshotItemAttributes {
   normalVotes: number;
   abnormalVotes: number;
   uncertainVotes: number;
+  /**
+   * Implicit NORMAL opinions (reviewers' completed Series reviews without a
+   * vote on the image) the label was derived from; 0 before migration
+   * 202610050000.
+   */
+  implicitNormals: number;
   seriesOrderIndex: number;
   fileSha256: string;
   /** BIGINT: read back as a string by the pg driver. */
@@ -246,6 +252,7 @@ export class DatasetSnapshotItem
   declare normalVotes: number;
   declare abnormalVotes: number;
   declare uncertainVotes: number;
+  declare implicitNormals: number;
   declare seriesOrderIndex: number;
   declare fileSha256: string;
   declare fileSize: string | number;
@@ -288,6 +295,8 @@ DatasetSnapshotItem.init(
     normalVotes: { type: DataTypes.INTEGER, allowNull: false },
     abnormalVotes: { type: DataTypes.INTEGER, allowNull: false },
     uncertainVotes: { type: DataTypes.INTEGER, allowNull: false },
+    // Migration 202610050000-series-review-completions.
+    implicitNormals: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     seriesOrderIndex: { type: DataTypes.INTEGER, allowNull: false },
     fileSha256: { type: DataTypes.CHAR(64), allowNull: false },
     fileSize: { type: DataTypes.BIGINT, allowNull: false },

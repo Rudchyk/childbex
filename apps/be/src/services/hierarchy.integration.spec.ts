@@ -9,6 +9,7 @@
  * "<name of TEST_DATABASE_URL>_navigation" (created when missing); every
  * test recreates its `public` schema.
  */
+import { createHash } from 'node:crypto';
 import { readFile, mkdtemp, rm, readdir } from 'node:fs/promises';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -221,6 +222,7 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
     votes: await rows('SELECT * FROM patient_image_review_votes ORDER BY id'),
     resolutions: await rows('SELECT * FROM patient_image_review_resolutions ORDER BY id'),
     completions: await rows('SELECT * FROM patient_image_review_completions ORDER BY id'),
+    seriesCompletions: await rows('SELECT * FROM series_review_completions ORDER BY id'),
   });
 
   // --- Hierarchy reads ---------------------------------------------------------------
@@ -288,10 +290,16 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
         reviewStateSource: 'NONE',
         status: 'not_reviewed',
         votes: [],
+        implicitNormals: [],
       });
       expect(result).toMatchObject({
         patient: { id: P1, slug: 'patient-one' },
         study: { id: ST1, studyDate: '2026-01-02', studyTime: '101500' },
+        // Revision of the non-broken image set; nobody completed it yet.
+        review: {
+          imageSetRevision: createHash('sha256').update([...AX_DISPLAYED].sort().join('\n')).digest('hex'),
+          completions: [],
+        },
       });
       // Same result on every call.
       expect(await hierarchy.getPatientSeries(P1, SE_AX)).toEqual(result);
@@ -357,26 +365,40 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
     });
   });
 
-  // --- Series Finish review ---------------------------------------------------------
+  // --- Series Complete review -------------------------------------------------------
 
-  describe('Series finish review', () => {
-    it('completes only untouched images of that series, with series provenance', async () => {
+  describe('Series complete review', () => {
+    it('records the reviewer\x27s image set; unvoted images become their implicit NORMAL (no vote rows)', async () => {
       await review.castVote(img(1), reviewer('a'), { vote: Vote.ABNORMAL });
       await review.castVote(img(2), reviewer('a'), { vote: Vote.NORMAL });
       await review.castVote(img(2), reviewer('b'), { vote: Vote.ABNORMAL });
       await review.setResolution(img(4), ADMIN, { label: ReviewResolutionLabel.UNCERTAIN });
       const before = await reviewSnapshot();
 
-      const result = await review.finishSeriesReview(P1, SE_AX, reviewer('f'), AX_DISPLAYED);
+      const result = await review.completeSeriesReview(P1, SE_AX, reviewer('f'), AX_DISPLAYED);
 
-      expect(result).toEqual({ runId: expect.any(String), completed: 1, alreadyReviewed: 3, skippedBroken: 1 });
-      expect(await rows(`SELECT "patientImageId", "runId", "scopeSeriesId", "legacyScopeClusterId", "completedById", "completedByName" FROM patient_image_review_completions`)).toEqual([
-        { patientImageId: img(3), runId: result.runId, scopeSeriesId: SE_AX, legacyScopeClusterId: null, completedById: 'sub-f', completedByName: 'Reviewer f' },
+      const sorted = [...AX_DISPLAYED].sort();
+      expect(result).toEqual({
+        completionId: expect.any(String),
+        completedAt: expect.any(String),
+        imageSetRevision: createHash('sha256').update(sorted.join('\n')).digest('hex'),
+        imageCount: AX_DISPLAYED.length,
+        explicitAbnormal: 0,
+        explicitUncertain: 0,
+        explicitNormal: 0,
+        implicitNormal: AX_DISPLAYED.length,
+        skippedBroken: 1,
+      });
+      expect(await rows(`SELECT "seriesId", "reviewerId", "reviewerName", "imageIds", "imageCount", "imageSetHash" FROM series_review_completions`)).toEqual([
+        { seriesId: SE_AX, reviewerId: 'sub-f', reviewerName: 'Reviewer f', imageIds: sorted, imageCount: AX_DISPLAYED.length, imageSetHash: result.imageSetRevision },
       ]);
+      // No per-image rows of any kind are created.
+      expect(await rows('SELECT 1 FROM patient_image_review_completions')).toHaveLength(0);
       const state = async (n: number) =>
         (await rows(`SELECT "reviewState", "reviewStateSource" FROM patients_images WHERE id = $1`, [img(n)]))[0];
       expect(await state(3)).toEqual({ reviewState: 'NORMAL', reviewStateSource: 'FINISH_REVIEW' });
-      expect(await state(1)).toEqual({ reviewState: 'ABNORMAL', reviewStateSource: 'VOTES' });
+      // A's explicit ABNORMAL vs f's implicit NORMAL: a disagreement.
+      expect(await state(1)).toEqual({ reviewState: 'CONFLICTED', reviewStateSource: 'VOTES' });
       expect(await state(2)).toEqual({ reviewState: 'CONFLICTED', reviewStateSource: 'VOTES' });
       expect(await state(4)).toEqual({ reviewState: 'UNCERTAIN', reviewStateSource: 'RESOLUTION' });
       expect(await state(5)).toEqual({ reviewState: 'NOT_REVIEWED', reviewStateSource: 'NONE' }); // broken
@@ -388,10 +410,13 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
       expect(after.votes).toEqual(before.votes);
       expect(after.resolutions).toEqual(before.resolutions);
 
-      // A later vote overrides the completion; the record stays.
+      // Another reviewer's later vote disagrees with f's implicit NORMAL.
       await review.castVote(img(3), reviewer('b'), { vote: Vote.ABNORMAL });
+      expect(await state(3)).toEqual({ reviewState: 'CONFLICTED', reviewStateSource: 'VOTES' });
+      // f changes their own mind later: no reopen needed, the vote wins.
+      await review.castVote(img(3), reviewer('f'), { vote: Vote.ABNORMAL });
       expect(await state(3)).toEqual({ reviewState: 'ABNORMAL', reviewStateSource: 'VOTES' });
-      expect(await rows('SELECT 1 FROM patient_image_review_completions')).toHaveLength(1);
+      expect(await rows('SELECT 1 FROM series_review_completions')).toHaveLength(1);
     });
 
     it.each([
@@ -402,7 +427,7 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
     ])('refuses a series with %s (SERIES_NOT_FULLY_REVIEWABLE), changing nothing', async (_, patient, series, presented) => {
       const before = await reviewSnapshot();
       await expect(
-        review.finishSeriesReview(patient, series, reviewer('f'), presented)
+        review.completeSeriesReview(patient, series, reviewer('f'), presented)
       ).rejects.toMatchObject({ code: 'SERIES_NOT_FULLY_REVIEWABLE', status: 409 });
       expect(await reviewSnapshot()).toEqual(before);
     });
@@ -415,20 +440,20 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
     ])('refuses when the presented images differ (%s): SERIES_CHANGED', async (_, presented) => {
       const before = await reviewSnapshot();
       await expect(
-        review.finishSeriesReview(P1, SE_AX, reviewer('f'), presented)
+        review.completeSeriesReview(P1, SE_AX, reviewer('f'), presented)
       ).rejects.toMatchObject({ code: 'SERIES_CHANGED', status: 409 });
       expect(await reviewSnapshot()).toEqual(before);
     });
 
     it('is not found for another patient and refused while frozen', async () => {
       await expect(
-        review.finishSeriesReview(P2, SE_AX, reviewer('f'), AX_DISPLAYED)
+        review.completeSeriesReview(P2, SE_AX, reviewer('f'), AX_DISPLAYED)
       ).rejects.toMatchObject({ code: 'SERIES_NOT_FOUND', status: 404 });
       await review.freezeReview(ADMIN, 'export');
       await expect(
-        review.finishSeriesReview(P1, SE_AX, reviewer('f'), AX_DISPLAYED)
+        review.completeSeriesReview(P1, SE_AX, reviewer('f'), AX_DISPLAYED)
       ).rejects.toMatchObject({ code: 'REVIEW_FROZEN' });
-      expect(await rows('SELECT 1 FROM patient_image_review_completions')).toHaveLength(0);
+      expect(await rows('SELECT 1 FROM series_review_completions')).toHaveLength(0);
     });
 
     it('exactly one completion scope (CHECK)', async () => {
@@ -517,7 +542,7 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
       expect([foreign.status, unknown.status]).toEqual([404, 404]);
       expect(await foreign.json()).toEqual(await unknown.json());
       expect((await call('GET', `/patients/${P2}/studies/${ST1}/series`)).status).toBe(404);
-      expect((await call('POST', `/patients/${P1}/series/${SE_P2}/review/finish`, { presentedImageIds: [img(50)] })).status).toBe(404);
+      expect((await call('POST', `/patients/${P1}/series/${SE_P2}/review/complete`, { presentedImageIds: [img(50)] })).status).toBe(404);
       // The file route still rejects another patient's image.
       expect((await call('GET', `/patients/${P2}/images/${img(1)}/file`)).status).toBe(404);
     });
@@ -538,9 +563,9 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
       expect((await fetch(`${origin}/uploads/${P1}/${SE_AX}/IM1`)).status).toBe(404);
     });
 
-    it('Finish review over HTTP: 200 for a simple stack, 409 codes otherwise', async () => {
+    it('Complete review over HTTP: 200 for a simple stack, 409 codes otherwise', async () => {
       const finish = (series: string, presentedImageIds: string[]) =>
-        call('POST', `/patients/${P1}/series/${series}/review/finish`, { presentedImageIds });
+        call('POST', `/patients/${P1}/series/${series}/review/complete`, { presentedImageIds });
       const mixed = await finish(SE_MIX, [img(10), img(11)]);
       expect(mixed.status).toBe(409);
       expect(await mixed.json()).toMatchObject({ code: 'SERIES_NOT_FULLY_REVIEWABLE' });
@@ -548,11 +573,11 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
       expect(await multiFrame.json()).toMatchObject({ code: 'SERIES_NOT_FULLY_REVIEWABLE' });
       const changed = await finish(SE_AX, [img(1)]);
       expect(await changed.json()).toMatchObject({ code: 'SERIES_CHANGED' });
-      expect((await call('POST', `/patients/${P1}/series/${SE_AX}/review/finish`, {})).status).toBe(400);
+      expect((await call('POST', `/patients/${P1}/series/${SE_AX}/review/complete`, {})).status).toBe(400);
 
       const ok = await finish(SE_AX, AX_DISPLAYED);
       expect(ok.status).toBe(200);
-      expect(await ok.json()).toMatchObject({ completed: 4, alreadyReviewed: 0, skippedBroken: 1 });
+      expect(await ok.json()).toMatchObject({ imageCount: 4, implicitNormal: 4, skippedBroken: 1 });
       const series = await (await call('GET', `/patients/${P1}/series/${SE_AX}`)).json();
       expect(series.series.review).toMatchObject({ normal: 4, notReviewed: 0, broken: 1 });
     });
@@ -564,7 +589,7 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
           headers: { 'x-test-user': 'admin', 'x-test-roles': 'dashboard:admin', 'content-type': 'application/json' },
           body: '{}',
         });
-      expect((await call('POST', `/patients/${P1}/series/${SE_AX}/review/finish`, {})).status).toBe(400);
+      expect((await call('POST', `/patients/${P1}/series/${SE_AX}/review/complete`, {})).status).toBe(400);
       expect((await admin('PUT', `/patients/images/${img(1)}/review/resolution`)).status).toBe(400);
       expect((await admin('POST', '/review/freeze')).status).toBe(400);
     });
@@ -635,7 +660,7 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
       const before = await list();
       await call('GET', `/patients/${P1}/studies`);
       await call('GET', `/patients/${P1}/series/${SE_AX}`);
-      await call('POST', `/patients/${P1}/series/${SE_AX}/review/finish`, { presentedImageIds: AX_DISPLAYED });
+      await call('POST', `/patients/${P1}/series/${SE_AX}/review/complete`, { presentedImageIds: AX_DISPLAYED });
       expect(await list()).toEqual(before);
     });
   });

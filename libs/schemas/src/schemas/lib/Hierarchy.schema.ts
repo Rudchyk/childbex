@@ -71,6 +71,33 @@ export type SeriesSummary = Static<typeof SeriesSummarySchema>;
 
 const image = PatientImageSchema.properties;
 
+/**
+ * A reviewer's implicit NORMAL opinion on an image: their latest completed
+ * review of the Series covers the image and they did not vote on it.
+ */
+export const ImplicitNormalSchema = Type.Object({
+  reviewerId: Type.String(),
+  reviewerName: Type.String(),
+  completedAt: Type.String({ format: 'date-time' }),
+});
+
+export type ImplicitNormal = Static<typeof ImplicitNormalSchema>;
+
+/** The latest "Complete review" of a Series by one reviewer. */
+export const SeriesReviewCompletionSchema = Type.Object({
+  reviewerId: Type.String(),
+  reviewerName: Type.String(),
+  completedAt: Type.String({ format: 'date-time' }),
+  imageSetRevision: Type.String(),
+  imageCount: Type.Integer(),
+  /** The completed image set is the Series' current image set. */
+  current: Type.Boolean(),
+  /** Current non-broken images the completion does not cover (added later). */
+  uncoveredImageCount: Type.Integer(),
+});
+
+export type SeriesReviewCompletion = Static<typeof SeriesReviewCompletionSchema>;
+
 export const SeriesImageSchema = Type.Object({
   id: IDSchema,
   /** Authenticated file route, relative to the API base (`/api/v1`). */
@@ -94,7 +121,10 @@ export const SeriesImageSchema = Type.Object({
   adminResolutionName: image.adminResolutionName,
   resolutionComment: image.resolutionComment,
   resolvedAt: Nullable(Type.String({ format: 'date-time' })),
+  /** Explicit votes (one per reviewer). */
   votes: Type.Array(PatientImageReviewVoteSchema),
+  /** Implicit NORMAL opinions (reviewers without a vote on the image). */
+  implicitNormals: Type.Array(ImplicitNormalSchema),
 });
 
 export type SeriesImage = Static<typeof SeriesImageSchema>;
@@ -123,6 +153,12 @@ export const PatientSeriesResponseSchema = Type.Object({
   series: SeriesSummarySchema,
   /** Display order (see the series ordering rule); broken images last. */
   images: Type.Array(SeriesImageSchema),
+  review: Type.Object({
+    /** Revision of the current non-broken image set. */
+    imageSetRevision: Type.String(),
+    /** The latest completion of every reviewer who completed the Series. */
+    completions: Type.Array(SeriesReviewCompletionSchema),
+  }),
 });
 
 export type PatientSeriesResponse = Static<typeof PatientSeriesResponseSchema>;
@@ -147,7 +183,7 @@ export const PatientSeriesParamsSchema = Type.Object({
 
 export type PatientSeriesParams = Static<typeof PatientSeriesParamsSchema>;
 
-export const FinishSeriesReviewRequestBodySchema = Type.Object(
+export const CompleteSeriesReviewRequestBodySchema = Type.Object(
   {
     /**
      * The non-broken images the reviewer was shown; must be exactly the
@@ -158,6 +194,6 @@ export const FinishSeriesReviewRequestBodySchema = Type.Object(
   { additionalProperties: false }
 );
 
-export type FinishSeriesReviewRequestBody = Static<
-  typeof FinishSeriesReviewRequestBodySchema
+export type CompleteSeriesReviewRequestBody = Static<
+  typeof CompleteSeriesReviewRequestBodySchema
 >;

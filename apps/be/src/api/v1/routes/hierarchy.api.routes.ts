@@ -2,8 +2,10 @@ import { Response } from 'fets';
 import { router } from '../apiRouter';
 import { apiRoutes } from '@libs/constants';
 import {
-  FinishReviewResponseSchema,
-  FinishSeriesReviewRequestBodySchema,
+  BulkReviewVoteRequestBodySchema,
+  BulkReviewVoteResponseSchema,
+  CompleteSeriesReviewRequestBodySchema,
+  CompleteSeriesReviewResponseSchema,
   PatientSeriesParamsSchema,
   PatientSeriesResponseSchema,
   PatientStudiesParamsSchema,
@@ -27,7 +29,10 @@ import {
   getPatientStudies,
   getStudySeries,
 } from '../../../services/hierarchy.service';
-import { finishSeriesReview } from '../../../services/review.service';
+import {
+  castBulkVote,
+  completeSeriesReview,
+} from '../../../services/review.service';
 
 const tags = [Tags.PATIENTS];
 
@@ -101,21 +106,21 @@ router
       return Response.json(result);
     },
   })
-  // Finish the review of a series
+  // Complete the current reviewer's review of a series
   .route({
     description:
-      'Finish the review of a Series: its untouched images are completed as NORMAL (FINISH_REVIEW). Only for a single-orientation Series without multi-frame images (409 SERIES_NOT_FULLY_REVIEWABLE), and only when presentedImageIds are exactly its non-broken images (409 SERIES_CHANGED).',
+      "Complete the current reviewer's review of a Series: records the reviewer, time and the presented image set (revision); every presented image without the reviewer's vote is the reviewer's implicit NORMAL (no vote rows). Not a lock: votes can change later. Only for a single-orientation Series without multi-frame images (409 SERIES_NOT_FULLY_REVIEWABLE), only when presentedImageIds are exactly its non-broken images (409 SERIES_CHANGED); 409 REVIEW_LOCKED while a dataset snapshot is captured (retry).",
     method: 'POST',
-    path: apiRoutes.patientSeriesFinishReview,
+    path: apiRoutes.patientSeriesCompleteReview,
     tags,
     ...getKeycloakSecurity(),
     schemas: {
       request: {
         params: PatientSeriesParamsSchema,
-        json: FinishSeriesReviewRequestBodySchema,
+        json: CompleteSeriesReviewRequestBodySchema,
       },
       responses: {
-        200: FinishReviewResponseSchema,
+        200: CompleteSeriesReviewResponseSchema,
         ...unauthorizedResponse,
         ...defaultResponses,
       },
@@ -124,12 +129,45 @@ router
       const { patientId, seriesId } = request.params;
       const reviewer = getReviewer(ctx as Ctx);
       const body = await readJsonBody(request);
-      if (!Value.Check(FinishSeriesReviewRequestBodySchema, body)) {
+      if (!Value.Check(CompleteSeriesReviewRequestBodySchema, body)) {
         throw getInvalidRequestError();
       }
       return Response.json(
         await runReviewAction(() =>
-          finishSeriesReview(patientId, seriesId, reviewer, body.presentedImageIds)
+          completeSeriesReview(patientId, seriesId, reviewer, body.presentedImageIds)
+        )
+      );
+    },
+  })
+  // The current reviewer's vote on many images of a series
+  .route({
+    description:
+      "Set the current reviewer's own vote on many images of a Series in one transaction (all or nothing; other reviewers' votes are untouched; repeating is a no-op). Every id must be a non-broken image of this Series of this patient (400 IMAGES_NOT_IN_SERIES / IMAGES_NOT_REVIEWABLE / INVALID_IMAGE_IDS); 404 for another patient's or an unknown Series; 409 REVIEW_LOCKED while a dataset snapshot is captured (retry), 409 REVIEW_FROZEN while frozen.",
+    method: 'POST',
+    path: apiRoutes.patientSeriesReviewVotes,
+    tags,
+    ...getKeycloakSecurity(),
+    schemas: {
+      request: {
+        params: PatientSeriesParamsSchema,
+        json: BulkReviewVoteRequestBodySchema,
+      },
+      responses: {
+        200: BulkReviewVoteResponseSchema,
+        ...unauthorizedResponse,
+        ...defaultResponses,
+      },
+    },
+    async handler(request, ctx) {
+      const { patientId, seriesId } = request.params;
+      const reviewer = getReviewer(ctx as Ctx);
+      const body = await readJsonBody(request);
+      if (!Value.Check(BulkReviewVoteRequestBodySchema, body)) {
+        throw getInvalidRequestError();
+      }
+      return Response.json(
+        await runReviewAction(() =>
+          castBulkVote(patientId, seriesId, reviewer, body.imageIds, body.vote)
         )
       );
     },

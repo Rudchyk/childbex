@@ -225,6 +225,8 @@ export const DatasetSnapshotItemSchema = Type.Object({
   normalVotes: Type.Integer(),
   abnormalVotes: Type.Integer(),
   uncertainVotes: Type.Integer(),
+  /** Implicit NORMAL opinions (completed Series reviews without a vote). */
+  implicitNormals: Type.Integer(),
   seriesOrderIndex: Type.Integer(),
   /** Verified at finalization: a consumer must re-check the bytes against it. */
   fileSha256: Type.String(),

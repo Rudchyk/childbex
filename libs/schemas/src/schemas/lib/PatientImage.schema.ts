@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import { TimestampsSchema } from './Timestamps.schemas.js';
 import { IDSchema } from './ID.schema.js';
 import { Nullable } from '../../utils/typebox-helpers.js';
+import { PatientImageReviewVoteTypes } from './PatientImageReviewVote.schema.js';
 
 /**
  * Legacy status (a compatibility cache of the review state; order matches
@@ -76,17 +77,63 @@ export type ReviewResolutionRequestBody = Static<
   typeof ReviewResolutionRequestBodySchema
 >;
 
-export const FinishReviewResponseSchema = Type.Object({
-  runId: Type.String({ format: 'uuid' }),
-  /** Images completed as NORMAL by this run. */
-  completed: Type.Integer(),
-  /** Images that already had votes, a resolution or a completion. */
-  alreadyReviewed: Type.Integer(),
-  /** Broken images (not reviewable). */
+/**
+ * A reviewer's "Complete review" of a Series: every presented image the
+ * reviewer did not vote on is the reviewer's implicit NORMAL (no vote rows).
+ */
+export const CompleteSeriesReviewResponseSchema = Type.Object({
+  completionId: Type.String({ format: 'uuid' }),
+  completedAt: Type.String({ format: 'date-time' }),
+  /** Revision of the completed image set (SHA-256 of the sorted image ids). */
+  imageSetRevision: Type.String(),
+  /** Non-broken images covered by the completion. */
+  imageCount: Type.Integer(),
+  /** The reviewer's explicit votes among them. */
+  explicitAbnormal: Type.Integer(),
+  explicitUncertain: Type.Integer(),
+  explicitNormal: Type.Integer(),
+  /** Images without an explicit vote of the reviewer: implicit NORMAL. */
+  implicitNormal: Type.Integer(),
+  /** Broken images (not reviewable, not covered). */
   skippedBroken: Type.Integer(),
 });
 
-export type FinishReviewResponse = Static<typeof FinishReviewResponseSchema>;
+export type CompleteSeriesReviewResponse = Static<
+  typeof CompleteSeriesReviewResponseSchema
+>;
+
+/** The most images one bulk vote may change. */
+export const MAX_BULK_REVIEW_VOTE_IMAGES = 5000;
+
+export const BulkReviewVoteRequestBodySchema = Type.Object(
+  {
+    /** Image ids of the Series (all must be non-broken images of it). */
+    imageIds: Type.Array(IDSchema, {
+      minItems: 1,
+      maxItems: MAX_BULK_REVIEW_VOTE_IMAGES,
+    }),
+    vote: Type.Enum(PatientImageReviewVoteTypes),
+  },
+  { additionalProperties: false }
+);
+
+export type BulkReviewVoteRequestBody = Static<
+  typeof BulkReviewVoteRequestBodySchema
+>;
+
+/** All or nothing: counts of the reviewer's own votes. */
+export const BulkReviewVoteResponseSchema = Type.Object({
+  /** Distinct images in the request. */
+  requested: Type.Integer(),
+  /** New votes. */
+  created: Type.Integer(),
+  /** Existing votes of the reviewer with another value, changed. */
+  changed: Type.Integer(),
+  /** Existing votes of the reviewer with the same value. */
+  unchanged: Type.Integer(),
+});
+
+export type BulkReviewVoteResponse = Static<typeof BulkReviewVoteResponseSchema>;
 
 export const ReviewFreezeRequestBodySchema = Type.Object(
   { reason: Type.String({ minLength: 1, maxLength: 1000 }) },

@@ -1,7 +1,9 @@
 /**
  * Review semantics against PostgreSQL: effective state, vote history,
- * resolutions, "Finish review", the review freeze (including races with
- * mutations in flight) and the HTTP API with a fake Keycloak.
+ * resolutions, per-reviewer Series "Complete review" (implicit NORMAL),
+ * bulk votes, multi-reviewer conflicts, the review freeze and lock
+ * (including races with mutations in flight) and the HTTP API with a fake
+ * Keycloak.
  *
  * Runs only when TEST_DATABASE_URL is set, in its own database
  * "<name of TEST_DATABASE_URL>_review" (created when missing); every test
@@ -172,8 +174,8 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         [series]
       )
     ).map(({ id: imageId }) => imageId as string);
-  const finishSeries = async (series = SERIES) =>
-    review.finishSeriesReview(PATIENT, series, reviewer('f'), await presentedOf(series));
+  const completeSeries = async (series = SERIES, who = 'f') =>
+    review.completeSeriesReview(PATIENT, series, reviewer(who), await presentedOf(series));
 
   const stateOf = async (imageId: string) =>
     (
@@ -407,78 +409,294 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
     });
   });
 
-  // --- Finish review -----------------------------------------------------------------
+  // --- Complete review (per reviewer, implicit NORMAL) ------------------------------
 
-  describe('finish review', () => {
-    it('completes untouched images as NORMAL with provenance; a later vote overrides it', async () => {
+  describe('complete review', () => {
+    it('gives the reviewer an implicit NORMAL on every unvoted image, without vote rows', async () => {
       const untouched = await addImage(1);
-      const voted = await addImage(2);
-      const broken = await addImage(3, { broken: true });
-      const resolved = await addImage(4);
+      const ownAbnormal = await addImage(2);
+      const ownUncertain = await addImage(3);
+      const broken = await addImage(4, { broken: true });
       const elsewhere = await addImage(5, { series: OTHER_SERIES });
-      await vote(voted, 'a', Vote.ABNORMAL);
-      await review.setResolution(resolved, ADMIN, { label: ReviewResolutionLabel.NORMAL });
+      await vote(ownAbnormal, 'f', Vote.ABNORMAL);
+      await vote(ownUncertain, 'f', Vote.UNCERTAIN);
 
-      const result = await finishSeries();
+      const result = await completeSeries();
 
       expect(result).toEqual({
-        runId: expect.stringMatching(/^[0-9a-f-]{36}$/),
-        completed: 1,
-        alreadyReviewed: 2,
+        completionId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        completedAt: expect.any(String),
+        imageSetRevision: expect.stringMatching(/^[0-9a-f]{64}$/),
+        imageCount: 3,
+        explicitAbnormal: 1,
+        explicitUncertain: 1,
+        explicitNormal: 0,
+        implicitNormal: 1,
         skippedBroken: 1,
       });
       expect(
         await rows(
-          `SELECT "patientImageId", "runId", "scopeSeriesId", "legacyScopeClusterId", "completedById", "completedByName",
-                  "createdAt" IS NOT NULL AS "hasCreatedAt"
-           FROM patient_image_review_completions`
+          `SELECT "seriesId", "reviewerId", "reviewerName", "imageIds", "imageCount", "imageSetHash",
+                  "completedAt" IS NOT NULL AS "hasCompletedAt"
+           FROM series_review_completions`
         )
       ).toEqual([
         {
-          patientImageId: untouched,
-          runId: result.runId,
-          scopeSeriesId: SERIES,
-          // Never written by new completions (historical provenance only).
-          legacyScopeClusterId: null,
-          completedById: 'sub-f',
-          completedByName: 'Reviewer f',
-          hasCreatedAt: true,
+          seriesId: SERIES,
+          reviewerId: 'sub-f',
+          reviewerName: 'Reviewer f',
+          imageIds: [untouched, ownAbnormal, ownUncertain].sort(),
+          imageCount: 3,
+          imageSetHash: result.imageSetRevision,
+          hasCompletedAt: true,
         },
       ]);
+      // No redundant explicit NORMAL rows, no per-image completion rows.
+      expect(await rows('SELECT 1 FROM patient_image_review_votes')).toHaveLength(2);
+      expect(await rows('SELECT 1 FROM patient_image_review_vote_events')).toHaveLength(2);
+      expect(await rows('SELECT 1 FROM patient_image_review_completions')).toHaveLength(0);
+
       expect(await stateOf(untouched)).toMatchObject({
         reviewState: 'NORMAL',
         reviewStateSource: 'FINISH_REVIEW',
         status: 'normal',
+        isAbnormal: false,
         votesCount: 0,
+        normalVotes: 0,
       });
-      expect(await stateOf(voted)).toMatchObject({ reviewState: 'ABNORMAL', reviewStateSource: 'VOTES' });
+      expect(await stateOf(ownAbnormal)).toMatchObject({ reviewState: 'ABNORMAL', reviewStateSource: 'VOTES' });
+      expect(await stateOf(ownUncertain)).toMatchObject({ reviewState: 'UNCERTAIN', reviewStateSource: 'VOTES' });
       expect(await stateOf(broken)).toMatchObject({ reviewState: 'NOT_REVIEWED', status: 'broken' });
-      expect(await stateOf(resolved)).toMatchObject({ reviewStateSource: 'RESOLUTION' });
       expect(await stateOf(elsewhere)).toMatchObject({ reviewState: 'NOT_REVIEWED' });
+    });
 
-      // A later vote overrides the completion; the provenance stays.
-      await vote(untouched, 'b', Vote.ABNORMAL);
-      expect(await stateOf(untouched)).toMatchObject({
-        reviewState: 'ABNORMAL',
-        reviewStateSource: 'VOTES',
-        isAbnormal: true,
-      });
-      expect(await rows('SELECT 1 FROM patient_image_review_completions')).toHaveLength(1);
+    it('does not lock the review: the reviewer changes any decision later, without reopening', async () => {
+      const image = await addImage(1);
+      const other = await addImage(2);
+      await vote(other, 'f', Vote.ABNORMAL);
+      await completeSeries();
+      expect(await stateOf(image)).toMatchObject({ reviewState: 'NORMAL', reviewStateSource: 'FINISH_REVIEW' });
 
-      // Nothing left to complete.
-      expect(await finishSeries()).toMatchObject({
-        completed: 0,
-        alreadyReviewed: 3,
-        skippedBroken: 1,
-      });
+      // implicit Normal -> Abnormal -> Not sure -> Normal (explicit) -> Abnormal
+      for (const [value, expected] of [
+        [Vote.ABNORMAL, 'ABNORMAL'],
+        [Vote.UNCERTAIN, 'UNCERTAIN'],
+        [Vote.NORMAL, 'NORMAL'],
+        [Vote.ABNORMAL, 'ABNORMAL'],
+      ] as const) {
+        await vote(image, 'f', value);
+        expect(await stateOf(image)).toMatchObject({ reviewState: expected, reviewStateSource: 'VOTES', votesCount: 1 });
+      }
+      // Abnormal -> Normal and Not sure -> Normal on the other image.
+      await vote(other, 'f', Vote.NORMAL);
+      expect(await stateOf(other)).toMatchObject({ reviewState: 'NORMAL', reviewStateSource: 'VOTES' });
+      await vote(other, 'f', Vote.UNCERTAIN);
+      await vote(other, 'f', Vote.NORMAL);
+      expect(await stateOf(other)).toMatchObject({ reviewState: 'NORMAL', normalVotes: 1 });
+      // The completion record is unchanged history.
+      expect(await rows('SELECT 1 FROM series_review_completions')).toHaveLength(1);
+    });
+
+    it('distinguishes the completed image set from a changed one; completing again covers it', async () => {
+      const first = await addImage(1);
+      const firstResult = await completeSeries();
+      const added = await addImage(2); // imported after the completion
+
+      expect(await stateOf(first)).toMatchObject({ reviewState: 'NORMAL' });
+      // Not reviewed by f: never implicitly NORMAL.
+      expect(await stateOf(added)).toMatchObject({ reviewState: 'NOT_REVIEWED', reviewStateSource: 'NONE' });
+      const { getPatientSeries } = require('./hierarchy.service');
+      const series = await getPatientSeries(PATIENT, SERIES);
+      expect(series.review.imageSetRevision).not.toBe(firstResult.imageSetRevision);
+      expect(series.review.completions).toEqual([
+        expect.objectContaining({
+          reviewerId: 'sub-f',
+          imageSetRevision: firstResult.imageSetRevision,
+          imageCount: 1,
+          current: false,
+          uncoveredImageCount: 1,
+        }),
+      ]);
+      // A stale presented set is refused.
+      await expect(
+        review.completeSeriesReview(PATIENT, SERIES, reviewer('f'), [first])
+      ).rejects.toMatchObject({ code: 'SERIES_CHANGED', status: 409 });
+
+      const second = await completeSeries();
+      expect(second.imageSetRevision).toBe(
+        (await getPatientSeries(PATIENT, SERIES)).review.imageSetRevision
+      );
+      expect(await stateOf(added)).toMatchObject({ reviewState: 'NORMAL', reviewStateSource: 'FINISH_REVIEW' });
+      // Append-only history: both completions are kept, the latest counts.
+      expect(await rows('SELECT 1 FROM series_review_completions')).toHaveLength(2);
+      expect((await getPatientSeries(PATIENT, SERIES)).review.completions).toEqual([
+        expect.objectContaining({ current: true, uncoveredImageCount: 0, imageCount: 2 }),
+      ]);
     });
 
     it('rejects an unknown series and a series of another patient alike', async () => {
       for (const series of ['99999999-9999-4999-8999-999999999999', FOREIGN_SERIES]) {
         await expect(
-          review.finishSeriesReview(PATIENT, series, reviewer('f'), [])
+          review.completeSeriesReview(PATIENT, series, reviewer('f'), [])
         ).rejects.toMatchObject({ code: 'SERIES_NOT_FOUND', status: 404 });
       }
+    });
+
+    it('legacy per-image completions keep their meaning (lowest precedence)', async () => {
+      const image = await addImage(1);
+      await sequelize.query(
+        `INSERT INTO patient_image_review_completions (id, "patientImageId", "runId", "scopeSeriesId",
+           "completedById", "completedByName", "createdAt")
+         VALUES (gen_random_uuid(), $1, gen_random_uuid(), $2, 'sub-old', 'Old', now())`,
+        { bind: [image, SERIES] }
+      );
+      await sequelize.transaction((transaction) =>
+        review.recomputeReviewCaches([image], transaction)
+      );
+      expect(await stateOf(image)).toMatchObject({ reviewState: 'NORMAL', reviewStateSource: 'FINISH_REVIEW' });
+      // Any vote takes precedence over a legacy completion (as before).
+      await vote(image, 'b', Vote.ABNORMAL);
+      expect(await stateOf(image)).toMatchObject({ reviewState: 'ABNORMAL', reviewStateSource: 'VOTES' });
+    });
+  });
+
+  // --- Multiple reviewers -----------------------------------------------------------
+
+  describe('multiple reviewers', () => {
+    it('explicit NORMAL of one doctor against ABNORMAL of another: both kept, CONFLICTED', async () => {
+      const image = await addImage(1);
+      await vote(image, 'a', Vote.ABNORMAL, 'lesion?');
+      await vote(image, 'b', Vote.NORMAL);
+      expect(await rows(`SELECT "reviewerId", vote::text AS vote, comment FROM patient_image_review_votes ORDER BY "reviewerId"`)).toEqual([
+        { reviewerId: 'sub-a', vote: 'abnormal', comment: 'lesion?' },
+        { reviewerId: 'sub-b', vote: 'normal', comment: null },
+      ]);
+      expect(await stateOf(image)).toMatchObject({ reviewState: 'CONFLICTED', isAbnormal: false, normalVotes: 1, abnormalVotes: 1 });
+    });
+
+    it('NOT SURE of one doctor and ABNORMAL / NORMAL of others stay separate opinions', async () => {
+      const image = await addImage(1);
+      await vote(image, 'a', Vote.UNCERTAIN);
+      await vote(image, 'b', Vote.ABNORMAL);
+      expect(await stateOf(image)).toMatchObject({ reviewState: 'CONFLICTED', uncertainVotes: 1, abnormalVotes: 1 });
+      await vote(image, 'b', Vote.NORMAL);
+      expect(await stateOf(image)).toMatchObject({ reviewState: 'CONFLICTED', uncertainVotes: 1, normalVotes: 1 });
+    });
+
+    it("one doctor's completed implicit NORMAL against another's explicit ABNORMAL: CONFLICTED", async () => {
+      const image = await addImage(1);
+      const quiet = await addImage(2);
+      await completeSeries(SERIES, 'a');
+      await vote(image, 'b', Vote.ABNORMAL);
+      expect(await stateOf(image)).toMatchObject({ reviewState: 'CONFLICTED', reviewStateSource: 'VOTES', isAbnormal: false });
+      // B completes too: B's explicit vote stays; the other image is NORMAL for both.
+      await completeSeries(SERIES, 'b');
+      expect(await stateOf(image)).toMatchObject({ reviewState: 'CONFLICTED' });
+      expect(await stateOf(quiet)).toMatchObject({ reviewState: 'NORMAL', reviewStateSource: 'FINISH_REVIEW' });
+      // A agrees later with an explicit vote: unanimous ABNORMAL.
+      await vote(image, 'a', Vote.ABNORMAL);
+      expect(await stateOf(image)).toMatchObject({ reviewState: 'ABNORMAL', isAbnormal: true, abnormalVotes: 2 });
+      const { getPatientSeries } = require('./hierarchy.service');
+      const series = await getPatientSeries(PATIENT, SERIES);
+      expect(series.images.find(({ id }: { id: string }) => id === quiet).implicitNormals.map(
+        ({ reviewerId }: { reviewerId: string }) => reviewerId
+      )).toEqual(['sub-a', 'sub-b']);
+      expect(series.images.find(({ id }: { id: string }) => id === image).implicitNormals).toEqual([]);
+    });
+  });
+
+  // --- Bulk votes ------------------------------------------------------------------------
+
+  describe('bulk votes', () => {
+    const bulk = (ids: string[], value: Vote, who = 'a', series = SERIES, patient = PATIENT) =>
+      review.castBulkVote(patient, series, reviewer(who), ids, value);
+
+    it.each([
+      [Vote.NORMAL, 'NORMAL'],
+      [Vote.ABNORMAL, 'ABNORMAL'],
+      [Vote.UNCERTAIN, 'UNCERTAIN'],
+    ])('sets %s on every selected image with history, only for the reviewer', async (value, expected) => {
+      const ids = [await addImage(1), await addImage(2), await addImage(3)];
+      const result = await bulk(ids.slice(0, 2), value);
+      expect(result).toEqual({ requested: 2, created: 2, changed: 0, unchanged: 0 });
+      for (const id of ids.slice(0, 2)) {
+        expect(await stateOf(id)).toMatchObject({ reviewState: expected, reviewStateSource: 'VOTES', votesCount: 1 });
+      }
+      expect(await stateOf(ids[2])).toMatchObject({ reviewState: 'NOT_REVIEWED' });
+      expect(await rows(`SELECT action, "newVote" FROM patient_image_review_vote_events`)).toEqual([
+        { action: 'cast', newVote: value },
+        { action: 'cast', newVote: value },
+      ]);
+    });
+
+    it('is idempotent and changes existing own votes, keeping their comments', async () => {
+      const [one, two] = [await addImage(1), await addImage(2)];
+      await vote(one, 'a', Vote.ABNORMAL, 'nodule');
+      expect(await bulk([one, two], Vote.NORMAL)).toEqual({ requested: 2, created: 1, changed: 1, unchanged: 0 });
+      expect(await bulk([one, two, one], Vote.NORMAL)).toEqual({ requested: 2, created: 0, changed: 0, unchanged: 2 });
+      expect(await rows(`SELECT vote::text AS vote, comment FROM patient_image_review_votes ORDER BY "patientImageId"`)).toEqual([
+        { vote: 'normal', comment: 'nodule' },
+        { vote: 'normal', comment: null },
+      ]);
+      expect(
+        await rows(`SELECT action, "previousVote", "newVote", "previousComment", "newComment" FROM patient_image_review_vote_events WHERE "patientImageId" = $1 ORDER BY "createdAt", action`, [one])
+      ).toEqual([
+        { action: 'cast', previousVote: null, newVote: 'abnormal', previousComment: null, newComment: 'nodule' },
+        { action: 'changed', previousVote: 'abnormal', newVote: 'normal', previousComment: 'nodule', newComment: 'nodule' },
+      ]);
+    });
+
+    it("never touches another reviewer's votes", async () => {
+      const [one, two] = [await addImage(1), await addImage(2)];
+      await vote(one, 'b', Vote.ABNORMAL, 'theirs');
+      await bulk([one, two], Vote.NORMAL, 'a');
+      expect(await rows(`SELECT "reviewerId", vote::text AS vote, comment FROM patient_image_review_votes WHERE "patientImageId" = $1 ORDER BY "reviewerId"`, [one])).toEqual([
+        { reviewerId: 'sub-a', vote: 'normal', comment: null },
+        { reviewerId: 'sub-b', vote: 'abnormal', comment: 'theirs' },
+      ]);
+      expect(await stateOf(one)).toMatchObject({ reviewState: 'CONFLICTED' });
+    });
+
+    it('is atomic: one image of another series, another patient, broken or unknown refuses all', async () => {
+      const mine = [await addImage(1), await addImage(2)];
+      const otherSeries = await addImage(3, { series: OTHER_SERIES });
+      const foreign = await addImage(4, { series: FOREIGN_SERIES });
+      const broken = await addImage(5, { broken: true });
+      for (const [ids, code, status] of [
+        [[...mine, otherSeries], 'IMAGES_NOT_IN_SERIES', 400],
+        [[...mine, foreign], 'IMAGES_NOT_IN_SERIES', 400],
+        [[...mine, '99999999-9999-4999-8999-999999999999'], 'IMAGES_NOT_IN_SERIES', 400],
+        [[...mine, broken], 'IMAGES_NOT_REVIEWABLE', 400],
+        [[...mine, 'not-a-uuid'], 'INVALID_IMAGE_IDS', 400],
+        [[], 'INVALID_IMAGE_IDS', 400],
+      ] as const) {
+        await expect(bulk([...ids], Vote.ABNORMAL)).rejects.toMatchObject({ code, status });
+      }
+      // A series of another patient through this patient: not found.
+      await expect(bulk([foreign], Vote.ABNORMAL, 'a', FOREIGN_SERIES)).rejects.toMatchObject({
+        code: 'SERIES_NOT_FOUND',
+        status: 404,
+      });
+      expect(await rows('SELECT 1 FROM patient_image_review_votes')).toHaveLength(0);
+      expect(await rows('SELECT 1 FROM patient_image_review_vote_events')).toHaveLength(0);
+      for (const id of mine) expect(await stateOf(id)).toMatchObject({ reviewState: 'NOT_REVIEWED' });
+    });
+
+    it('rolls back everything when the transaction fails midway', async () => {
+      const ids = [await addImage(1), await addImage(2)];
+      const { PatientImageReviewVoteEvent } = require('../db/models/PatientImageReviewVoteEvent.model');
+      const spy = jest.spyOn(PatientImageReviewVoteEvent, 'bulkCreate').mockRejectedValueOnce(new Error('boom'));
+      await expect(bulk(ids, Vote.ABNORMAL)).rejects.toThrow('boom');
+      spy.mockRestore();
+      expect(await rows('SELECT 1 FROM patient_image_review_votes')).toHaveLength(0);
+      for (const id of ids) expect(await stateOf(id)).toMatchObject({ reviewState: 'NOT_REVIEWED' });
+    });
+
+    it('handles a large Series in one request', async () => {
+      const ids: string[] = [];
+      for (let n = 1; n <= 400; n++) ids.push(await addImage(n));
+      expect(await bulk(ids, Vote.ABNORMAL)).toMatchObject({ requested: 400, created: 400 });
+      expect(await rows(`SELECT count(*)::int AS n FROM patients_images WHERE "reviewState" = 'ABNORMAL'`)).toEqual([{ n: 400 }]);
     });
   });
 
@@ -502,7 +720,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         review.setResolution(image, ADMIN, { label: ReviewResolutionLabel.ABNORMAL })
       ).rejects.toMatchObject(frozen);
       await expect(review.removeResolution(image, ADMIN)).rejects.toMatchObject(frozen);
-      await expect(finishSeries()).rejects.toMatchObject(frozen);
+      await expect(completeSeries()).rejects.toMatchObject(frozen);
       await expect(review.freezeReview(ADMIN, 'again')).rejects.toMatchObject({
         code: 'REVIEW_ALREADY_FROZEN',
       });
@@ -550,7 +768,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       expect(await stateOf(image)).toMatchObject({ votesCount: 1 });
     });
 
-    it('race: a mutation waiting behind a freeze in flight is refused once the freeze commits', async () => {
+    it('race: a mutation during a freeze in flight is refused at once (REVIEW_LOCKED), never queued', async () => {
       const image = await addImage(1);
       const release = gate();
       const locked = gate();
@@ -571,11 +789,12 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       await locked.opened;
 
       const voting = vote(image, 'a', Vote.ABNORMAL);
-      expect(await settlesWithin(voting, 500)).toBe(false); // waits for the freeze
+      expect(await settlesWithin(voting, 2000)).toBe(true); // does not wait
+      await expect(voting).rejects.toMatchObject({ code: 'REVIEW_LOCKED', status: 409 });
 
       release.open();
       await freezing;
-      await expect(voting).rejects.toMatchObject({ code: 'REVIEW_FROZEN' });
+      await expect(vote(image, 'a', Vote.ABNORMAL)).rejects.toMatchObject({ code: 'REVIEW_FROZEN' });
       expect(await stateOf(image)).toMatchObject({ reviewState: 'NOT_REVIEWED', votesCount: 0 });
       expect(await rows('SELECT 1 FROM patient_image_review_votes')).toHaveLength(0);
     });
@@ -710,6 +929,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         voteEvents: await rows('SELECT id FROM patient_image_review_vote_events ORDER BY id'),
         resolutions: await rows('SELECT id, "supersededAt" FROM patient_image_review_resolutions ORDER BY id'),
         completions: await rows('SELECT id FROM patient_image_review_completions ORDER BY id'),
+        seriesCompletions: await rows('SELECT id FROM series_review_completions ORDER BY id'),
         file: existsSync(seriesFile()),
         otherPatientFile: existsSync(seriesFile(OTHER_PATIENT, FOREIGN_SERIES)),
       });
@@ -727,7 +947,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         await addImage(2);
         await vote(voted, 'a', Vote.ABNORMAL);
         await review.setResolution(voted, ADMIN, { label: ReviewResolutionLabel.ABNORMAL });
-        await finishSeries();
+        await completeSeries();
         await addImage(20, { series: FOREIGN_SERIES });
         for (const [patient, series] of [[PATIENT, SERIES], [OTHER_PATIENT, FOREIGN_SERIES]]) {
           await mkdir(path.dirname(seriesFile(patient, series)), { recursive: true });
@@ -763,6 +983,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
           voteEvents: [],
           resolutions: [],
           completions: [],
+          seriesCompletions: [],
           file: false,
           otherPatientFile: true,
         });
@@ -844,7 +1065,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         expect(await snapshot()).toMatchObject({ ...otherPatient, otherPatientFile: true });
       });
 
-      it('race: a deletion waiting behind a freeze in flight is refused once the freeze commits', async () => {
+      it('race: a deletion during a freeze in flight is refused at once (REVIEW_LOCKED), nothing lost', async () => {
         await reviewedSeries();
         const before = await snapshot();
         const release = gate();
@@ -864,26 +1085,101 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         });
         await locked.opened;
 
-        const deletingPatient = deletePatient();
-        const trashingOther = call('DELETE', `/patients/${OTHER_PATIENT}`);
-        expect(await settlesWithin(deletingPatient, 500)).toBe(false);
-        expect(await settlesWithin(trashingOther, 100)).toBe(false);
+        const expectLocked = async (response: Response) => {
+          expect(response.status).toBe(409);
+          expect(await response.json()).toMatchObject({ code: 'REVIEW_LOCKED' });
+        };
+        await expectLocked(await deletePatient());
+        await expectLocked(await call('DELETE', `/patients/${OTHER_PATIENT}`));
 
         release.open();
         await freezing;
-        await expectFrozen(await deletingPatient);
-        await expectFrozen(await trashingOther);
+        await expectFrozen(await deletePatient());
         expect(await snapshot()).toEqual(before);
       });
     });
 
-    it('finish review, freeze and unfreeze over HTTP (409 REVIEW_FROZEN)', async () => {
+    describe('bulk votes over HTTP', () => {
+      const votesUrl = (patient = PATIENT, series = SERIES) =>
+        `/patients/${patient}/series/${series}/review/votes`;
+
+      it('requires authentication; votes as the token user only, never as another', async () => {
+        const [one, two] = [await addImage(1), await addImage(2)];
+        const anonymous = await fetch(`${baseUrl}${votesUrl()}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ imageIds: [one], vote: 'abnormal' }),
+        });
+        expect(anonymous.status).toBe(401);
+
+        await vote(one, 'b', Vote.NORMAL, 'b says normal');
+        const response = await call('POST', votesUrl(), {
+          user: 'a',
+          // Unknown properties (e.g. a forged reviewer) are refused.
+          body: { imageIds: [one, two], vote: 'abnormal', reviewerId: 'sub-b' },
+        });
+        expect(response.status).toBe(400);
+
+        const ok = await call('POST', votesUrl(), { user: 'a', body: { imageIds: [one, two], vote: 'abnormal' } });
+        expect(ok.status).toBe(200);
+        expect(await ok.json()).toEqual({ requested: 2, created: 2, changed: 0, unchanged: 0 });
+        expect(
+          await rows(`SELECT "reviewerId", vote::text AS vote, comment FROM patient_image_review_votes WHERE "patientImageId" = $1 ORDER BY "reviewerId"`, [one])
+        ).toEqual([
+          { reviewerId: 'sub-a', vote: 'abnormal', comment: null },
+          { reviewerId: 'sub-b', vote: 'normal', comment: 'b says normal' },
+        ]);
+      });
+
+      it('validates the body and the patient -> series -> image chain', async () => {
+        const mine = await addImage(1);
+        const foreign = await addImage(2, { series: FOREIGN_SERIES });
+        const post = (url: string, body: unknown) => call('POST', url, { body });
+        expect((await post(votesUrl(), { imageIds: [mine], vote: 'maybe' })).status).toBe(400);
+        expect((await post(votesUrl(), { imageIds: [], vote: 'normal' })).status).toBe(400);
+        expect((await post(votesUrl(), { vote: 'normal' })).status).toBe(400);
+        const crossSeries = await post(votesUrl(), { imageIds: [mine, foreign], vote: 'normal' });
+        expect(crossSeries.status).toBe(400);
+        expect(await crossSeries.json()).toMatchObject({ code: 'IMAGES_NOT_IN_SERIES' });
+        // Another patient's series addressed through this patient: 404.
+        expect((await post(votesUrl(PATIENT, FOREIGN_SERIES), { imageIds: [foreign], vote: 'normal' })).status).toBe(404);
+        expect((await post(votesUrl('not-a-uuid', SERIES), { imageIds: [mine], vote: 'normal' })).status).toBe(404);
+        expect(await rows('SELECT 1 FROM patient_image_review_votes')).toHaveLength(0);
+      });
+
+      it('is refused with a retryable 409 REVIEW_LOCKED while the labels are being captured', async () => {
+        const image = await addImage(1);
+        const release = gate();
+        const locked = gate();
+        const capture = sequelize.transaction(async (transaction) => {
+          await sequelize.query('SELECT pg_advisory_xact_lock($1)', {
+            bind: [review.REVIEW_FREEZE_LOCK_KEY],
+            transaction,
+          });
+          locked.open();
+          await release.opened;
+        });
+        await locked.opened;
+        const refused = await call('POST', votesUrl(), { body: { imageIds: [image], vote: 'abnormal' } });
+        expect(refused.status).toBe(409);
+        expect(await refused.json()).toMatchObject({ code: 'REVIEW_LOCKED' });
+        // Viewing is not blocked.
+        expect((await call('GET', `/patients/${PATIENT}/series/${SERIES}`)).status).toBe(200);
+        release.open();
+        await capture;
+        // Released: the retry succeeds.
+        expect((await call('POST', votesUrl(), { body: { imageIds: [image], vote: 'abnormal' } })).status).toBe(200);
+        expect(await stateOf(image)).toMatchObject({ reviewState: 'ABNORMAL' });
+      });
+    });
+
+    it('complete review, freeze and unfreeze over HTTP (409 REVIEW_FROZEN)', async () => {
       const image = await addImage(1);
-      const finish = await call('POST', `/patients/${PATIENT}/series/${SERIES}/review/finish`, {
+      const complete = await call('POST', `/patients/${PATIENT}/series/${SERIES}/review/complete`, {
         body: { presentedImageIds: [image] },
       });
-      expect(finish.status).toBe(200);
-      expect(await finish.json()).toMatchObject({ completed: 1, alreadyReviewed: 0, skippedBroken: 0 });
+      expect(complete.status).toBe(200);
+      expect(await complete.json()).toMatchObject({ imageCount: 1, implicitNormal: 1, skippedBroken: 0 });
 
       expect((await call('POST', '/review/freeze', { body: { reason: 'export' } })).status).toBe(403);
       const frozen = await call('POST', '/review/freeze', {

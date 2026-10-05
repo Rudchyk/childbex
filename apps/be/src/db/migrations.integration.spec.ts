@@ -111,6 +111,7 @@ describeWithDatabase('database migrations (PostgreSQL)', () => {
       require('./models/PatientImageReviewCompletion.model')
         .PatientImageReviewCompletion,
       require('./models/ReviewFreeze.model').ReviewFreeze,
+      require('./models/SeriesReviewCompletion.model').SeriesReviewCompletion,
       ...(() => {
         const snapshots = require('./models/DatasetSnapshot.model');
         return [

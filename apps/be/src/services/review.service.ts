@@ -1,20 +1,25 @@
 /**
  * Review semantics: the only writer of votes, vote history, resolutions,
- * "Finish review" completions, review freezes and the cached review state of
+ * Series review completions, review freezes and the cached review state of
  * images (no model hooks). The derivation itself is in review-state.ts.
  *
  * Every mutation, in one transaction: takes the review-freeze lock in shared
- * mode and refuses while review is frozen; locks the image row(s); changes
- * the authoritative data; appends history; recomputes all cached fields.
- * Freezing takes the same lock in exclusive mode, so it waits for mutations
- * in flight and no mutation can commit after a freeze.
+ * mode WITHOUT waiting (refused with 409 REVIEW_LOCKED while a dataset
+ * snapshot captures the labels or the freeze changes, so requests never
+ * queue up holding connections) and refuses while review is frozen; locks
+ * the image row(s) in id order; changes the authoritative data; appends
+ * history; recomputes all cached fields. Freezing and the dataset snapshot
+ * capture take the same lock in exclusive mode, so they wait for mutations
+ * in flight and no mutation can commit inside them. The lock is
+ * transaction-scoped: PostgreSQL releases it on commit, rollback or a lost
+ * connection (nothing can strand it).
  */
-import { randomUUID } from 'node:crypto';
 import { QueryTypes, type Transaction } from 'sequelize';
 import {
   PatientImageReviewVoteTypes,
   ReviewResolutionLabel,
-  type FinishReviewResponse,
+  type BulkReviewVoteResponse,
+  type CompleteSeriesReviewResponse,
   type ReviewFreezeState,
 } from '@libs/schemas';
 import {
@@ -30,6 +35,7 @@ import { PatientImageReviewVoteEvent } from '../db/models/PatientImageReviewVote
 import { PatientImageReviewResolution } from '../db/models/PatientImageReviewResolution.model';
 import { PatientImageReviewCompletion } from '../db/models/PatientImageReviewCompletion.model';
 import { ReviewFreeze } from '../db/models/ReviewFreeze.model';
+import { SeriesReviewCompletion } from '../db/models/SeriesReviewCompletion.model';
 import {
   findOwnedSeries,
   stackImageColumns,
@@ -37,6 +43,7 @@ import {
   type StackImageRow,
 } from './hierarchy.service';
 import { isSimpleStack, orderSeriesImages } from './series-stack';
+import { findImplicitNormals, imageSetRevision } from './series-review';
 
 /** Advisory lock guarding review data against a freeze (shared/exclusive). */
 export const REVIEW_FREEZE_LOCK_KEY = 4_352_002;
@@ -48,6 +55,10 @@ export interface Reviewer {
 
 export type ReviewErrorCode =
   | 'REVIEW_FROZEN'
+  | 'REVIEW_LOCKED'
+  | 'INVALID_IMAGE_IDS'
+  | 'IMAGES_NOT_IN_SERIES'
+  | 'IMAGES_NOT_REVIEWABLE'
   | 'REVIEW_ALREADY_FROZEN'
   | 'REVIEW_NOT_FROZEN'
   | 'IMAGE_NOT_FOUND'
@@ -60,6 +71,10 @@ export type ReviewErrorCode =
 
 const errorStatus: Record<ReviewErrorCode, 400 | 404 | 409> = {
   REVIEW_FROZEN: 409,
+  REVIEW_LOCKED: 409,
+  INVALID_IMAGE_IDS: 400,
+  IMAGES_NOT_IN_SERIES: 400,
+  IMAGES_NOT_REVIEWABLE: 400,
   REVIEW_ALREADY_FROZEN: 409,
   REVIEW_NOT_FROZEN: 409,
   IMAGE_NOT_FOUND: 404,
@@ -119,6 +134,7 @@ export const planReviewCaches = async (
     attributes: ['patientImageId'],
     transaction,
   });
+  const implicitNormals = await findImplicitNormals(ids, transaction);
   const votesByImage = new Map<string, PatientImageReviewVoteTypes[]>();
   for (const { patientImageId, vote } of votes) {
     votesByImage.set(patientImageId, [
@@ -135,6 +151,7 @@ export const planReviewCaches = async (
     const expected = deriveReviewCaches(
       {
         votes: votesByImage.get(image.id) ?? [],
+        implicitNormals: implicitNormals.get(image.id)?.length ?? 0,
         resolution: resolutionByImage.get(image.id) ?? null,
         completed: completed.has(image.id),
       },
@@ -162,11 +179,20 @@ export const recomputeReviewCaches = async (
   { silent = false }: { silent?: boolean } = {}
 ): Promise<ImageReviewPlan[]> => {
   const plans = await planReviewCaches(imageIds, transaction);
+  // One UPDATE per distinct change (a Series review completion typically
+  // changes hundreds of images the same way).
+  const groups = new Map<string, { changes: Partial<ReviewCaches>; ids: string[] }>();
   for (const { imageId, changes } of plans) {
     if (!Object.keys(changes).length) continue;
+    const key = JSON.stringify(changes);
+    const group = groups.get(key);
+    if (group) group.ids.push(imageId);
+    else groups.set(key, { changes, ids: [imageId] });
+  }
+  for (const { changes, ids } of groups.values()) {
     // `resolvedAt` is typed as the API's ISO string; Sequelize takes a Date.
     await PatientImage.update(changes as never, {
-      where: { id: imageId },
+      where: { id: ids },
       transaction,
       silent,
     });
@@ -184,14 +210,27 @@ const findActiveFreeze = (transaction?: Transaction) =>
 
 /**
  * Takes the review-freeze lock in shared mode (until the transaction ends)
- * and refuses while review is frozen. Read after the lock: a freeze
- * committed before it is always seen (READ COMMITTED, new snapshot).
+ * without waiting: while a dataset snapshot capture or a freeze change holds
+ * (or waits for) the exclusive lock, the mutation is refused at once with
+ * REVIEW_LOCKED (retryable, typically within seconds). Then refuses while
+ * review is frozen. Read after the lock: a freeze committed before it is
+ * always seen (READ COMMITTED, new snapshot).
  */
 export const acquireReviewMutationLock = async (transaction: Transaction) => {
-  await sequelize.query('SELECT pg_advisory_xact_lock_shared(:key)', {
-    replacements: { key: REVIEW_FREEZE_LOCK_KEY },
-    transaction,
-  });
+  const [{ locked }] = await sequelize.query<{ locked: boolean }>(
+    'SELECT pg_try_advisory_xact_lock_shared(:key) AS locked',
+    {
+      replacements: { key: REVIEW_FREEZE_LOCK_KEY },
+      type: QueryTypes.SELECT,
+      transaction,
+    }
+  );
+  if (!locked) {
+    throw new ReviewError(
+      'REVIEW_LOCKED',
+      'Review labels are locked for a moment while a dataset snapshot is captured; try again shortly.'
+    );
+  }
   if (await findActiveFreeze(transaction)) {
     throw new ReviewError(
       'REVIEW_FROZEN',
@@ -208,7 +247,8 @@ const acquireReviewFreezeLock = (transaction: Transaction) =>
 
 /**
  * Runs `run` in a transaction under the review-freeze protocol (shared lock,
- * refused with REVIEW_FROZEN while frozen). Used by every review mutation and
+ * refused with REVIEW_LOCKED while it is taken exclusively and with
+ * REVIEW_FROZEN while frozen). Used by every review mutation and
  * by operations that remove reviewed images or change which patients are
  * active (patient deletion, trash, restore): `run` must do all its
  * database changes in the given transaction.
@@ -406,75 +446,157 @@ export const removeResolution = (imageId: string, admin: Reviewer) =>
     return plan.expected;
   });
 
-// --- Finish review -----------------------------------------------------------
+// --- Series review: bulk votes and Complete review ------------------------------
+
+/** Most images one bulk vote may change (a CT Series has up to ~1000+). */
+export const MAX_BULK_VOTE_IMAGES = 5000;
 
 /**
- * Completes as NORMAL every non-broken image (rows locked by the caller)
- * without votes, an active resolution or an earlier completion: one
- * completion record per image, sharing a run id, with the given scope.
- * Images with any review data are left as they are.
+ * Locks (in id order) the given images of a Series of the patient and checks
+ * that every one of them is a non-broken image of that Series. Unknown ids,
+ * images of another Series or patient, and broken images (never shown) are
+ * refused as a whole; nothing is changed.
  */
-const completeUntouchedImages = async (
-  images: readonly { id: string; isBrocken: boolean }[],
-  scopeSeriesId: string,
-  reviewer: Reviewer,
+const lockSeriesImages = async (
+  patientId: string,
+  seriesId: string,
+  imageIds: readonly string[],
   transaction: Transaction
-): Promise<FinishReviewResponse> => {
-  const reviewable = images.filter((image) => !image.isBrocken);
-  const ids = reviewable.map(({ id }) => id);
-  const reviewed = new Set<string>();
-  if (ids.length) {
-    const rows = await sequelize.query<{ id: string }>(
-      `SELECT "patientImageId" AS id FROM patient_image_review_votes
-         WHERE "patientImageId" IN (:ids)
-       UNION
-       SELECT "patientImageId" FROM patient_image_review_resolutions
-         WHERE "patientImageId" IN (:ids) AND "supersededAt" IS NULL
-       UNION
-       SELECT "patientImageId" FROM patient_image_review_completions
-         WHERE "patientImageId" IN (:ids)`,
-      { replacements: { ids }, type: QueryTypes.SELECT, transaction }
+) => {
+  const ids = [...new Set(imageIds)];
+  if (!ids.length || ids.length > MAX_BULK_VOTE_IMAGES || !ids.every((id) => UUID.test(id))) {
+    throw new ReviewError(
+      'INVALID_IMAGE_IDS',
+      `Between 1 and ${MAX_BULK_VOTE_IMAGES} valid image ids are required.`
     );
-    for (const { id } of rows) reviewed.add(id);
   }
-  const toComplete = ids.filter((id) => !reviewed.has(id));
-  const runId = randomUUID();
-  const createdAt = new Date();
-  await PatientImageReviewCompletion.bulkCreate(
-    toComplete.map((patientImageId) => ({
-      patientImageId,
-      runId,
-      // Never the legacy cluster scope (historical provenance only).
-      legacyScopeClusterId: null,
-      scopeSeriesId,
-      completedById: reviewer.id,
-      completedByName: reviewer.name,
-      createdAt,
-    })),
-    { transaction }
+  if (!(await findOwnedSeries(patientId, seriesId, transaction))) {
+    throw new ReviewError('SERIES_NOT_FOUND', 'The series does not exist.');
+  }
+  const rows = await sequelize.query<{ id: string; isBrocken: boolean }>(
+    `SELECT id, "isBrocken" FROM patients_images
+     WHERE "seriesId" = :seriesId AND id IN (:ids) ORDER BY id FOR UPDATE`,
+    { replacements: { seriesId, ids }, type: QueryTypes.SELECT, transaction }
   );
-  await recomputeReviewCaches(toComplete, transaction);
-  return {
-    runId,
-    completed: toComplete.length,
-    alreadyReviewed: reviewed.size,
-    skippedBroken: images.length - reviewable.length,
-  };
+  if (rows.length !== ids.length) {
+    throw new ReviewError(
+      'IMAGES_NOT_IN_SERIES',
+      `${ids.length - rows.length} of the selected images are not images of this series; reload the series.`
+    );
+  }
+  if (rows.some(({ isBrocken }) => isBrocken)) {
+    throw new ReviewError(
+      'IMAGES_NOT_REVIEWABLE',
+      'Broken images cannot be reviewed.'
+    );
+  }
+  return ids;
 };
 
 /**
- * "Finish review" of a DICOM Series of the patient. Only for a Series the
- * viewer shows completely (one orientation, no multi-frame image), and only
- * when the non-broken images are exactly those the reviewer was shown
- * (`presentedImageIds`): an image that was not presented is never
- * completed. Checked on the locked rows.
+ * Sets the reviewer's own vote on many images of one Series at once (one
+ * transaction: all or nothing). Only the reviewer's votes change; other
+ * reviewers' votes are never read for writing. Repeating the same vote
+ * changes nothing (idempotent). An existing comment is kept: a bulk action
+ * never discards a reviewer's free text.
  */
-export const finishSeriesReview = (
+export const castBulkVote = (
+  patientId: string,
+  seriesId: string,
+  reviewer: Reviewer,
+  imageIds: readonly string[],
+  vote: PatientImageReviewVoteTypes
+): Promise<BulkReviewVoteResponse> =>
+  reviewMutation(async (transaction) => {
+    const ids = await lockSeriesImages(patientId, seriesId, imageIds, transaction);
+    const existing = await PatientImageReviewVote.findAll({
+      where: { patientImageId: ids, reviewerId: reviewer.id },
+      transaction,
+    });
+    const byImage = new Map(existing.map((row) => [row.patientImageId, row]));
+    const toCreate = ids.filter((id) => !byImage.has(id));
+    const toChange = existing.filter((row) => row.vote !== vote);
+    const createdAt = new Date();
+
+    if (toCreate.length) {
+      await PatientImageReviewVote.bulkCreate(
+        toCreate.map((patientImageId) => ({
+          patientImageId,
+          reviewerId: reviewer.id,
+          reviewerName: reviewer.name,
+          vote,
+          comment: null,
+        })),
+        { transaction }
+      );
+    }
+    if (toChange.length) {
+      await PatientImageReviewVote.update(
+        { vote, reviewerName: reviewer.name },
+        { where: { id: toChange.map(({ id }) => id) }, transaction }
+      );
+    }
+    await PatientImageReviewVoteEvent.bulkCreate(
+      [
+        ...toCreate.map((patientImageId) => ({
+          patientImageId,
+          reviewerId: reviewer.id,
+          reviewerName: reviewer.name,
+          action: 'cast' as const,
+          previousVote: null,
+          newVote: vote,
+          previousComment: null,
+          newComment: null,
+          createdAt,
+        })),
+        ...toChange.map((row) => ({
+          patientImageId: row.patientImageId,
+          reviewerId: reviewer.id,
+          reviewerName: reviewer.name,
+          action: 'changed' as const,
+          previousVote: row.vote,
+          newVote: vote,
+          previousComment: row.comment,
+          newComment: row.comment,
+          createdAt,
+        })),
+      ],
+      { transaction }
+    );
+    await recomputeReviewCaches(
+      [...toCreate, ...toChange.map(({ patientImageId }) => patientImageId)],
+      transaction
+    );
+    return {
+      requested: ids.length,
+      created: toCreate.length,
+      changed: toChange.length,
+      unchanged: ids.length - toCreate.length - toChange.length,
+    };
+  });
+
+/**
+ * "Complete review" of a DICOM Series by a reviewer: "I reviewed every image
+ * of this Series; every image I did not mark is NORMAL according to me".
+ *
+ * Records one append-only completion (reviewer, time, exactly the presented
+ * image set and its revision); creates no vote rows. The reviewer's explicit
+ * votes stay as they are; every other presented image gets the reviewer's
+ * implicit NORMAL opinion. Other reviewers' data is untouched. It is not a
+ * lock: the reviewer can vote on any image later, and completing again
+ * records a new completion (the latest one counts).
+ *
+ * Only for a Series the viewer shows completely (one orientation, no
+ * multi-frame image), and only when the non-broken images are exactly those
+ * the reviewer was shown (`presentedImageIds`): an image that was not
+ * presented is never covered. Checked on the locked rows.
+ */
+export const completeSeriesReview = (
   patientId: string,
   seriesId: string,
   reviewer: Reviewer,
   presentedImageIds: readonly string[]
-): Promise<FinishReviewResponse> =>
+): Promise<CompleteSeriesReviewResponse> =>
   reviewMutation(async (transaction) => {
     if (!(await findOwnedSeries(patientId, seriesId, transaction))) {
       throw new ReviewError('SERIES_NOT_FOUND', 'The series does not exist.');
@@ -491,7 +613,7 @@ export const finishSeriesReview = (
         'SERIES_NOT_FULLY_REVIEWABLE',
         'The series has several orientations or geometries, incomplete ' +
           'geometry or multi-frame images; the viewer cannot show it ' +
-          'completely, so it cannot be finished as a whole.'
+          'completely, so it cannot be completed as a whole.'
       );
     }
     const displayed = new Set(
@@ -499,6 +621,7 @@ export const finishSeriesReview = (
     );
     const presented = new Set(presentedImageIds);
     if (
+      !displayed.size ||
       displayed.size !== presented.size ||
       [...displayed].some((id) => !presented.has(id))
     ) {
@@ -507,12 +630,38 @@ export const finishSeriesReview = (
         'The series images differ from the images that were presented; reload the series.'
       );
     }
-    return completeUntouchedImages(
-      rows.map(({ id, isBrocken }) => ({ id, isBrocken })),
-      seriesId,
-      reviewer,
-      transaction
+    const imageIds = [...displayed].sort();
+    const completion = await SeriesReviewCompletion.create(
+      {
+        seriesId,
+        reviewerId: reviewer.id,
+        reviewerName: reviewer.name,
+        imageIds,
+        imageCount: imageIds.length,
+        imageSetHash: imageSetRevision(imageIds),
+        completedAt: new Date(),
+      },
+      { transaction }
     );
+    const ownVotes = await PatientImageReviewVote.findAll({
+      where: { patientImageId: imageIds, reviewerId: reviewer.id },
+      attributes: ['vote'],
+      transaction,
+    });
+    const count = (value: PatientImageReviewVoteTypes) =>
+      ownVotes.filter(({ vote }) => vote === value).length;
+    await recomputeReviewCaches(imageIds, transaction);
+    return {
+      completionId: completion.id,
+      completedAt: completion.completedAt.toISOString(),
+      imageSetRevision: completion.imageSetHash,
+      imageCount: imageIds.length,
+      explicitAbnormal: count(PatientImageReviewVoteTypes.ABNORMAL),
+      explicitUncertain: count(PatientImageReviewVoteTypes.UNCERTAIN),
+      explicitNormal: count(PatientImageReviewVoteTypes.NORMAL),
+      implicitNormal: imageIds.length - ownVotes.length,
+      skippedBroken: rows.length - imageIds.length,
+    };
   });
 
 // --- Freeze ------------------------------------------------------------------

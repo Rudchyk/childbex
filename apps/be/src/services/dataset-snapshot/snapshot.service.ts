@@ -4,22 +4,31 @@
  * - A DRAFT holds only its configuration (and seed). `previewSnapshot`
  *   evaluates the current data with it (cheap file checks), writing
  *   nothing.
- * - `finalizeSnapshot` builds and persists the whole snapshot in ONE
- *   REPEATABLE READ transaction:
- *     1. pg_try_advisory_xact_lock_shared(REVIEW_FREEZE_LOCK_KEY) as the
- *        first statement (never waits: the snapshot of the data is taken
- *        right then); not granted -> REVIEW_FREEZE_CHANGING;
- *     2. an active global review freeze is required (REVIEW_NOT_FROZEN);
- *     3. the snapshot row FOR UPDATE, still a DRAFT;
- *     4. membership with every included file re-hashed (SHA-256); the split
- *        (global quotas, minPatientsPerSplit) is computed on the set left
- *        AFTER that verification and every exclusion rule, never on a
- *        preview's set;
- *     5. patients, items and exclusions inserted, the snapshot FINALIZED.
- *   Holding the shared lock until the commit keeps unfreeze (exclusive)
- *   out; review mutations and patient trash/restore/delete are refused
- *   while frozen; concurrent imports only add NOT_REVIEWED images, outside
- *   the transaction's snapshot anyway.
+ * - `finalizeSnapshot` (live review -> short freeze -> immutable snapshot
+ *   -> review open again; no manual freeze needed):
+ *     1. VERIFY (long; no transaction, no lock, review stays open): the
+ *        file of every image that could be included whatever its label
+ *        (not trashed / broken, fully reviewable Series, recorded hash) is
+ *        re-hashed (SHA-256), one file at a time;
+ *     2. CAPTURE (short; one READ COMMITTED transaction): the exclusive
+ *        review-freeze lock (pg_advisory_xact_lock, waits at most
+ *        CAPTURE_LOCK_TIMEOUT for review mutations in flight, else
+ *        REVIEW_FREEZE_CHANGING); while it is held or awaited every label
+ *        mutation (votes, Complete review, resolutions, patient trash /
+ *        restore / delete) is refused at once with REVIEW_LOCKED, and
+ *        nothing else is blocked (viewing, imports). Then the snapshot row
+ *        FOR UPDATE, still a DRAFT; membership from the review state at
+ *        that moment, using step 1's verification for files that did not
+ *        change (any other candidate is re-hashed now); the split (global
+ *        quotas, minPatientsPerSplit) on the set left AFTER verification and
+ *        every exclusion rule; patients, items and exclusions inserted; the
+ *        freeze window recorded (the active manual freeze, else a closed
+ *        `review_freezes` row); the snapshot FINALIZED.
+ *     3. COMMIT releases the lock (as does a rollback or a lost connection:
+ *        nothing can strand it). A failure publishes nothing: the snapshot
+ *        stays a DRAFT and can be finalized again.
+ *   Long-running dataset preparation (export, preprocessing) reads the
+ *   finalized membership afterwards and never holds review locks.
  * - Finalized data is never recomputed from live state (and the database
  *   triggers refuse changes).
  */
@@ -66,7 +75,6 @@ export type DatasetSnapshotErrorCode =
   | 'SNAPSHOT_NOT_FOUND'
   | 'SNAPSHOT_NOT_DRAFT'
   | 'SNAPSHOT_NOT_FINALIZED'
-  | 'REVIEW_NOT_FROZEN'
   | 'REVIEW_FREEZE_CHANGING'
   | 'INSUFFICIENT_PATIENTS'
   | 'INVALID_CONFIGURATION'
@@ -76,7 +84,6 @@ const errorStatus: Record<DatasetSnapshotErrorCode, 400 | 404 | 409 | 422> = {
   SNAPSHOT_NOT_FOUND: 404,
   SNAPSHOT_NOT_DRAFT: 409,
   SNAPSHOT_NOT_FINALIZED: 409,
-  REVIEW_NOT_FROZEN: 409,
   REVIEW_FREEZE_CHANGING: 409,
   INSUFFICIENT_PATIENTS: 422,
   INVALID_CONFIGURATION: 400,
@@ -131,6 +138,7 @@ interface SourceRow extends StackImageRow {
   uncertainVotes: number;
   resolutionId: string | null;
   completionId: string | null;
+  implicitNormals: number;
 }
 
 interface PlannedItem {
@@ -146,16 +154,30 @@ interface Plan {
   splitError: SplitPlanError | null;
 }
 
-/** Every image with what eligibility needs (one query, ordered). */
+/**
+ * Every image with what eligibility needs (one query, so one consistent
+ * view, ordered). `implicitNormals` counts the reviewers whose latest
+ * completed review of the Series covers the image without a vote on it.
+ */
 const readSourceRows = (transaction?: Transaction) =>
   sequelize.query<SourceRow>(
-    `SELECT i.id, i."isBrocken", i."instanceNumber", i."imageOrientationPatient",
+    `WITH latest_completions AS (
+       SELECT DISTINCT ON ("seriesId", "reviewerId") "seriesId", "reviewerId", "imageIds"
+       FROM series_review_completions
+       ORDER BY "seriesId", "reviewerId", "completedAt" DESC, id DESC)
+     SELECT i.id, i."isBrocken", i."instanceNumber", i."imageOrientationPatient",
             i."imagePositionPatient", i."numberOfFrames", i.rows, i.columns, i."pixelSpacing",
             i."seriesId", se."studyId", s."patientId",
             (p."deletedAt" IS NOT NULL) AS "patientTrashed",
             i."reviewState", i."reviewStateSource", i."fileSha256", i."fileSize",
             i.source, i."normalVotes", i."abnormalVotes", i."uncertainVotes",
-            r.id AS "resolutionId", c.id AS "completionId"
+            r.id AS "resolutionId", c.id AS "completionId",
+            (SELECT count(*)::int FROM latest_completions lc
+             WHERE lc."seriesId" = i."seriesId" AND i.id = ANY (lc."imageIds")
+               AND NOT EXISTS (
+                 SELECT 1 FROM patient_image_review_votes v
+                 WHERE v."patientImageId" = i.id AND v."reviewerId" = lc."reviewerId")
+            ) AS "implicitNormals"
      FROM patients_images i
      JOIN series se ON se.id = i."seriesId"
      JOIN studies s ON s.id = se."studyId"
@@ -167,15 +189,8 @@ const readSourceRows = (transaction?: Transaction) =>
     { type: QueryTypes.SELECT, transaction }
   );
 
-const buildPlan = async (
-  config: DatasetSnapshotConfigV1,
-  fileMode: FileCheckMode,
-  transaction?: Transaction,
-  onProgress?: (line: string) => void
-): Promise<Plan> => {
-  const rows = await readSourceRows(transaction);
-
-  // Series readiness and display order: the application's shared rule.
+/** Series readiness and display order: the application's shared rule. */
+const seriesLayout = (rows: readonly SourceRow[]) => {
   const bySeries = new Map<string, SourceRow[]>();
   for (const row of rows) {
     const seriesRows = bySeries.get(row.seriesId);
@@ -189,6 +204,20 @@ const buildPlan = async (
     reviewable.set(seriesId, isSimpleStack(stack));
     stack.images.forEach(({ image }, index) => orderIndex.set(image.id, index));
   }
+  return { reviewable, orderIndex };
+};
+
+/** The file check of a candidate image (null: the file passes). */
+type FileCheck = (row: SourceRow) => Promise<DatasetExclusionReason | null>;
+
+const buildPlan = async (
+  config: DatasetSnapshotConfigV1,
+  checkFile: FileCheck,
+  transaction?: Transaction,
+  onProgress?: (line: string) => void
+): Promise<Plan> => {
+  const rows = await readSourceRows(transaction);
+  const { reviewable, orderIndex } = seriesLayout(rows);
 
   const items: PlannedItem[] = [];
   const exclusions: Plan['exclusions'] = [];
@@ -210,11 +239,7 @@ const buildPlan = async (
   }
   // File checks: one file at a time.
   for (const [index, row] of candidates.entries()) {
-    const reason = await checkImageFile(
-      { source: row.source, fileSize: row.fileSize, fileSha256: row.fileSha256 as string },
-      fileMode,
-      uploadRoot
-    );
+    const reason = await checkFile(row);
     if (reason) exclusions.push({ row, reason });
     else {
       items.push({
@@ -416,6 +441,7 @@ export const listSnapshotItems = async (
     normalVotes: item.normalVotes,
     abnormalVotes: item.abnormalVotes,
     uncertainVotes: item.uncertainVotes,
+    implicitNormals: item.implicitNormals,
     seriesOrderIndex: item.seriesOrderIndex,
     fileSha256: item.fileSha256,
     fileSize: Number(item.fileSize),
@@ -502,6 +528,47 @@ export const archiveSnapshot = (id: string, actor: Actor) =>
     return toSummary(snapshot);
   });
 
+// --- File checks -------------------------------------------------------------------------
+
+const checkSourceFile = (row: SourceRow, mode: FileCheckMode) =>
+  checkImageFile(
+    { source: row.source, fileSize: row.fileSize, fileSha256: row.fileSha256 as string },
+    mode,
+    uploadRoot
+  );
+
+/** What a file verification was made for: the stored file it read. */
+const fileKey = (row: SourceRow) => `${row.source}\n${row.fileSize}\n${row.fileSha256}`;
+
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/**
+ * Finalization step 1 (no transaction, no lock): re-hashes the file of every
+ * image that could be included whatever its review label (labels may still
+ * change until the capture). Returns the result per image with the file it
+ * was made for.
+ */
+const verifyCandidateFiles = async (onProgress?: (line: string) => void) => {
+  const rows = await readSourceRows();
+  const { reviewable } = seriesLayout(rows);
+  const candidates = rows.filter(
+    (row) =>
+      !row.patientTrashed &&
+      !row.isBrocken &&
+      reviewable.get(row.seriesId) &&
+      !!row.fileSha256 &&
+      SHA256.test(row.fileSha256)
+  );
+  const verified = new Map<string, { key: string; reason: DatasetExclusionReason | null }>();
+  for (const [index, row] of candidates.entries()) {
+    verified.set(row.id, { key: fileKey(row), reason: await checkSourceFile(row, 'sha256') });
+    if (onProgress && (index + 1) % 500 === 0) {
+      onProgress(`verified ${index + 1}/${candidates.length} file(s) (review open)`);
+    }
+  }
+  return verified;
+};
+
 // --- Preview ---------------------------------------------------------------------------
 
 const isReviewFrozen = async (transaction?: Transaction) =>
@@ -521,7 +588,7 @@ export const previewSnapshot = async (id: string): Promise<DatasetSnapshotPrevie
     );
   }
   const config = withConfigErrors(() => validateConfig(snapshot.configuration));
-  const plan = await buildPlan(config, 'size');
+  const plan = await buildPlan(config, (row) => checkSourceFile(row, 'size'));
   const labels = { NORMAL: 0, ABNORMAL: 0 };
   const bySource: Record<string, number> = {};
   for (const { label, row } of plan.items) {
@@ -563,152 +630,196 @@ const insertInChunks = async <T>(
   }
 };
 
-/** Builds and stores the snapshot under the active review freeze (see top). */
+/**
+ * Longest wait of the capture for review mutations in flight (they are
+ * short); after it the finalization fails with REVIEW_FREEZE_CHANGING and
+ * can be retried.
+ */
+export const CAPTURE_LOCK_TIMEOUT = '15s';
+
+/**
+ * Builds and stores the snapshot: files verified with review open, labels
+ * captured under a short exclusive review lock (see top).
+ */
 export const finalizeSnapshot = async (
   id: string,
   actor: Actor,
   { onProgress }: { onProgress?: (line: string) => void } = {}
 ): Promise<DatasetSnapshotSummary> => {
-  if (!UUID.test(id)) throw notFound();
+  const pending = await findSnapshot(id);
+  if (pending.status !== DatasetSnapshotStatus.DRAFT) {
+    throw new DatasetSnapshotError('SNAPSHOT_NOT_DRAFT', 'The snapshot is already finalized.');
+  }
+  withConfigErrors(() => validateConfig(pending.configuration));
+
+  // 1. Verify (long): review stays open.
+  const verified = await verifyCandidateFiles(onProgress);
+  onProgress?.('capturing review labels (label mutations briefly locked)');
+
+  // 2. Capture (short): exclusive review lock until the commit.
   try {
-    const snapshot = await sequelize.transaction(
-      { isolationLevel: Transaction.ISOLATION_LEVELS.REPEATABLE_READ },
-      async (transaction) => {
-        // First statement: never wait (the data snapshot is taken now).
-        const [{ locked }] = await sequelize.query<{ locked: boolean }>(
-          'SELECT pg_try_advisory_xact_lock_shared(:key) AS locked',
-          { replacements: { key: REVIEW_FREEZE_LOCK_KEY }, type: QueryTypes.SELECT, transaction }
-        );
-        if (!locked) {
-          throw new DatasetSnapshotError(
-            'REVIEW_FREEZE_CHANGING',
-            'The review freeze is being changed; try again.'
-          );
-        }
-        const freeze = await ReviewFreeze.findOne({
-          where: { scope: 'global', unfrozenAt: null },
-          attributes: ['id'],
-          transaction,
-        });
-        if (!freeze) {
-          throw new DatasetSnapshotError(
-            'REVIEW_NOT_FROZEN',
-            'Finalizing a dataset snapshot requires an active review freeze.'
-          );
-        }
-        const draft = await findSnapshot(id, transaction, true);
-        if (draft.status !== DatasetSnapshotStatus.DRAFT) {
-          throw new DatasetSnapshotError('SNAPSHOT_NOT_DRAFT', 'The snapshot is already finalized.');
-        }
-        const config = withConfigErrors(() => validateConfig(draft.configuration));
-        const plan = await buildPlan(config, 'sha256', transaction, onProgress);
-        if (!plan.split) {
-          throw new DatasetSnapshotError(
-            'INSUFFICIENT_PATIENTS',
-            plan.splitError?.message ?? 'Not enough eligible patients.'
-          );
-        }
-        const now = new Date();
-        const assignments = new Map(
-          plan.split.assignments.map((assignment) => [assignment.patientGroupKey, assignment])
-        );
-        const perPatient = new Map<string, { imageCount: number; normal: number; abnormal: number }>();
-        for (const { row, label } of plan.items) {
-          const counts = perPatient.get(row.patientId) ?? { imageCount: 0, normal: 0, abnormal: 0 };
-          counts.imageCount += 1;
-          if (label === DatasetLabel.ABNORMAL) counts.abnormal += 1;
-          else counts.normal += 1;
-          perPatient.set(row.patientId, counts);
-        }
-        await insertInChunks([...assignments.values()], (chunk) =>
-          DatasetSnapshotPatient.bulkCreate(
-            chunk.map((assignment) => {
-              const counts = perPatient.get(assignment.patientGroupKey) as {
-                imageCount: number;
-                normal: number;
-                abnormal: number;
-              };
-              return {
-                snapshotId: draft.id,
-                patientGroupKey: assignment.patientGroupKey,
-                // The grouping key is the internal Patient id (schema v1).
-                patientId: assignment.patientGroupKey,
-                split: assignment.split,
-                stratum: assignment.stratum,
-                splitRank: assignment.splitRank,
-                imageCount: counts.imageCount,
-                normalImages: counts.normal,
-                abnormalImages: counts.abnormal,
-              };
-            }),
-            { transaction }
-          )
-        );
-        await insertInChunks(plan.items, (chunk) =>
-          DatasetSnapshotItem.bulkCreate(
-            chunk.map(({ row, label, seriesOrderIndex }) => ({
-              snapshotId: draft.id,
-              patientGroupKey: row.patientId,
-              split: (assignments.get(row.patientId) as { split: DatasetSplit }).split,
-              patientImageId: row.id,
-              patientId: row.patientId,
-              studyId: row.studyId,
-              seriesId: row.seriesId,
-              label,
-              reviewStateAtSnapshot: row.reviewState,
-              reviewStateSourceAtSnapshot: row.reviewStateSource as DatasetReviewSource,
-              reviewResolutionId: row.resolutionId,
-              reviewCompletionId: row.completionId,
-              normalVotes: row.normalVotes,
-              abnormalVotes: row.abnormalVotes,
-              uncertainVotes: row.uncertainVotes,
-              seriesOrderIndex,
-              fileSha256: row.fileSha256 as string,
-              fileSize: row.fileSize as string,
-              createdAt: now,
-            })),
-            { transaction }
-          )
-        );
-        await insertInChunks(plan.exclusions, (chunk) =>
-          DatasetSnapshotExclusion.bulkCreate(
-            chunk.map(({ row, reason }) => ({
-              snapshotId: draft.id,
-              patientImageId: row.id,
-              seriesId: row.seriesId,
-              patientGroupKey: row.patientId,
-              reason,
-              createdAt: now,
-            })),
-            { transaction }
-          )
-        );
-        const normal = plan.items.filter(({ label }) => label === DatasetLabel.NORMAL).length;
-        await draft.update(
-          {
-            status: DatasetSnapshotStatus.FINALIZED,
-            finalizedAt: now,
-            finalizedById: actor.id,
-            finalizedByName: actor.name,
-            reviewFreezeId: freeze.id,
-            fileVerification: 'SHA256_REHASHED',
-            totalPatients: assignments.size,
-            totalImages: plan.items.length,
-            normalImages: normal,
-            abnormalImages: plan.items.length - normal,
-            excludedImages: plan.exclusions.length,
-            exclusionSummary: exclusionSummary(plan),
-          },
-          { transaction }
-        );
-        return draft;
+    const snapshot = await sequelize.transaction(async (transaction) => {
+      await sequelize.query(`SET LOCAL lock_timeout = '${CAPTURE_LOCK_TIMEOUT}'`, { transaction });
+      await sequelize.query('SELECT pg_advisory_xact_lock(:key)', {
+        replacements: { key: REVIEW_FREEZE_LOCK_KEY },
+        transaction,
+      });
+      await sequelize.query('SET LOCAL lock_timeout = 0', { transaction });
+      const frozenAt = new Date();
+
+      const draft = await findSnapshot(id, transaction, true);
+      if (draft.status !== DatasetSnapshotStatus.DRAFT) {
+        throw new DatasetSnapshotError('SNAPSHOT_NOT_DRAFT', 'The snapshot is already finalized.');
       }
-    );
+      const config = withConfigErrors(() => validateConfig(draft.configuration));
+      const plan = await buildPlan(
+        config,
+        async (row) => {
+          const prior = verified.get(row.id);
+          // Verified in step 1 for the same stored file; else (an image
+          // that became a candidate meanwhile) re-hashed now.
+          return prior && prior.key === fileKey(row)
+            ? prior.reason
+            : checkSourceFile(row, 'sha256');
+        },
+        transaction,
+        onProgress
+      );
+      if (!plan.split) {
+        throw new DatasetSnapshotError(
+          'INSUFFICIENT_PATIENTS',
+          plan.splitError?.message ?? 'Not enough eligible patients.'
+        );
+      }
+      const now = new Date();
+      const assignments = new Map(
+        plan.split.assignments.map((assignment) => [assignment.patientGroupKey, assignment])
+      );
+      const perPatient = new Map<string, { imageCount: number; normal: number; abnormal: number }>();
+      for (const { row, label } of plan.items) {
+        const counts = perPatient.get(row.patientId) ?? { imageCount: 0, normal: 0, abnormal: 0 };
+        counts.imageCount += 1;
+        if (label === DatasetLabel.ABNORMAL) counts.abnormal += 1;
+        else counts.normal += 1;
+        perPatient.set(row.patientId, counts);
+      }
+      await insertInChunks([...assignments.values()], (chunk) =>
+        DatasetSnapshotPatient.bulkCreate(
+          chunk.map((assignment) => {
+            const counts = perPatient.get(assignment.patientGroupKey) as {
+              imageCount: number;
+              normal: number;
+              abnormal: number;
+            };
+            return {
+              snapshotId: draft.id,
+              patientGroupKey: assignment.patientGroupKey,
+              // The grouping key is the internal Patient id (schema v1).
+              patientId: assignment.patientGroupKey,
+              split: assignment.split,
+              stratum: assignment.stratum,
+              splitRank: assignment.splitRank,
+              imageCount: counts.imageCount,
+              normalImages: counts.normal,
+              abnormalImages: counts.abnormal,
+            };
+          }),
+          { transaction }
+        )
+      );
+      await insertInChunks(plan.items, (chunk) =>
+        DatasetSnapshotItem.bulkCreate(
+          chunk.map(({ row, label, seriesOrderIndex }) => ({
+            snapshotId: draft.id,
+            patientGroupKey: row.patientId,
+            split: (assignments.get(row.patientId) as { split: DatasetSplit }).split,
+            patientImageId: row.id,
+            patientId: row.patientId,
+            studyId: row.studyId,
+            seriesId: row.seriesId,
+            label,
+            reviewStateAtSnapshot: row.reviewState,
+            reviewStateSourceAtSnapshot: row.reviewStateSource as DatasetReviewSource,
+            reviewResolutionId: row.resolutionId,
+            reviewCompletionId: row.completionId,
+            normalVotes: row.normalVotes,
+            abnormalVotes: row.abnormalVotes,
+            uncertainVotes: row.uncertainVotes,
+            implicitNormals: row.implicitNormals,
+            seriesOrderIndex,
+            fileSha256: row.fileSha256 as string,
+            fileSize: row.fileSize as string,
+            createdAt: now,
+          })),
+          { transaction }
+        )
+      );
+      await insertInChunks(plan.exclusions, (chunk) =>
+        DatasetSnapshotExclusion.bulkCreate(
+          chunk.map(({ row, reason }) => ({
+            snapshotId: draft.id,
+            patientImageId: row.id,
+            seriesId: row.seriesId,
+            patientGroupKey: row.patientId,
+            reason,
+            createdAt: now,
+          })),
+          { transaction }
+        )
+      );
+      // The freeze the labels were captured under: an active manual
+      // freeze, else this capture's window (recorded closed: the lock ends
+      // with this transaction).
+      const manualFreeze = await ReviewFreeze.findOne({
+        where: { scope: 'global', unfrozenAt: null },
+        attributes: ['id'],
+        transaction,
+      });
+      const freezeId =
+        manualFreeze?.id ??
+        (
+          await ReviewFreeze.create(
+            {
+              reason: `Dataset snapshot capture ${draft.id}`,
+              frozenById: actor.id,
+              frozenByName: actor.name,
+              frozenAt,
+              unfrozenAt: new Date(),
+              unfrozenById: actor.id,
+              unfrozenByName: actor.name,
+            },
+            { transaction }
+          )
+        ).id;
+      const normal = plan.items.filter(({ label }) => label === DatasetLabel.NORMAL).length;
+      await draft.update(
+        {
+          status: DatasetSnapshotStatus.FINALIZED,
+          finalizedAt: now,
+          finalizedById: actor.id,
+          finalizedByName: actor.name,
+          reviewFreezeId: freezeId,
+          fileVerification: 'SHA256_REHASHED',
+          totalPatients: assignments.size,
+          totalImages: plan.items.length,
+          normalImages: normal,
+          abnormalImages: plan.items.length - normal,
+          excludedImages: plan.exclusions.length,
+          exclusionSummary: exclusionSummary(plan),
+        },
+        { transaction }
+      );
+      return draft;
+    });
     return toSummary(snapshot);
   } catch (error) {
-    // Another finalization of the same snapshot committed meanwhile.
-    if ((error as { parent?: { code?: string } }).parent?.code === '40001') {
-      throw new DatasetSnapshotError('SNAPSHOT_NOT_DRAFT', 'The snapshot is already finalized.');
+    const code = (error as { parent?: { code?: string } }).parent?.code;
+    // The lock could not be taken in time (review mutations in flight).
+    if (code === '55P03') {
+      throw new DatasetSnapshotError(
+        'REVIEW_FREEZE_CHANGING',
+        'Review changes in progress did not finish in time; try again.'
+      );
     }
     throw error;
   }

@@ -1,11 +1,19 @@
 /**
  * Effective review state of an image and its cached fields (pure; no
- * database access). Precedence:
- *   1. an active admin resolution -> its label          (RESOLUTION)
- *   2. votes: one distinct label  -> that label          (VOTES)
- *             several labels      -> CONFLICTED          (VOTES)
- *   3. a "Finish review" completion -> NORMAL            (FINISH_REVIEW)
- *   4. otherwise                  -> NOT_REVIEWED        (NONE)
+ * database access).
+ *
+ * Every reviewer has at most one opinion per image: their explicit vote, or
+ * else an IMPLICIT NORMAL when their latest completed review of the image's
+ * Series covered the image (radiologist workflow: doctors mark Abnormal /
+ * Not sure, everything else they reviewed is Normal). Opinions of different
+ * reviewers are never merged into one label; precedence:
+ *   1. an active admin resolution  -> its label                  (RESOLUTION)
+ *   2. opinions (explicit votes and implicit NORMALs):
+ *        one distinct label        -> that label   (VOTES; FINISH_REVIEW when
+ *                                                   all are implicit NORMAL)
+ *        several labels            -> CONFLICTED                  (VOTES)
+ *   3. a legacy per-image "Finish review" completion -> NORMAL (FINISH_REVIEW)
+ *   4. otherwise                   -> NOT_REVIEWED                (NONE)
  */
 import {
   PatientImageReviewVoteTypes,
@@ -26,10 +34,16 @@ export interface ActiveResolution {
 }
 
 export interface ReviewEvidence {
+  /** Explicit votes (one per reviewer). */
   votes: readonly PatientImageReviewVoteTypes[];
+  /**
+   * Implicit NORMAL opinions: reviewers whose latest completed Series review
+   * covers the image and who have no explicit vote on it.
+   */
+  implicitNormals?: number;
   /** The active resolution, if any. */
   resolution: ActiveResolution | null;
-  /** A "Finish review" completion exists. */
+  /** A legacy per-image "Finish review" completion exists. */
   completed: boolean;
 }
 
@@ -51,12 +65,15 @@ const resolutionState: Record<ReviewResolutionLabel, ReviewState> = {
 };
 
 /**
- * The effective review state. Any disagreement between votes is CONFLICTED
- * (no majority); only UNCERTAIN votes are UNCERTAIN; no votes are
- * NOT_REVIEWED unless a reviewer finished the review of the cluster.
+ * The effective review state. Any disagreement between reviewers' opinions
+ * is CONFLICTED (no majority; an implicit NORMAL disagrees with an explicit
+ * ABNORMAL / UNCERTAIN like an explicit NORMAL does); only UNCERTAIN
+ * opinions are UNCERTAIN; no opinion is NOT_REVIEWED unless a legacy
+ * completion exists.
  */
 export const deriveReviewState = ({
   votes,
+  implicitNormals = 0,
   resolution,
   completed,
 }: ReviewEvidence): DerivedReviewState => {
@@ -67,10 +84,13 @@ export const deriveReviewState = ({
     };
   }
   const labels = new Set(votes);
+  if (implicitNormals > 0) labels.add(PatientImageReviewVoteTypes.NORMAL);
   if (labels.size === 1) {
     return {
       reviewState: voteState[[...labels][0]],
-      reviewStateSource: ReviewStateSource.VOTES,
+      reviewStateSource: votes.length
+        ? ReviewStateSource.VOTES
+        : ReviewStateSource.FINISH_REVIEW,
     };
   }
   if (labels.size > 1) {
@@ -131,8 +151,10 @@ const stateStatus: Record<ReviewState, PatientImageStatus> = {
 /**
  * The effective state plus the compatibility caches: the legacy `status`
  * (`broken` for broken images, `admin_resolved` for a resolution),
- * `isAbnormal` (only for an ABNORMAL state), the vote counters and the
- * legacy resolution fields (from the active resolution, else null).
+ * `isAbnormal` (only for an ABNORMAL state), the vote counters (explicit
+ * votes only: an implicit NORMAL is not a vote) and the legacy resolution
+ * fields (from the active resolution, else null). `isAbnormal = false` is
+ * never proof of agreement on NORMAL: read `reviewState`.
  */
 export const deriveReviewCaches = (
   evidence: ReviewEvidence,
