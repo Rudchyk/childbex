@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 027
+
+BRANCH="${CHILDBEX_BRANCH:-main}"
+REPO="${CHILDBEX_REPO:-/srv/childbex/repo}"
+RELEASES="${CHILDBEX_ML_RELEASES:-/srv/childbex/ml-releases}"
+ACTIVE="${CHILDBEX_ML_ACTIVE_LINK:-/srv/childbex/ml-current}"
+BUILD_USER="${CHILDBEX_BUILD_USER:-childbex-build}"
+UV="${CHILDBEX_UV:-/opt/childbex-ml/bin/uv}"
+PYTHON="${CHILDBEX_ML_PYTHON:-/opt/childbex-ml/python/cpython-3.13.15-linux-x86_64-gnu/bin/python3.13}"
+SERVICE="${CHILDBEX_ML_SERVICE:-childbex-ml.service}"
+HEALTH_URL="${CHILDBEX_ML_HEALTH_URL:-http://127.0.0.1:8001/health}"
+LOCK_FILE="${CHILDBEX_ML_DEPLOY_LOCK:-/run/lock/childbex-ml-deploy.lock}"
+
+[[ $EUID -eq 0 ]] || { echo "ERROR: run as root" >&2; exit 1; }
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || { echo "ERROR: ML deploy already running" >&2; exit 1; }
+
+run_build() {
+  sudo -u "$BUILD_USER" env     PATH="/usr/bin:/bin"     bash -lc "$1"
+}
+
+echo "Fetching origin/$BRANCH..."
+run_build "cd '$REPO' && git fetch origin '$BRANCH':refs/remotes/origin/'$BRANCH'"
+
+TARGET_SHA="$(sudo -u "$BUILD_USER" git -C "$REPO" rev-parse "origin/$BRANCH")"
+RELEASE="$RELEASES/$TARGET_SHA"
+TMP_RELEASE="$RELEASES/.tmp-$TARGET_SHA-$$"
+OLD_RELEASE="$(readlink -f "$ACTIVE" 2>/dev/null || true)"
+
+echo "Target SHA: $TARGET_SHA"
+echo "Current ML release: ${OLD_RELEASE:-none}"
+
+run_build "cd '$REPO' && git switch -C '$BRANCH' 'origin/$BRANCH' && git reset --hard 'origin/$BRANCH'"
+
+if [[ ! -d "$RELEASE" ]]; then
+  rm -rf "$TMP_RELEASE"
+  sudo -u "$BUILD_USER" mkdir -p "$TMP_RELEASE"
+  sudo -u "$BUILD_USER" cp -a "$REPO/apps/llm-service/." "$TMP_RELEASE/"
+
+  sudo -u "$BUILD_USER" env UV_LINK_MODE=copy     "$UV" venv --python "$PYTHON" "$TMP_RELEASE/.venv"
+
+  sudo -u "$BUILD_USER" env UV_LINK_MODE=copy     "$UV" pip install     --python "$TMP_RELEASE/.venv/bin/python"     -r "$TMP_RELEASE/requirements.txt"
+
+  mv "$TMP_RELEASE" "$RELEASE"
+fi
+
+rollback() {
+  echo "ML deploy failed; attempting rollback..." >&2
+  if [[ -n "$OLD_RELEASE" && -d "$OLD_RELEASE" ]]; then
+    ln -sfn "$OLD_RELEASE" "$ACTIVE"
+    systemctl restart "$SERVICE" || true
+    echo "Rollback target: $OLD_RELEASE" >&2
+  else
+    echo "No previous ML release available for rollback." >&2
+  fi
+}
+trap rollback ERR
+
+ln -sfn "$RELEASE" "$ACTIVE"
+systemctl restart "$SERVICE"
+
+healthy=0
+for _ in $(seq 1 30); do
+  code="$(curl -sS -o /dev/null -w '%{http_code}' "$HEALTH_URL" 2>/dev/null || true)"
+  if [[ "$code" == "200" ]]; then
+    healthy=1
+    break
+  fi
+  sleep 1
+done
+
+[[ "$healthy" -eq 1 ]] || { echo "ERROR: ML health check failed" >&2; false; }
+
+trap - ERR
+
+run_build "cd '$REPO' && git fetch origin '$BRANCH':refs/remotes/origin/'$BRANCH'"
+REMOTE_SHA="$(sudo -u "$BUILD_USER" git -C "$REPO" rev-parse "origin/$BRANCH")"
+
+echo "ML DEPLOY SUCCESS"
+echo "deployed_sha=$TARGET_SHA"
+echo "health_code=200"
+if [[ "$REMOTE_SHA" == "$TARGET_SHA" ]]; then
+  echo "branch_status=current"
+else
+  echo "branch_status=advanced"
+  echo "current_origin_sha=$REMOTE_SHA"
+fi

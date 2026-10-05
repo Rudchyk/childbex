@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 027
+
+BRANCH="${CHILDBEX_BRANCH:-main}"
+REPO="${CHILDBEX_REPO:-/srv/childbex/repo}"
+RELEASES="${CHILDBEX_RELEASES:-/srv/childbex/releases}"
+ACTIVE="${CHILDBEX_ACTIVE_LINK:-/var/www/childbex/app}"
+ENV_SOURCE="${CHILDBEX_ENV_SOURCE:-/srv/secrets/childbex/app/.env}"
+BUILD_USER="${CHILDBEX_BUILD_USER:-childbex-build}"
+NODE_BIN_DIR="${CHILDBEX_BUILD_NODE_BIN:-/opt/childbex-build/node-current/bin}"
+SERVICE="${CHILDBEX_APP_SERVICE:-childbex-app.service}"
+HEALTH_URL="${CHILDBEX_APP_HEALTH_URL:-http://127.0.0.1:3111/api/v1/patients}"
+EXPECTED_HEALTH="${CHILDBEX_APP_HEALTH_CODE:-401}"
+LOCK_FILE="${CHILDBEX_APP_DEPLOY_LOCK:-/run/lock/childbex-app-deploy.lock}"
+
+[[ $EUID -eq 0 ]] || { echo "ERROR: run as root" >&2; exit 1; }
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || { echo "ERROR: app deploy already running" >&2; exit 1; }
+
+run_build() {
+  sudo -u "$BUILD_USER" env     PATH="$NODE_BIN_DIR:/usr/bin:/bin"     NX_DAEMON=false     NX_SKIP_NATIVE_FILE_CACHE=true     bash -lc "$1"
+}
+
+echo "Fetching origin/$BRANCH..."
+run_build "cd '$REPO' && git fetch origin '$BRANCH':refs/remotes/origin/'$BRANCH'"
+
+TARGET_SHA="$(sudo -u "$BUILD_USER" git -C "$REPO" rev-parse "origin/$BRANCH")"
+SHORT_SHA="${TARGET_SHA:0:12}"
+RELEASE="$RELEASES/$TARGET_SHA"
+TMP_RELEASE="$RELEASES/.tmp-$TARGET_SHA-$$"
+OLD_RELEASE="$(readlink -f "$ACTIVE" 2>/dev/null || true)"
+
+echo "Target SHA: $TARGET_SHA"
+echo "Current release: ${OLD_RELEASE:-none}"
+
+run_build "cd '$REPO' && git switch -C '$BRANCH' 'origin/$BRANCH' && git reset --hard 'origin/$BRANCH'"
+run_build "cd '$REPO' && npm ci --no-audit --no-fund"
+run_build "cd '$REPO' && npm run build"
+
+if [[ ! -d "$RELEASE" ]]; then
+  rm -rf "$TMP_RELEASE"
+  sudo -u "$BUILD_USER" mkdir -p "$TMP_RELEASE"
+  sudo -u "$BUILD_USER" cp -a "$REPO/dist/apps/be" "$TMP_RELEASE/be"
+  sudo -u "$BUILD_USER" cp -a "$REPO/dist/apps/gui" "$TMP_RELEASE/gui"
+  sudo -u "$BUILD_USER" ln -s "$ENV_SOURCE" "$TMP_RELEASE/.env"
+
+  sudo -u "$BUILD_USER" env     PATH="$NODE_BIN_DIR:/usr/bin:/bin"     bash -lc "cd '$TMP_RELEASE/be' && npm ci --omit=dev --ignore-scripts --no-audit --no-fund"
+
+  mv "$TMP_RELEASE" "$RELEASE"
+fi
+
+rollback() {
+  echo "Deploy failed; attempting rollback..." >&2
+  if [[ -n "$OLD_RELEASE" && -d "$OLD_RELEASE" ]]; then
+    ln -sfn "$OLD_RELEASE" "$ACTIVE"
+    systemctl restart "$SERVICE" || true
+    echo "Rollback target: $OLD_RELEASE" >&2
+  else
+    echo "No previous release available for rollback." >&2
+  fi
+}
+trap rollback ERR
+
+ln -sfn "$RELEASE" "$ACTIVE"
+systemctl restart "$SERVICE"
+
+healthy=0
+for _ in $(seq 1 30); do
+  code="$(curl -sS -o /dev/null -w '%{http_code}' "$HEALTH_URL" 2>/dev/null || true)"
+  if [[ "$code" == "$EXPECTED_HEALTH" ]]; then
+    healthy=1
+    break
+  fi
+  sleep 1
+done
+
+[[ "$healthy" -eq 1 ]] || { echo "ERROR: app health check failed" >&2; false; }
+
+trap - ERR
+
+run_build "cd '$REPO' && git fetch origin '$BRANCH':refs/remotes/origin/'$BRANCH'"
+REMOTE_SHA="$(sudo -u "$BUILD_USER" git -C "$REPO" rev-parse "origin/$BRANCH")"
+
+echo "APP DEPLOY SUCCESS"
+echo "deployed_sha=$TARGET_SHA"
+echo "health_code=$EXPECTED_HEALTH"
+if [[ "$REMOTE_SHA" == "$TARGET_SHA" ]]; then
+  echo "branch_status=current"
+else
+  echo "branch_status=advanced"
+  echo "current_origin_sha=$REMOTE_SHA"
+fi

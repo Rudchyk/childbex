@@ -1,0 +1,21 @@
+[Unit]
+Description=ChildBEx application
+After=network.target
+
+[Service]
+Type=simple
+User=nodeapp
+Group=nodeapp
+SupplementaryGroups=nodeapps
+WorkingDirectory=/var/www/childbex/app
+ExecStart=/usr/bin/node be/main.js
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=childbex-app
+
+[Install]
+WantedBy=multi-user.target

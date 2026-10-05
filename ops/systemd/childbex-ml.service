@@ -1,0 +1,20 @@
+[Unit]
+Description=ChildBEx ML service
+After=network.target
+
+[Service]
+Type=simple
+User=childbex-ml
+Group=childbex-ml
+WorkingDirectory=/srv/childbex/ml-current
+ExecStart=/srv/childbex/ml-current/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=childbex-ml
+
+[Install]
+WantedBy=multi-user.target
