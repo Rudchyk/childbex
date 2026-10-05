@@ -48,6 +48,10 @@ if [[ ! -d "$RELEASE" ]]; then
   sudo -u "$BUILD_USER" env UV_LINK_MODE=copy     "$UV" pip install     --python "$RELEASE/.venv/bin/python"     -r "$RELEASE/requirements.txt"
 fi
 
+# Normalize copied source files and venv entry points so unrelated local users
+# cannot read or execute release contents.
+chmod -R o-rwx "$RELEASE"
+
 # Keep ML releases private while allowing the service account to read the
 # environment and execute venv entry points. This also repairs an existing
 # release left behind by a failed activation of the same SHA.

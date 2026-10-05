@@ -83,3 +83,36 @@ Do not commit:
 Application releases link the existing production environment file from `/srv/secrets/childbex/app/.env`.
 
 Model artifacts belong under `/srv/data/childbex/models` (or another explicitly managed persistent model path), not inside disposable code releases.
+
+
+## GitHub Actions production deploy
+
+Production deployment is exposed through the manual-only workflow:
+
+```text
+.github/workflows/production-deploy.yml
+```
+
+The workflow uses `workflow_dispatch` and requires an explicit target selection:
+
+- `app`
+- `ml`
+
+It intentionally does **not** deploy automatically on pushes to `main` yet.
+
+The GitHub `production` environment must provide these secrets:
+
+- `CHILDBEX_PROD_SSH_HOST`
+- `CHILDBEX_PROD_SSH_PORT`
+- `CHILDBEX_PROD_SSH_USER`
+- `CHILDBEX_PROD_SSH_PRIVATE_KEY`
+- `CHILDBEX_PROD_SSH_KNOWN_HOSTS`
+
+The SSH account should be a dedicated deployment identity with passwordless sudo restricted to the two repository-owned deploy entry points:
+
+```text
+/usr/local/sbin/childbex-app-deploy
+/usr/local/sbin/childbex-ml-deploy
+```
+
+Do not place production application secrets or model data in GitHub Actions.

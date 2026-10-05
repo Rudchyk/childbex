@@ -1,0 +1,62 @@
+name: Production deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Service to deploy
+        required: true
+        type: choice
+        options:
+          - app
+          - ml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: childbex-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.target }} to production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.CHILDBEX_PROD_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.CHILDBEX_PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0644 ~/.ssh/known_hosts
+
+      - name: Run repository-owned deploy
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.CHILDBEX_PROD_SSH_HOST }}
+          SSH_PORT: ${{ secrets.CHILDBEX_PROD_SSH_PORT }}
+          SSH_USER: ${{ secrets.CHILDBEX_PROD_SSH_USER }}
+          DEPLOY_TARGET: ${{ inputs.target }}
+        run: |
+          set -Eeuo pipefail
+
+          case "$DEPLOY_TARGET" in
+            app) REMOTE_COMMAND='sudo /usr/local/sbin/childbex-app-deploy' ;;
+            ml)  REMOTE_COMMAND='sudo /usr/local/sbin/childbex-ml-deploy' ;;
+            *)   echo "Unsupported deploy target: $DEPLOY_TARGET" >&2; exit 2 ;;
+          esac
+
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -p "$SSH_PORT" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            "$SSH_USER@$SSH_HOST" \
+            "$REMOTE_COMMAND"
