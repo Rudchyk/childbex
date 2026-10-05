@@ -7,6 +7,8 @@ export default [
   {
     ignores: [
       '**/dist',
+      '**/out-tsc/**',
+      '**/src/html/**',
       '**/vite.config.*.timestamp*',
       '**/vitest.config.*.timestamp*',
     ],
