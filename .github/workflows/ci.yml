@@ -6,41 +6,85 @@ on:
       - main
     paths-ignore:
       - "docs/**"
-      - ".github/**"
   pull_request:
     paths-ignore:
       - "docs/**"
+  workflow_dispatch:
 
 permissions:
-  actions: read
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  main:
-    runs-on: ubuntu-latest
+  node:
+    name: Node / Nx
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
         with:
           filter: tree:0
           fetch-depth: 0
 
-      # This enables task distribution via Nx Cloud
-      # Run this command as early as possible, before dependencies are installed
-      # Learn more at https://nx.dev/ci/reference/nx-cloud-cli#npx-nxcloud-startcirun
-      # Uncomment this line to enable task distribution
-      # - run: npx nx start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="build"
-
-      # Cache node_modules
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
         with:
           node-version: 20
-          cache: 'npm'
+          cache: npm
 
-      - run: npm ci --legacy-peer-deps
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
 
-      # Prepend any command with "nx-cloud record --" to record its logs to Nx Cloud
-      # - run: npx nx-cloud record -- echo Hello World
-      - run: npx nx run-many -t lint test build typecheck
-      # Nx Cloud recommends fixes for failures to help you get CI green faster. Learn more: https://nx.dev/ci/features/self-healing-ci
-      - run: npx nx fix-ci
-        if: always()
+      - name: Lint, test, build and typecheck
+        run: npx nx run-many -t lint test build typecheck --outputStyle=stream
+
+  python:
+    name: Python / LLM service
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/llm-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/llm-service/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Verify dependencies
+        run: python -m pip check
+
+      - name: Compile Python sources
+        run: python -m compileall -q .
+
+      - name: Import FastAPI app
+        run: python -c "import main; assert main.app is not None"
+
+  ops:
+    name: Ops scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate production script syntax
+        run: |
+          bash -n ops/deploy/childbex-app-deploy
+          bash -n ops/deploy/childbex-ml-deploy
+          bash -n ops/install/install-production-deploy.sh
