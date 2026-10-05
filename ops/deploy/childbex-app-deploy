@@ -8,6 +8,7 @@ RELEASES="${CHILDBEX_RELEASES:-/srv/childbex/releases}"
 ACTIVE="${CHILDBEX_ACTIVE_LINK:-/var/www/childbex/app}"
 ENV_SOURCE="${CHILDBEX_ENV_SOURCE:-/srv/secrets/childbex/app/.env}"
 BUILD_USER="${CHILDBEX_BUILD_USER:-childbex-build}"
+RUNTIME_USER="${CHILDBEX_APP_RUNTIME_USER:-nodeapp}"
 NODE_BIN_DIR="${CHILDBEX_BUILD_NODE_BIN:-/opt/childbex-build/node-current/bin}"
 SERVICE="${CHILDBEX_APP_SERVICE:-childbex-app.service}"
 HEALTH_URL="${CHILDBEX_APP_HEALTH_URL:-http://127.0.0.1:3111/api/v1/patients}"
@@ -50,6 +51,11 @@ if [[ ! -d "$RELEASE" ]]; then
 
   mv "$TMP_RELEASE" "$RELEASE"
 fi
+
+# Releases are private to deployers (umask 027). Grant only the runtime user
+# read access to files and traverse/execute access where required. Using X
+# preserves executable entry points while keeping non-executable files non-executable.
+setfacl -R -m "u:${RUNTIME_USER}:r-X" "$RELEASE"
 
 rollback() {
   echo "Deploy failed; attempting rollback..." >&2
