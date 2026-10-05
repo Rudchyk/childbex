@@ -50,6 +50,9 @@ export const DicomViewerDropbox: FC<DicomViewerDropboxProps> = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       sx={{
+        // Above the (empty) viewer layers, which also take pointer events.
+        position: 'relative',
+        zIndex: 1,
         p: 2,
         height: '100%',
         border: '5px dashed #e8eaf6',

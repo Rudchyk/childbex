@@ -56,7 +56,12 @@ export default defineConfig(({ mode }) => {
         '/api': `http://localhost:${process.env.PORT}`,
         '/metrics': `http://localhost:${process.env.PORT}`,
         '/test': `http://localhost:${process.env.PORT}`,
-        '/assets': `http://localhost:${process.env.PORT}`,
+        '/assets': {
+          target: `http://localhost:${process.env.PORT}`,
+          // dwv's decoder workers are served by Vite itself (static copy).
+          bypass: (req) =>
+            req.url?.startsWith('/assets/workers/') ? req.url : undefined,
+        },
       },
     },
     preview: {
@@ -78,6 +83,19 @@ export default defineConfig(({ mode }) => {
               path.resolve(__dirname, 'src/assets/manifest.json')
             ),
             dest: '.',
+          },
+          // dwv decodes compressed transfer syntaxes (JPEG baseline /
+          // lossless, JPEG 2000, RLE) in web workers it loads from
+          // `assets/workers/` relative to the document base (`<base href="/">`).
+          // Not bundled by Vite: without this copy those images fail to load.
+          {
+            src: normalizePath(
+              path.resolve(
+                __dirname,
+                '../../node_modules/dwv/dist/assets/workers/*.worker.min.js'
+              )
+            ),
+            dest: 'assets/workers',
           },
         ],
       }),

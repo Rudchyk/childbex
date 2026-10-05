@@ -63,7 +63,7 @@ export interface DicomPositionChangeEvent {
   type: 'positionchange';
   value: [[number, number, number], [number, number, number], number];
   diffDims: number[];
-  data: {
+  data?: {
     imageUid: string;
   };
   srclayerid: string;

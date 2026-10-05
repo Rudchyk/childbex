@@ -6,10 +6,8 @@ import {
   ListItemIcon,
   ListItemText,
   ListSubheader,
-  // ListSubheader,
   Paper,
 } from '@mui/material';
-import { App, Index } from 'dwv';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 
 export interface Item {
@@ -21,15 +19,16 @@ export interface Item {
 export interface DicomViewerSidebarProps {
   items: Item[];
   currentImageId?: string;
-  app: App | null;
   icon?: (source: string) => ReactElement;
+  /** Shows the slice with this index. */
+  onJumpTo: (index: number) => void;
 }
 
 export const DicomViewerSidebar: FC<DicomViewerSidebarProps> = ({
   items = [],
   currentImageId,
   icon = () => <InsertDriveFileIcon />,
-  app,
+  onJumpTo,
 }) => {
   const itemsList = useMemo(() => [...items].reverse(), [items]);
   const itemRefs = useRef<Record<string, HTMLLIElement | null>>({});
@@ -49,21 +48,6 @@ export const DicomViewerSidebar: FC<DicomViewerSidebarProps> = ({
       });
     }
   }, [currentImageId]);
-
-  const jumpTo = (i: number) => {
-    if (app) {
-      const lg = app.getActiveLayerGroup();
-      if (lg) {
-        const vl = lg.getActiveViewLayer();
-        if (vl) {
-          const vc = vl.getViewController();
-          const vals = vc.getCurrentIndex().getValues();
-          vals[2] = i;
-          vc.setCurrentIndex(new Index(vals), false);
-        }
-      }
-    }
-  };
 
   if (!items.length) {
     return null;
@@ -92,7 +76,7 @@ export const DicomViewerSidebar: FC<DicomViewerSidebarProps> = ({
               ref={(el: HTMLLIElement | null) => {
                 itemRefs.current[imageUid] = el;
               }}
-              onClick={() => jumpTo(index)}
+              onClick={() => onJumpTo(index)}
               alignItems="flex-start"
               sx={{
                 borderBottom: '1px solid #ccc',
