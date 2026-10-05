@@ -7,6 +7,7 @@ REPO="${CHILDBEX_REPO:-/srv/childbex/repo}"
 RELEASES="${CHILDBEX_ML_RELEASES:-/srv/childbex/ml-releases}"
 ACTIVE="${CHILDBEX_ML_ACTIVE_LINK:-/srv/childbex/ml-current}"
 BUILD_USER="${CHILDBEX_BUILD_USER:-childbex-build}"
+RUNTIME_USER="${CHILDBEX_ML_RUNTIME_USER:-childbex-ml}"
 UV="${CHILDBEX_UV:-/opt/childbex-ml/bin/uv}"
 PYTHON="${CHILDBEX_ML_PYTHON:-/opt/childbex-ml/python/cpython-3.13.15-linux-x86_64-gnu/bin/python3.13}"
 SERVICE="${CHILDBEX_ML_SERVICE:-childbex-ml.service}"
@@ -46,6 +47,11 @@ if [[ ! -d "$RELEASE" ]]; then
 
   mv "$TMP_RELEASE" "$RELEASE"
 fi
+
+# Keep ML releases private while allowing the service account to read the
+# environment and execute venv entry points. This also repairs an existing
+# release left behind by a failed activation of the same SHA.
+setfacl -R -m "u:${RUNTIME_USER}:r-X" "$RELEASE"
 
 rollback() {
   echo "ML deploy failed; attempting rollback..." >&2
