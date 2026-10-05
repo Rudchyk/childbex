@@ -41,11 +41,11 @@ if [[ ! -d "$RELEASE" ]]; then
   sudo -u "$BUILD_USER" mkdir -p "$TMP_RELEASE"
   sudo -u "$BUILD_USER" cp -a "$REPO/apps/llm-service/." "$TMP_RELEASE/"
 
-  sudo -u "$BUILD_USER" env UV_LINK_MODE=copy     "$UV" venv --python "$PYTHON" "$TMP_RELEASE/.venv"
-
-  sudo -u "$BUILD_USER" env UV_LINK_MODE=copy     "$UV" pip install     --python "$TMP_RELEASE/.venv/bin/python"     -r "$TMP_RELEASE/requirements.txt"
-
   mv "$TMP_RELEASE" "$RELEASE"
+
+  sudo -u "$BUILD_USER" env UV_LINK_MODE=copy     "$UV" venv --python "$PYTHON" "$RELEASE/.venv"
+
+  sudo -u "$BUILD_USER" env UV_LINK_MODE=copy     "$UV" pip install     --python "$RELEASE/.venv/bin/python"     -r "$RELEASE/requirements.txt"
 fi
 
 # Keep ML releases private while allowing the service account to read the
