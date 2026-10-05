@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: childbex-production-deploy
@@ -24,6 +25,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Connect to production tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:childbex-ci
+          ping: 100.117.155.53
+
       - name: Configure SSH
         shell: bash
         env:
