@@ -15,6 +15,7 @@ import { PatientImageVote } from './PatientImageVote';
 import { useAuth } from '../../../auth/useAuth';
 import { PatientImageStatus, SeriesImage } from '@libs/schemas';
 import { defaultDateFormat } from '@libs/constants';
+import { opinionLabels, opinionOf } from './reviewOpinions';
 
 /** The review fields of an image (a Series image or a legacy cluster image). */
 export type ReviewPanelImage = Pick<
@@ -32,6 +33,8 @@ export type ReviewPanelImage = Pick<
   | 'votes'
 > & {
   resolvedAt?: string | null;
+  /** Implicit NORMAL opinions (Series images). */
+  implicitNormals?: SeriesImage['implicitNormals'];
   /** Legacy cluster images only. */
   notes?: string;
   reviewState?: SeriesImage['reviewState'];
@@ -119,12 +122,26 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
     },
   ];
   const userVote = item?.votes?.find(({ reviewerId }) => reviewerId === userId);
+  const myOpinion = item
+    ? opinionOf({ votes: item.votes ?? [], implicitNormals: item.implicitNormals ?? [] }, userId)
+    : null;
+  const opinionsCount = (item?.votes?.length ?? 0) + (item?.implicitNormals?.length ?? 0);
 
   return (
     <>
       <Stack spacing={1} py={1}>
         {(isDoctor || isAdmin) && !!item?.id && (
           <>
+            <Typography px={2} variant="body2" data-testid="my-opinion">
+              Your opinion:{' '}
+              <strong>
+                {myOpinion
+                  ? myOpinion.source === 'implicit'
+                    ? 'Normal (by default: your completed review)'
+                    : opinionLabels[myOpinion.vote]
+                  : 'not marked'}
+              </strong>
+            </Typography>
             <PatientImageVote patientImageId={item.id} userVote={userVote} />
             <Divider />
           </>
@@ -172,7 +189,12 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
           <Typography px={2} variant="subtitle1">
             Review info:
           </Typography>
-          {!!item?.votes?.length && <PatientImageVotes data={item.votes} />}
+          {!!opinionsCount && (
+            <PatientImageVotes
+              data={item?.votes ?? []}
+              implicitNormals={item?.implicitNormals ?? []}
+            />
+          )}
         </Stack>
         <Table size="small">
           <TableBody>

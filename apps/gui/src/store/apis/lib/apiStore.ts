@@ -22,8 +22,10 @@ import {
   PatientStudyParams,
   PatientSeriesResponse,
   PatientSeriesParams,
-  FinishReviewResponse,
-  FinishSeriesReviewRequestBody,
+  CompleteSeriesReviewResponse,
+  CompleteSeriesReviewRequestBody,
+  BulkReviewVoteRequestBody,
+  BulkReviewVoteResponse,
 } from '@libs/schemas';
 import { generatePath } from 'react-router-dom';
 import { createReauthBaseQuery, keycloakRefresher } from '../../../auth/reauth';
@@ -166,17 +168,32 @@ export const apiStore = createApi({
         providesTags: [TagTypesEnum.PATIENT],
       }
     ),
-    finishSeriesReview: builder.mutation<
-      FinishReviewResponse,
-      PatientSeriesParams & FinishSeriesReviewRequestBody
+    completeSeriesReview: builder.mutation<
+      CompleteSeriesReviewResponse,
+      PatientSeriesParams & CompleteSeriesReviewRequestBody
     >({
       query: ({ patientId, seriesId, presentedImageIds }) => ({
-        url: generatePath(apiRoutes.patientSeriesFinishReview, {
+        url: generatePath(apiRoutes.patientSeriesCompleteReview, {
           patientId,
           seriesId,
         }),
         method: 'POST',
         body: { presentedImageIds },
+      }),
+      invalidatesTags: [TagTypesEnum.PATIENT],
+    }),
+    // One atomic request for the whole selection (never one per image).
+    bulkReviewVote: builder.mutation<
+      BulkReviewVoteResponse,
+      PatientSeriesParams & BulkReviewVoteRequestBody
+    >({
+      query: ({ patientId, seriesId, imageIds, vote }) => ({
+        url: generatePath(apiRoutes.patientSeriesReviewVotes, {
+          patientId,
+          seriesId,
+        }),
+        method: 'POST',
+        body: { imageIds, vote },
       }),
       invalidatesTags: [TagTypesEnum.PATIENT],
     }),
@@ -226,7 +243,8 @@ export const {
   useGetPatientStudiesQuery,
   useGetStudySeriesQuery,
   useGetPatientSeriesQuery,
-  useFinishSeriesReviewMutation,
+  useCompleteSeriesReviewMutation,
+  useBulkReviewVoteMutation,
   useLlmServiceHealthMutation,
   useLlmServiceCheckItemsMutation,
   useLlmServiceInferenceMutation,

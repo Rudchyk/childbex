@@ -18,7 +18,7 @@ const BrokenImages: FC<{ data: PatientSeriesResponse }> = ({ data }) => {
     <Alert severity="warning">
       <AlertTitle>
         {broken.length} broken {pluralize('image', broken.length)} (not
-        displayed, not included in Finish review)
+        displayed, not included in Complete review)
       </AlertTitle>
       {broken.map((image) => (
         <div key={image.id}>
@@ -31,7 +31,7 @@ const BrokenImages: FC<{ data: PatientSeriesResponse }> = ({ data }) => {
 
 export const SeriesContent = WithLoader<PatientSeriesResponse>(({ data }) => {
   const { series } = data;
-  // Server-derived: the same rule as Series Finish review.
+  // Server-derived: the same rule as Series Complete review.
   const simple = series.reviewable;
   return (
     <Stack spacing={2}>
@@ -55,7 +55,7 @@ export const SeriesContent = WithLoader<PatientSeriesResponse>(({ data }) => {
           {pluralize('image', series.multiFrameImageCount)}. The viewer shows
           one stack of single-frame images of one orientation and geometry
           only, so it would not show the complete series: it is not displayed,
-          and Finish review is not available. Its images still count in the
+          and Complete review is not available. Its images still count in the
           review summaries.
         </Alert>
       )}

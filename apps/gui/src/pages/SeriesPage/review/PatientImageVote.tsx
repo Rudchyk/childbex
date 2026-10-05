@@ -9,13 +9,13 @@ import {
   Stack,
   TextField,
 } from '@mui/material';
-import { startCase } from 'lodash';
 import { FC, useEffect, useState } from 'react';
 import { useNotifications } from '../../../modules/notifications';
 import {
   useUpdatePatientImageReviewVoteMutation,
   useAddPatientImageReviewVoteMutation,
 } from '../../../store/apis';
+import { opinionLabels } from './reviewOpinions';
 
 interface PatientImageVoteProps {
   patientImageId: string;
@@ -99,7 +99,7 @@ export const PatientImageVote: FC<PatientImageVoteProps> = ({
               key={value}
               value={value}
               control={<Radio />}
-              label={startCase(value)}
+              label={opinionLabels[value]}
             />
           ))}
         </RadioGroup>
