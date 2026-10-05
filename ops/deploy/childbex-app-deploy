@@ -52,9 +52,13 @@ if [[ ! -d "$RELEASE" ]]; then
   mv "$TMP_RELEASE" "$RELEASE"
 fi
 
-# Releases are private to deployers (umask 027). Grant only the runtime user
-# read access to files and traverse/execute access where required. Using X
-# preserves executable entry points while keeping non-executable files non-executable.
+# Normalize copied/build output so unrelated local users cannot read release
+# contents even if source artifacts carried broader mode bits.
+chmod -R o-rwx "$RELEASE"
+
+# Grant only the runtime user read access to files and traverse/execute access
+# where required. Using X preserves executable entry points while keeping
+# non-executable files non-executable.
 setfacl -R -m "u:${RUNTIME_USER}:r-X" "$RELEASE"
 
 rollback() {
