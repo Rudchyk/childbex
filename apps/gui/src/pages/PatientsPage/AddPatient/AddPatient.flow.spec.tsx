@@ -18,6 +18,7 @@ import {
 } from '@testing-library/react';
 import { SnackbarProvider } from 'notistack';
 import { createHash, webcrypto } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { TextEncoder } from 'node:util';
 import { AddPatient } from './AddPatient';
 
@@ -213,13 +214,27 @@ beforeAll(() => {
     value: webcrypto,
     configurable: true,
   });
-  Blob.prototype.arrayBuffer ??= function (this: Blob) {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as ArrayBuffer);
-      reader.readAsArrayBuffer(this);
-    });
-  };
+  Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+    configurable: true,
+    value: function (this: Blob): Promise<ArrayBuffer> {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const bytes = new Uint8Array(reader.result as ArrayBuffer);
+          const nodeBuffer = Buffer.from(bytes);
+          resolve(
+            nodeBuffer.buffer.slice(
+              nodeBuffer.byteOffset,
+              nodeBuffer.byteOffset + nodeBuffer.byteLength
+            ) as ArrayBuffer
+          );
+        };
+        reader.onerror = () =>
+          reject(reader.error ?? new Error('Failed to read Blob'));
+        reader.readAsArrayBuffer(this);
+      });
+    },
+  });
 });
 
 beforeEach(() => {
