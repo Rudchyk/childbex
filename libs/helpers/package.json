@@ -15,5 +15,8 @@
       "default": "./dist/index.js"
     }
   },
-  "dependencies": {}
+  "dependencies": {
+    "cyrillic-doctor": "^1.0.3",
+    "slug": "^11.0.1"
+  }
 }
