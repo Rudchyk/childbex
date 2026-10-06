@@ -18,6 +18,10 @@ import type { Migration } from './types';
  *   finalized before this migration, which is exact: none existed then.
  *   (ADD COLUMN with a constant default fires no row trigger, so finalized
  *   rows stay untouched.)
+ * - `dataset_snapshot_exclusions`: the review state, its source and the
+ *   opinion counts of an EXCLUDED image (e.g. CONFLICTED: explicit ABNORMAL
+ *   vs explicit or implicit NORMAL), so a snapshot records why an image got
+ *   no label. NULL for exclusions finalized before this migration (unknown).
  */
 const upSql = `
 CREATE TABLE series_review_completions (
@@ -43,9 +47,24 @@ CREATE INDEX series_review_completions_series_reviewer
 
 ALTER TABLE dataset_snapshot_items
   ADD COLUMN "implicitNormals" integer NOT NULL DEFAULT 0;
+
+ALTER TABLE dataset_snapshot_exclusions
+  ADD COLUMN "reviewStateAtSnapshot" varchar(16),
+  ADD COLUMN "reviewStateSourceAtSnapshot" varchar(16),
+  ADD COLUMN "normalVotes" integer,
+  ADD COLUMN "abnormalVotes" integer,
+  ADD COLUMN "uncertainVotes" integer,
+  ADD COLUMN "implicitNormals" integer;
 `;
 
 const downSql = `
+ALTER TABLE dataset_snapshot_exclusions
+  DROP COLUMN "reviewStateAtSnapshot",
+  DROP COLUMN "reviewStateSourceAtSnapshot",
+  DROP COLUMN "normalVotes",
+  DROP COLUMN "abnormalVotes",
+  DROP COLUMN "uncertainVotes",
+  DROP COLUMN "implicitNormals";
 ALTER TABLE dataset_snapshot_items DROP COLUMN "implicitNormals";
 DROP TABLE series_review_completions;
 `;
@@ -62,7 +81,7 @@ export const seriesReviewCompletionsMigration: Migration = {
   async down({ sequelize }) {
     await sequelize.transaction(async (transaction) => {
       await sequelize.query(
-        'LOCK TABLE series_review_completions, dataset_snapshot_items IN SHARE MODE',
+        'LOCK TABLE series_review_completions, dataset_snapshot_items, dataset_snapshot_exclusions IN SHARE MODE',
         { transaction }
       );
       const [{ completions, items }] = await sequelize.query<{
@@ -71,13 +90,15 @@ export const seriesReviewCompletionsMigration: Migration = {
       }>(
         `SELECT (SELECT count(*)::int FROM series_review_completions) AS completions,
                 (SELECT count(*)::int FROM dataset_snapshot_items
-                 WHERE "implicitNormals" > 0) AS items`,
+                 WHERE "implicitNormals" > 0)
+                + (SELECT count(*)::int FROM dataset_snapshot_exclusions
+                   WHERE "reviewStateAtSnapshot" IS NOT NULL) AS items`,
         { type: QueryTypes.SELECT, transaction }
       );
       if (completions > 0 || items > 0) {
         throw new Error(
           `Cannot revert: ${completions} series review completion(s) and ` +
-            `${items} dataset snapshot item(s) with implicit NORMAL provenance would be lost.`
+            `${items} dataset snapshot item(s) / exclusion(s) with review provenance would be lost.`
         );
       }
       await sequelize.query(downSql, { transaction });

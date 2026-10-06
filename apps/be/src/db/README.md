@@ -331,20 +331,29 @@ Authoritative records:
 | `patient_image_review_votes`       | the current vote of each reviewer per image (unique `patientImageId, reviewerId`)                 |
 | `patient_image_review_vote_events` | append-only vote history (`cast` / `changed`, previous and new vote/comment, reviewer, time)      |
 | `patient_image_review_resolutions` | admin resolutions (`label` NORMAL/ABNORMAL/UNCERTAIN), append-only: a new one or a removal supersedes the active one (at most one active, `supersededAt IS NULL`); `origin` `admin`, `legacy_confirmed`, `legacy_unlabeled` |
-| `patient_image_review_completions` | "Finish review" provenance: `runId`, `scopeSeriesId` (or historical `legacyScopeClusterId`), `completedById/Name`, `createdAt` (one per image) |
+| `series_review_completions`        | per-reviewer "Complete review" of a Series, append-only: `reviewerId/Name`, `completedAt`, the presented non-broken `imageIds`, `imageCount`, `imageSetHash` (SHA-256 of the sorted ids: the image-set revision). The latest row of a reviewer counts |
+| `patient_image_review_completions` | legacy per-image "Finish review" provenance (`runId`, `scopeSeriesId` / `legacyScopeClusterId`, `completedById/Name`); kept, no longer written |
 | `review_freezes`                   | review freezes (at most one active; kept as history)                                             |
 
 **Effective state** (`patients_images.reviewState` / `reviewStateSource`,
 derived in `services/review-state.ts`):
 
+Each reviewer has at most one **opinion** per image: their explicit vote,
+else an **implicit NORMAL** when their latest Series completion covers the
+image (doctors mark Abnormal / Not sure; everything else they reviewed is
+Normal; no vote rows are created).
+
 1. an active resolution with a label → that label (`RESOLUTION`);
-2. otherwise votes: exactly one distinct label → that label; more than one
-   distinct label → `CONFLICTED` (no majority; uncertain-only is
-   `UNCERTAIN`) (`VOTES`);
-3. otherwise a completion → `NORMAL` (`FINISH_REVIEW`);
+2. otherwise opinions: exactly one distinct label → that label (`VOTES`, or
+   `FINISH_REVIEW` when all are implicit NORMAL); more than one distinct
+   label → `CONFLICTED` (no majority; an implicit NORMAL disagrees with an
+   explicit ABNORMAL / UNCERTAIN like an explicit NORMAL does) (`VOTES`);
+3. otherwise a legacy per-image completion → `NORMAL` (`FINISH_REVIEW`);
 4. otherwise `NOT_REVIEWED` (`NONE`) — zero votes never mean normal.
 
-A later vote therefore overrides a completion (the completion record stays).
+A completion is not a lock: the reviewer's later explicit vote replaces
+their implicit NORMAL (no reopen step); images added after a completion are
+not covered until the reviewer completes again.
 `status`, `isAbnormal`, the vote counters and `adminResolutionId/Name`,
 `resolutionComment`, `resolvedAt` are **compatibility caches** recomputed in
 the same transaction as every change (`status`: `broken` for broken images,
@@ -352,12 +361,16 @@ the same transaction as every change (`status`: `broken` for broken images,
 only for `ABNORMAL`). Ground truth (e.g. ML labels) must use `reviewState` /
 `reviewStateSource` and the records above, never `isAbnormal`.
 
-Every mutation (vote, resolution, finish review) runs in one transaction:
-review-freeze advisory lock (key 4352002) in **shared** mode, refuse with
-409 `REVIEW_FROZEN` while frozen, lock the image row(s) `FOR UPDATE`, change
-the records, append history, recompute the caches. Freezing takes the same
-lock in **exclusive** mode: it waits for mutations in flight, and no mutation
-commits after it.
+Every mutation (vote, bulk vote, resolution, complete review) runs in one
+transaction: review-freeze advisory lock (key 4352002) in **shared** mode
+**without waiting** (`pg_try_advisory_xact_lock_shared`: refused at once with
+retryable 409 `REVIEW_LOCKED` while the lock is held or awaited exclusively,
+i.e. at a dataset snapshot's capture point or a freeze change), refuse with
+409 `REVIEW_FROZEN` while frozen, lock the image row(s) `FOR NO KEY UPDATE`
+in id order (never waits for a snapshot writing items that reference the
+image), change the records, append history, recompute the caches. Freezing
+and the snapshot capture take the same lock in **exclusive** mode: they wait
+for mutations in flight, and no mutation commits inside them.
 
 The same protocol (`withReviewFreezeGuard`) also guards the operations that
 remove reviewed images or change which patients are active, so a frozen
@@ -365,8 +378,8 @@ review cannot lose data: trashing a patient (`DELETE /patients/:id`),
 permanently deleting or restoring one (`POST /patients/:id/trash?type=delete
 | restore`). Trashing counts because trashed patients are excluded like
 deleted ones (patient list, file access, maintenance commands by default).
-All of them return 409 `REVIEW_FROZEN` while frozen; their authorization is
-unchanged. Files of a deleted patient are removed only after the deletion
+All of them return 409 `REVIEW_FROZEN` while frozen (and 409
+`REVIEW_LOCKED` at a capture point); their authorization is unchanged. Files of a deleted patient are removed only after the deletion
 is committed (never after a rollback). Not guarded: reads, patient metadata
 (`PATCH`) and imports (they only add `NOT_REVIEWED` images; no general
 dataset locking). There is no endpoint deleting a Study, Series or image.
@@ -374,13 +387,20 @@ dataset locking). There is no endpoint deleting a Study, Series or image.
 `202609301800-patient-image-sop-unique`; once the review tables exist that
 unique index already rules out duplicates, so it has nothing to delete.
 
-API: `POST /patients/images/:id/review-votes` casts or changes the caller's
-own vote; `PATCH .../review-votes/:voteId` changes only the caller's own vote
-of that image (anything else: 404); `PUT` / `DELETE
-/patients/images/:id/review/resolution` (`dashboard:admin`);
-`POST /patients/:patientId/series/:seriesId/review/finish` (any reviewer:
-completes images without votes, active resolution or completion as NORMAL;
-broken images are skipped; see below); `GET /review/freeze`, `POST /review/freeze` `{reason}` and
+API (opinion changes require a reviewer role, else 403: `doctor` or
+`admin` in the token's realm or client roles — the GUI's `isDoctor ||
+isAdmin` rule): `POST /patients/images/:id/review-votes` casts or changes
+the caller's own vote; `PATCH .../review-votes/:voteId` changes only the
+caller's own vote of that image (anything else: 404);
+`POST /patients/:patientId/series/:seriesId/review/votes`
+`{imageIds, vote}` sets the caller's vote on up to 5000 non-broken images
+of that Series in one transaction (all or nothing; duplicates count once;
+other reviewers' votes and existing comments untouched; 400
+`IMAGES_NOT_IN_SERIES` / `IMAGES_NOT_REVIEWABLE` / `INVALID_IMAGE_IDS`);
+`POST /patients/:patientId/series/:seriesId/review/complete`
+`{presentedImageIds}` records the caller's completion (see below);
+`PUT` / `DELETE /patients/images/:id/review/resolution` (`dashboard:admin`);
+`GET /review/freeze`, `POST /review/freeze` `{reason}` and
 `POST /review/unfreeze` (`dashboard:admin`).
 
 ### Rollout: `audit review-state` / `backfill review-state`
@@ -448,8 +468,9 @@ a foreign, unknown or trashed one is the same 404.
 | --- | --- |
 | `GET /patients/:patientId/studies` | studies (date, time, series/image counts, review summary) |
 | `GET /patients/:patientId/studies/:studyId/series` | the study and its series (number, description, modality, image type, kernel, slice thickness, counts, review summary, `orientationCount`, `multiFrameImageCount`, `geometryCount`, `geometryIncompleteCount`, `reviewable`) |
-| `GET /patients/:patientId/series/:seriesId` | the series and its images in display order: `fileUrl` (the authenticated file route), `instanceNumber`, `orientationGroup`, `isBroken`, `brokenReason`, `reviewState`, `reviewStateSource`, the compatibility caches, votes |
-| `POST /patients/:patientId/series/:seriesId/review/finish` `{presentedImageIds}` | Finish review of the series |
+| `GET /patients/:patientId/series/:seriesId` | the series and its images in display order: `fileUrl` (the authenticated file route), `instanceNumber`, `orientationGroup`, `isBroken`, `brokenReason`, `reviewState`, `reviewStateSource`, the compatibility caches, votes, `implicitNormals`; `review`: the current `imageSetRevision` and every reviewer's latest completion (`current`, `uncoveredImageCount`) |
+| `POST /patients/:patientId/series/:seriesId/review/complete` `{presentedImageIds}` | the caller's Complete review of the series |
+| `POST /patients/:patientId/series/:seriesId/review/votes` `{imageIds, vote}` | the caller's vote on many images of the series |
 
 - No DICOM UIDs, hashes, stored paths (`source`) or file names are returned.
 - Review summaries (`total`, `broken`, `notReviewed`, `normal`, `abnormal`,
@@ -467,7 +488,7 @@ a foreign, unknown or trashed one is the same 404.
   of them or IOP / IPP missing). The server derives `reviewable` with the
   same rule (`isSimpleStack`) for the API, and the GUI only displays it;
   otherwise the GUI shows a warning and no viewer, and the server refuses
-  Finish review with 409 `SERIES_NOT_FULLY_REVIEWABLE`. It also
+  Complete review with 409 `SERIES_NOT_FULLY_REVIEWABLE`. It also
   refuses with 409 `SERIES_CHANGED` unless `presentedImageIds` are exactly
   the series' non-broken images (images added since the viewer loaded are
   never completed unseen); the GUI enables the button only once the viewer
@@ -595,15 +616,28 @@ for one ML experiment ("model X was trained from snapshot Y").
 - **Preview** (DRAFT, no writes, no freeze needed): eligible patients /
   images, labels, sources, exclusions by reason, strata, quotas, per-split
   counts. Only cheap file checks (hash recorded, file exists, size).
-- **Finalization** (one REPEATABLE READ transaction): first statement
-  `pg_try_advisory_xact_lock_shared` on the review-freeze lock (not granted:
-  409 `REVIEW_FREEZE_CHANGING`), an active global review freeze is required
-  (409 `REVIEW_NOT_FROZEN`), the snapshot row `FOR UPDATE`, then every
-  included file is resolved safely and **re-hashed (SHA-256, streamed)**
-  against `fileSha256` (`fileVerification = SHA256_REHASHED`), and
-  patients, items and exclusions are stored. The shared lock keeps
-  unfreeze out until the commit; review mutations and patient trash /
-  restore / delete are refused while frozen.
+- **Finalization** (no manual freeze needed; live review → short freeze →
+  immutable snapshot → review open again):
+  1. *verify* (no transaction, review open): every candidate file is
+     resolved safely and **re-hashed (SHA-256, streamed)** against
+     `fileSha256` (`fileVerification = SHA256_REHASHED`); catch-up passes
+     cover images that became candidates meanwhile;
+  2. *capture point* (milliseconds): the review-freeze lock in **exclusive**
+     mode (waits at most 15 s for label mutations in flight, else 409
+     `REVIEW_FREEZE_CHANGING`), `pg_export_snapshot()` imported into a new
+     REPEATABLE READ transaction, lock released. Meanwhile every label
+     mutation is refused at once with 409 `REVIEW_LOCKED` (archive-wide:
+     a snapshot covers every patient); reads, imports and patient metadata
+     are never blocked. A rollback or a lost connection releases the lock;
+  3. *build* (review open, on the imported view): the snapshot row
+     `FOR UPDATE` (still a DRAFT), membership and split, patients, items
+     (label, review state/source, explicit vote counts, `implicitNormals`)
+     and exclusions (reason, review state/source and the same opinion
+     counts, e.g. why an image is `CONFLICTED`) stored; the capture window
+     recorded as `reviewFreezeId` (the manual freeze active at the capture
+     point, else a closed `review_freezes` row); FINALIZED. Votes committed
+     after the capture point are not in it; a failure publishes nothing
+     (the snapshot stays a DRAFT).
 - **Source deletion**: items reference `patients_images` with ON DELETE
   RESTRICT. Permanent patient deletion is refused with 409
   `PATIENT_IN_DATASET_SNAPSHOT` (the snapshot ids and names) when any of its
@@ -623,9 +657,8 @@ every file is re-hashed):
 
 ```sh
 node migrate.js dataset-snapshot preview <snapshotId> [--report ~/preview.json]
-# enable the review freeze first (POST /review/freeze), then:
+# no manual freeze needed: labels are captured at a short internal lock
 node migrate.js dataset-snapshot finalize <snapshotId> --operator "<name>"
-# unfreeze afterwards (POST /review/unfreeze)
 ```
 
 ## Commands

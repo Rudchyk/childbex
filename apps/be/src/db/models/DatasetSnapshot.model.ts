@@ -324,6 +324,16 @@ export interface DatasetSnapshotExclusionAttributes {
   seriesId: string;
   patientGroupKey: string;
   reason: DatasetExclusionReason;
+  /**
+   * Review provenance at the snapshot (why the image got no label, e.g. the
+   * opinions behind CONFLICTED); null before migration 202610050000.
+   */
+  reviewStateAtSnapshot: string | null;
+  reviewStateSourceAtSnapshot: string | null;
+  normalVotes: number | null;
+  abnormalVotes: number | null;
+  uncertainVotes: number | null;
+  implicitNormals: number | null;
   createdAt: Date;
 }
 
@@ -337,6 +347,12 @@ export class DatasetSnapshotExclusion
   declare seriesId: string;
   declare patientGroupKey: string;
   declare reason: DatasetExclusionReason;
+  declare reviewStateAtSnapshot: string | null;
+  declare reviewStateSourceAtSnapshot: string | null;
+  declare normalVotes: number | null;
+  declare abnormalVotes: number | null;
+  declare uncertainVotes: number | null;
+  declare implicitNormals: number | null;
   declare createdAt: Date;
 }
 
@@ -359,6 +375,13 @@ DatasetSnapshotExclusion.init(
     seriesId: { type: DataTypes.UUID, allowNull: false },
     patientGroupKey: { type: DataTypes.STRING(128), allowNull: false },
     reason: { type: DataTypes.STRING(32), allowNull: false },
+    // Migration 202610050000-series-review-completions.
+    reviewStateAtSnapshot: { type: DataTypes.STRING(16), allowNull: true },
+    reviewStateSourceAtSnapshot: { type: DataTypes.STRING(16), allowNull: true },
+    normalVotes: { type: DataTypes.INTEGER, allowNull: true },
+    abnormalVotes: { type: DataTypes.INTEGER, allowNull: true },
+    uncertainVotes: { type: DataTypes.INTEGER, allowNull: true },
+    implicitNormals: { type: DataTypes.INTEGER, allowNull: true },
     createdAt: { type: DataTypes.DATE, allowNull: false },
   },
   {

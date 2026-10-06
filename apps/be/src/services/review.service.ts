@@ -7,7 +7,10 @@
  * mode WITHOUT waiting (refused with 409 REVIEW_LOCKED while a dataset
  * snapshot captures the labels or the freeze changes, so requests never
  * queue up holding connections) and refuses while review is frozen; locks
- * the image row(s) in id order; changes the authoritative data; appends
+ * the image row(s) in id order FOR NO KEY UPDATE (serializes review
+ * mutations of an image, but never waits for a dataset snapshot that is
+ * writing items referencing the image: their foreign keys only take
+ * KEY SHARE locks); changes the authoritative data; appends
  * history; recomputes all cached fields. Freezing and the dataset snapshot
  * capture take the same lock in exclusive mode, so they wait for mutations
  * in flight and no mutation can commit inside them. The lock is
@@ -269,7 +272,7 @@ const lockImage = async (imageId: string, transaction: Transaction) => {
   const image = UUID.test(imageId)
     ? await PatientImage.findByPk(imageId, {
         attributes: ['id'],
-        lock: transaction.LOCK.UPDATE,
+        lock: transaction.LOCK.NO_KEY_UPDATE,
         transaction,
       })
     : null;
@@ -475,7 +478,7 @@ const lockSeriesImages = async (
   }
   const rows = await sequelize.query<{ id: string; isBrocken: boolean }>(
     `SELECT id, "isBrocken" FROM patients_images
-     WHERE "seriesId" = :seriesId AND id IN (:ids) ORDER BY id FOR UPDATE`,
+     WHERE "seriesId" = :seriesId AND id IN (:ids) ORDER BY id FOR NO KEY UPDATE`,
     { replacements: { seriesId, ids }, type: QueryTypes.SELECT, transaction }
   );
   if (rows.length !== ids.length) {
@@ -604,7 +607,7 @@ export const completeSeriesReview = (
     // In id order: concurrent runs never deadlock on the rows.
     const rows = await sequelize.query<StackImageRow>(
       `SELECT ${stackImageColumns} FROM patients_images
-       WHERE "seriesId" = :seriesId ORDER BY id FOR UPDATE`,
+       WHERE "seriesId" = :seriesId ORDER BY id FOR NO KEY UPDATE`,
       { replacements: { seriesId }, type: QueryTypes.SELECT, transaction }
     );
     const stack = orderSeriesImages(rows.map(toStackImage));

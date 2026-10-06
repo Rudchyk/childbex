@@ -543,6 +543,20 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
     return { reached, release, restore: () => spy.mockRestore() };
   };
 
+  /** Pauses the finalization at its capture point (exclusive review lock held). */
+  const pauseAtCapturePoint = () => {
+    const { ReviewFreeze } = require('../../db/models/ReviewFreeze.model');
+    const reached = gate();
+    const release = gate();
+    const original = ReviewFreeze.findOne.bind(ReviewFreeze);
+    const spy = jest.spyOn(ReviewFreeze, 'findOne').mockImplementationOnce((async (...args: unknown[]) => {
+      reached.open();
+      await release.opened;
+      return original(...args);
+    }) as never);
+    return { reached, release, restore: () => spy.mockRestore() };
+  };
+
   it('while frozen a review mutation is refused outright', async () => {
     await review.freezeReview(ADMIN, 'dataset');
     await expect(review.castVote(imageId(1), reviewer('z'), { vote: Vote.ABNORMAL })).rejects.toMatchObject({
@@ -550,11 +564,11 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
     });
   });
 
-  it('during the capture label mutations are refused at once; viewing and other writes work; then released', async () => {
+  it('at the capture point label mutations are refused at once; viewing and other writes work; then released', async () => {
     const snapshot = await draft(SEED);
-    const pause = pauseFinalization();
+    const pause = pauseAtCapturePoint();
     const finalizing = snapshots.finalizeSnapshot(snapshot.id, ADMIN);
-    await pause.reached.opened; // inside the capture: exclusive lock held
+    await pause.reached.opened; // capture point: exclusive lock held
 
     const locked = { code: 'REVIEW_LOCKED', status: 409 };
     await expect(review.castVote(imageId(1), reviewer('z'), { vote: Vote.ABNORMAL })).rejects.toMatchObject(locked);
@@ -582,6 +596,35 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
     expect(
       await rows(`SELECT label, "normalVotes", "abnormalVotes" FROM dataset_snapshot_items WHERE "patientImageId" = $1`, [imageId(1)])
     ).toEqual([{ label: 'NORMAL', normalVotes: 1, abnormalVotes: 0 }]);
+  });
+
+  it('the lock ends at the capture point: votes are accepted while the snapshot is written and never enter it', async () => {
+    const snapshot = await draft(SEED);
+    const pause = pauseFinalization(); // after the capture point, before the last insert
+    const finalizing = snapshots.finalizeSnapshot(snapshot.id, ADMIN);
+    await pause.reached.opened;
+
+    const accepted = review.castVote(imageId(1), reviewer('z'), { vote: Vote.ABNORMAL });
+    expect(await settlesWithin(accepted, 5000)).toBe(true);
+    await accepted;
+    await review.castBulkVote(patientId(6), seriesId(6), reviewer('z'), [imageId(15)], Vote.UNCERTAIN);
+
+    pause.release.open();
+    await expect(finalizing).resolves.toMatchObject({ status: 'FINALIZED', totalImages: 16 });
+    pause.restore();
+    expect(
+      await rows(`SELECT "patientImageId", label, "normalVotes", "abnormalVotes", "uncertainVotes" FROM dataset_snapshot_items
+                  WHERE "patientImageId" IN ($1, $2) ORDER BY "patientImageId"`, [imageId(1), imageId(15)])
+    ).toEqual([
+      { patientImageId: imageId(1), label: 'NORMAL', normalVotes: 1, abnormalVotes: 0, uncertainVotes: 0 },
+      { patientImageId: imageId(15), label: 'NORMAL', normalVotes: 1, abnormalVotes: 0, uncertainVotes: 0 },
+    ]);
+    // The recorded freeze window ends before the snapshot was finalized.
+    const [window] = await rows(
+      `SELECT f."unfrozenAt" <= d."finalizedAt" AS "endedBefore" FROM dataset_snapshots d JOIN review_freezes f ON f.id = d."reviewFreezeId" WHERE d.id = $1`,
+      [snapshot.id]
+    );
+    expect(window).toEqual({ endedBefore: true });
   });
 
   it('the capture waits for a label mutation in flight and includes it; newer ones are refused meanwhile', async () => {
@@ -633,6 +676,52 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
     await review.castVote(imageId(2), reviewer('z'), { vote: Vote.NORMAL });
 
     await expect(snapshots.finalizeSnapshot(snapshot.id, ADMIN)).resolves.toMatchObject({ status: 'FINALIZED' });
+  });
+
+  it('provenance: conflicts are excluded with both opinions recorded, never turned into a clean label', async () => {
+    // Case A: f completed patient 2's series (implicit NORMAL); b marks image 4 ABNORMAL.
+    await review.castVote(imageId(4), reviewer('b'), { vote: Vote.ABNORMAL });
+    const snapshot = await draft(SEED);
+    await snapshots.finalizeSnapshot(snapshot.id, ADMIN);
+    const exclusion = async (n: number) =>
+      (
+        await rows(
+          `SELECT reason, "reviewStateAtSnapshot", "reviewStateSourceAtSnapshot", "normalVotes", "abnormalVotes",
+                  "uncertainVotes", "implicitNormals" FROM dataset_snapshot_exclusions WHERE "patientImageId" = $1`,
+          [imageId(n)]
+        )
+      )[0];
+    expect(await exclusion(4)).toEqual({
+      reason: 'CONFLICTED',
+      reviewStateAtSnapshot: 'CONFLICTED',
+      reviewStateSourceAtSnapshot: 'VOTES',
+      normalVotes: 0,
+      abnormalVotes: 1,
+      uncertainVotes: 0,
+      implicitNormals: 1,
+    });
+    // Case B: explicit NORMAL (a) vs explicit ABNORMAL (b).
+    expect(await exclusion(13)).toEqual({
+      reason: 'CONFLICTED',
+      reviewStateAtSnapshot: 'CONFLICTED',
+      reviewStateSourceAtSnapshot: 'VOTES',
+      normalVotes: 1,
+      abnormalVotes: 1,
+      uncertainVotes: 0,
+      implicitNormals: 0,
+    });
+    // Not sure is excluded too, with its opinion.
+    expect(await exclusion(12)).toMatchObject({ reason: 'UNCERTAIN', uncertainVotes: 1 });
+    // Neither became an item; image 5 (implicit NORMAL only) did, with its provenance.
+    expect(await rows(`SELECT 1 FROM dataset_snapshot_items WHERE "patientImageId" IN ($1, $2)`, [imageId(4), imageId(13)])).toHaveLength(0);
+    expect(
+      (await rows(`SELECT label, "reviewStateSourceAtSnapshot", "normalVotes", "implicitNormals" FROM dataset_snapshot_items WHERE "patientImageId" = $1`, [imageId(5)]))[0]
+    ).toEqual({ label: 'NORMAL', reviewStateSourceAtSnapshot: 'FINISH_REVIEW', normalVotes: 0, implicitNormals: 1 });
+    // Live opinions are untouched by the snapshot.
+    expect(await rows(`SELECT "reviewerId", vote::text AS vote FROM patient_image_review_votes WHERE "patientImageId" = $1 ORDER BY "reviewerId"`, [imageId(13)])).toEqual([
+      { reviewerId: 'sub-a', vote: 'normal' },
+      { reviewerId: 'sub-b', vote: 'abnormal' },
+    ]);
   });
 
   it('an active manual freeze is kept and recorded as the capture freeze', async () => {
