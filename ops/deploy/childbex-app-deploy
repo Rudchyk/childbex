@@ -61,6 +61,18 @@ chmod -R o-rwx "$RELEASE"
 # non-executable files non-executable.
 setfacl -R -m "u:${RUNTIME_USER}:r-X" "$RELEASE"
 
+# Apply forward-compatible database migrations from the release that is about
+# to be activated. Migrations run as the application runtime user so they use
+# the same database credentials and access model as the backend.
+#
+# Database migrations are intentionally not reverted during application
+# rollback. Production migrations must therefore remain backward-compatible
+# with the previous application release.
+echo "Applying database migrations..."
+sudo -u "$RUNTIME_USER" env \
+  PATH="$NODE_BIN_DIR:/usr/bin:/bin" \
+  bash -lc "cd '$RELEASE' && node be/migrate.js up"
+
 rollback() {
   echo "Deploy failed; attempting rollback..." >&2
   if [[ -n "$OLD_RELEASE" && -d "$OLD_RELEASE" ]]; then
