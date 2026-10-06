@@ -23,7 +23,7 @@ import {
   getNotFoundError,
   readJsonBody,
 } from '../lib/helpers';
-import { getReviewer, runReviewAction } from '../lib/review.helpers';
+import { getAuthorizedReviewer, runReviewAction } from '../lib/review.helpers';
 import {
   getPatientSeries,
   getPatientStudies,
@@ -127,7 +127,7 @@ router
     },
     async handler(request, ctx) {
       const { patientId, seriesId } = request.params;
-      const reviewer = getReviewer(ctx as Ctx);
+      const reviewer = getAuthorizedReviewer(ctx as Ctx);
       const body = await readJsonBody(request);
       if (!Value.Check(CompleteSeriesReviewRequestBodySchema, body)) {
         throw getInvalidRequestError();
@@ -160,7 +160,7 @@ router
     },
     async handler(request, ctx) {
       const { patientId, seriesId } = request.params;
-      const reviewer = getReviewer(ctx as Ctx);
+      const reviewer = getAuthorizedReviewer(ctx as Ctx);
       const body = await readJsonBody(request);
       if (!Value.Check(BulkReviewVoteRequestBodySchema, body)) {
         throw getInvalidRequestError();

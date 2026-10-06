@@ -501,7 +501,8 @@ describeWithDatabase('Study/Series hierarchy (PostgreSQL)', () => {
             return void res.status(403).end();
           }
           (req as unknown as { kauth: unknown }).kauth = {
-            grant: { access_token: { content: { sub: `sub-${user}`, name: `User ${user}` } } },
+            // Token roles: the test header, else a doctor (realm role).
+            grant: { access_token: { content: { sub: `sub-${user}`, name: `User ${user}`, realm_access: { roles: (req.header('x-test-roles') ?? 'doctor').split(',') } } } },
           };
           next();
         },

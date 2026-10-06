@@ -8,7 +8,7 @@ import {
   onListening,
   port,
 } from './services/server.service';
-import { isProd } from './constants/defaults';
+import { isProd, JSON_BODY_LIMIT } from './constants/defaults';
 import { serverRoutes, setupRoutes } from './routes/routes';
 import { setupAPIRoutes } from './api/v1/api';
 import { logger } from './services/logger.service';
@@ -40,7 +40,7 @@ const setupServer = async () => {
 
     app.use(compression());
     app.use(morgan(isProd ? 'tiny' : 'dev'));
-    app.use(express.json());
+    app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
     const security = setupSecurity(app);
     setupRoutes(app);

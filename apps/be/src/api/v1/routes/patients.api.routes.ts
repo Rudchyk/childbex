@@ -59,7 +59,11 @@ import {
   setResolution,
   withReviewFreezeGuard,
 } from '../../../services/review.service';
-import { getReviewer, runReviewAction } from '../lib/review.helpers';
+import {
+  getAuthorizedReviewer,
+  getReviewer,
+  runReviewAction,
+} from '../lib/review.helpers';
 
 /** Patients with their study and image counts (one grouped query). */
 const withImageCounts = async (
@@ -461,7 +465,7 @@ router
     },
     async handler(request, ctx) {
       const { id } = request.params;
-      const reviewer = getReviewer(ctx as Ctx);
+      const reviewer = getAuthorizedReviewer(ctx as Ctx);
       const body = await readVoteBody(request);
       await runReviewAction(() => castVote(id, reviewer, body));
       return Response.json(null, { status: 204 });
@@ -488,7 +492,7 @@ router
     },
     async handler(request, ctx) {
       const { id, voteId } = request.params;
-      const reviewer = getReviewer(ctx as Ctx);
+      const reviewer = getAuthorizedReviewer(ctx as Ctx);
       const body = await readVoteBody(request);
       await runReviewAction(() => changeOwnVote(id, voteId, reviewer, body));
       return Response.json(null, { status: 204 });
