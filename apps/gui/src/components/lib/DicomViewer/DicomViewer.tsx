@@ -2,6 +2,7 @@ import {
   FC,
   ReactElement,
   ReactNode,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -271,7 +272,8 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     setLoadedItemsMapping({});
     setLoadErrorEvents([]);
   };
-  const jumpTo = (i: number) => {
+  // Stable: memoised slice rows receive it.
+  const jumpTo = useCallback((i: number) => {
     const lg = appRef.current?.getActiveLayerGroup();
     const vl = lg?.getActiveViewLayer();
     if (vl) {
@@ -280,7 +282,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       vals[2] = i;
       vc.setCurrentIndex(new Index(vals), false);
     }
-  };
+  }, []);
 
   // High-DPI container: sized before dwv first fits the image, and on
   // every viewport resize or pixel-ratio change.

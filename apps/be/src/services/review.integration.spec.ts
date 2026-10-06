@@ -24,6 +24,7 @@ import {
 import type * as MigratorModule from '../db/migrator';
 import type * as ReviewModule from './review.service';
 import type * as ApiModule from '../api/v1/api';
+import { JSON_BODY_LIMIT } from '../constants/defaults';
 
 const mockLogger = {
   info: jest.fn(),
@@ -165,6 +166,20 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       }
     );
     return id(n);
+  };
+  /** Axial slices `from`..`to` of a series in one statement (large Series). */
+  const addImages = async (from: number, to: number) => {
+    await sequelize.query(
+      `INSERT INTO patients_images (id, source, "seriesId", "isBrocken", status,
+         "imageOrientationPatient", "imagePositionPatient", rows, columns, "pixelSpacing",
+         "createdAt", "updatedAt")
+       SELECT ('33333333-3333-4333-8333-' || lpad(n::text, 12, '0'))::uuid, '/uploads/p/s/IM' || n,
+              $1, false, 'not_reviewed', '{1,0,0,0,1,0}', ARRAY[0, 0, n]::double precision[], 4, 4,
+              '{0.5,0.5}', now(), now()
+       FROM generate_series($2::int, $3::int) AS n`,
+      { bind: [SERIES, from, to] }
+    );
+    return Array.from({ length: to - from + 1 }, (_, i) => id(from + i));
   };
   /** The non-broken images of a series (what the viewer presents). */
   const presentedOf = async (series: string) =>
@@ -470,6 +485,43 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       expect(await stateOf(elsewhere)).toMatchObject({ reviewState: 'NOT_REVIEWED' });
     });
 
+    it('radiologist example: 300 images, 2 Abnormal + 1 Not sure, then Complete -> 297 implicit Normal, 3 vote rows', async () => {
+      const ids: string[] = [];
+      ids.push(...(await addImages(1, 300)));
+      await vote(id(87), 'a', Vote.ABNORMAL);
+      await vote(id(88), 'a', Vote.ABNORMAL);
+      await vote(id(154), 'a', Vote.UNCERTAIN);
+
+      const result = await completeSeries(SERIES, 'a');
+
+      expect(result).toMatchObject({
+        imageCount: 300,
+        explicitAbnormal: 2,
+        explicitUncertain: 1,
+        explicitNormal: 0,
+        implicitNormal: 297,
+      });
+      // No explicit Normal rows were created.
+      expect(await rows(`SELECT vote::text AS vote, count(*)::int AS n FROM patient_image_review_votes GROUP BY vote ORDER BY vote`)).toEqual([
+        { vote: 'abnormal', n: 2 },
+        { vote: 'uncertain', n: 1 },
+      ]);
+      expect(await rows('SELECT 1 FROM patient_image_review_vote_events')).toHaveLength(3);
+      expect(await rows(`SELECT "reviewState", "reviewStateSource", count(*)::int AS n FROM patients_images GROUP BY 1, 2 ORDER BY 1`)).toEqual([
+        { reviewState: 'ABNORMAL', reviewStateSource: 'VOTES', n: 2 },
+        { reviewState: 'NORMAL', reviewStateSource: 'FINISH_REVIEW', n: 297 },
+        { reviewState: 'UNCERTAIN', reviewStateSource: 'VOTES', n: 1 },
+      ]);
+      // The Series read tells explicit from implicit opinions.
+      const { getPatientSeries } = require('./hierarchy.service');
+      const series = await getPatientSeries(PATIENT, SERIES);
+      const byId = new Map(series.images.map((image: { id: string }) => [image.id, image]));
+      expect(byId.get(id(87))).toMatchObject({ votes: [expect.objectContaining({ reviewerId: 'sub-a', vote: 'abnormal' })], implicitNormals: [] });
+      expect(byId.get(id(154))).toMatchObject({ votes: [expect.objectContaining({ vote: 'uncertain' })], implicitNormals: [] });
+      expect(byId.get(id(1))).toMatchObject({ votes: [], implicitNormals: [expect.objectContaining({ reviewerId: 'sub-a' })] });
+      expect(series.review.completions).toEqual([expect.objectContaining({ reviewerId: 'sub-a', imageCount: 300, current: true })]);
+    });
+
     it('does not lock the review: the reviewer changes any decision later, without reopening', async () => {
       const image = await addImage(1);
       const other = await addImage(2);
@@ -483,6 +535,8 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         [Vote.UNCERTAIN, 'UNCERTAIN'],
         [Vote.NORMAL, 'NORMAL'],
         [Vote.ABNORMAL, 'ABNORMAL'],
+        [Vote.UNCERTAIN, 'UNCERTAIN'],
+        [Vote.ABNORMAL, 'ABNORMAL'],
       ] as const) {
         await vote(image, 'f', value);
         expect(await stateOf(image)).toMatchObject({ reviewState: expected, reviewStateSource: 'VOTES', votesCount: 1 });
@@ -495,6 +549,17 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       expect(await stateOf(other)).toMatchObject({ reviewState: 'NORMAL', normalVotes: 1 });
       // The completion record is unchanged history.
       expect(await rows('SELECT 1 FROM series_review_completions')).toHaveLength(1);
+    });
+
+    it('implicit Normal -> Not sure directly, and completing again keeps every explicit vote', async () => {
+      const [one, two] = [await addImage(1), await addImage(2)];
+      await completeSeries();
+      await vote(one, 'f', Vote.UNCERTAIN);
+      expect(await stateOf(one)).toMatchObject({ reviewState: 'UNCERTAIN', votesCount: 1 });
+      await completeSeries();
+      expect(await stateOf(one)).toMatchObject({ reviewState: 'UNCERTAIN' });
+      expect(await stateOf(two)).toMatchObject({ reviewState: 'NORMAL', reviewStateSource: 'FINISH_REVIEW' });
+      expect(await rows('SELECT 1 FROM patient_image_review_votes')).toHaveLength(1);
     });
 
     it('distinguishes the completed image set from a changed one; completing again covers it', async () => {
@@ -557,6 +622,28 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       // Any vote takes precedence over a legacy completion (as before).
       await vote(image, 'b', Vote.ABNORMAL);
       expect(await stateOf(image)).toMatchObject({ reviewState: 'ABNORMAL', reviewStateSource: 'VOTES' });
+    });
+  });
+
+  describe('migration 202610050000-series-review-completions', () => {
+    it('reverts only while no reviewer opinion would be lost; re-applies cleanly', async () => {
+      await addImage(1);
+      await completeSeries();
+      await expect(migrator.migrateDown(sequelize)).rejects.toThrow(/revert/i);
+      expect(await rows('SELECT 1 FROM series_review_completions')).toHaveLength(1);
+
+      await sequelize.query('DELETE FROM series_review_completions');
+      const reverted = await migrator.migrateDown(sequelize);
+      expect(reverted.map(({ name }) => name)).toEqual(['202610050000-series-review-completions']);
+      expect(
+        await rows(`SELECT to_regclass('series_review_completions') IS NULL AS dropped`)
+      ).toEqual([{ dropped: true }]);
+
+      expect((await migrator.migrateUp(sequelize)).map(({ name }) => name)).toEqual([
+        '202610050000-series-review-completions',
+      ]);
+      await completeSeries();
+      expect(await rows('SELECT 1 FROM series_review_completions')).toHaveLength(1);
     });
   });
 
@@ -694,7 +781,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
 
     it('handles a large Series in one request', async () => {
       const ids: string[] = [];
-      for (let n = 1; n <= 400; n++) ids.push(await addImage(n));
+      ids.push(...(await addImages(1, 400)));
       expect(await bulk(ids, Vote.ABNORMAL)).toMatchObject({ requested: 400, created: 400 });
       expect(await rows(`SELECT count(*)::int AS n FROM patients_images WHERE "reviewState" = 'ABNORMAL'`)).toEqual([{ n: 400 }]);
     });
@@ -818,7 +905,22 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
             return void res.status(403).end();
           }
           (req as unknown as { kauth: unknown }).kauth = {
-            grant: { access_token: { content: { sub: `sub-${user}`, name: `User ${user}` } } },
+            // Token roles as Keycloak puts them: realm roles, and client
+            // roles (`client:role` in the header) under resource_access.
+            grant: {
+              access_token: {
+                content: {
+                  sub: `sub-${user}`,
+                  name: `User ${user}`,
+                  realm_access: { roles: granted.filter((role) => !role.includes(':')) },
+                  resource_access: Object.fromEntries(
+                    granted
+                      .filter((role) => role.includes(':'))
+                      .map((role) => [role.split(':')[0], { roles: [role.split(':')[1]] }])
+                  ),
+                },
+              },
+            },
           };
           next();
         },
@@ -827,7 +929,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
     beforeAll(async () => {
       const { setupAPIRoutes } = require('../api/v1/api') as typeof ApiModule;
       const app = express();
-      app.use(express.json());
+      app.use(express.json({ limit: JSON_BODY_LIMIT }));
       setupAPIRoutes(app, fakeKeycloak as never);
       server = app.listen(0);
       await new Promise((resolve) => server.once('listening', resolve));
@@ -841,7 +943,7 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
     const call = (
       method: string,
       url: string,
-      { user = 'a', roles = '', body }: { user?: string; roles?: string; body?: unknown } = {}
+      { user = 'a', roles = 'doctor', body }: { user?: string; roles?: string; body?: unknown } = {}
     ) =>
       fetch(`${baseUrl}${url}`, {
         method,
@@ -1099,6 +1201,34 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
       });
     });
 
+    it('only doctors and administrators can change review opinions (server-side, 403)', async () => {
+      const image = await addImage(1);
+      const theirs = await vote(image, 'u', Vote.NORMAL);
+      const asUser = { user: 'u', roles: 'user' };
+      const attempts = [
+        call('POST', `/patients/images/${image}/review-votes`, { ...asUser, body: { vote: 'abnormal', comment: null } }),
+        call('PATCH', `/patients/images/${image}/review-votes/${theirs.id}`, { ...asUser, body: { vote: 'abnormal', comment: null } }),
+        call('POST', `/patients/${PATIENT}/series/${SERIES}/review/votes`, { ...asUser, body: { imageIds: [image], vote: 'abnormal' } }),
+        call('POST', `/patients/${PATIENT}/series/${SERIES}/review/complete`, { ...asUser, body: { presentedImageIds: [image] } }),
+        // No roles at all.
+        call('POST', `/patients/images/${image}/review-votes`, { user: 'v', roles: '', body: { vote: 'abnormal', comment: null } }),
+      ];
+      for (const response of await Promise.all(attempts)) expect(response.status).toBe(403);
+      expect(await rows('SELECT vote::text AS vote FROM patient_image_review_votes')).toEqual([{ vote: 'normal' }]);
+      expect(await rows('SELECT 1 FROM series_review_completions')).toHaveLength(0);
+      // Viewing stays open to every signed-in user.
+      expect((await call('GET', `/patients/${PATIENT}/series/${SERIES}`, asUser)).status).toBe(200);
+
+      // A doctor (realm role) and an administrator (dashboard client role).
+      expect(
+        (await call('POST', `/patients/images/${image}/review-votes`, { user: 'd', roles: 'doctor', body: { vote: 'abnormal', comment: null } })).status
+      ).toBe(204);
+      expect(
+        (await call('POST', `/patients/${PATIENT}/series/${SERIES}/review/votes`, { user: 'x', roles: 'dashboard:admin', body: { imageIds: [image], vote: 'uncertain' } })).status
+      ).toBe(200);
+      expect(await stateOf(image)).toMatchObject({ votesCount: 3, reviewState: 'CONFLICTED' });
+    });
+
     describe('bulk votes over HTTP', () => {
       const votesUrl = (patient = PATIENT, series = SERIES) =>
         `/patients/${patient}/series/${series}/review/votes`;
@@ -1145,6 +1275,38 @@ describeWithDatabase('review semantics (PostgreSQL)', () => {
         expect((await post(votesUrl(PATIENT, FOREIGN_SERIES), { imageIds: [foreign], vote: 'normal' })).status).toBe(404);
         expect((await post(votesUrl('not-a-uuid', SERIES), { imageIds: [mine], vote: 'normal' })).status).toBe(404);
         expect(await rows('SELECT 1 FROM patient_image_review_votes')).toHaveLength(0);
+      });
+
+      it('bounds the request: duplicates count once, more than 5000 ids are refused as a whole', async () => {
+        const [one, two] = [await addImage(1), await addImage(2)];
+        const duplicated = await call('POST', votesUrl(), { body: { imageIds: [one, two, one, one], vote: 'normal' } });
+        expect(duplicated.status).toBe(200);
+        expect(await duplicated.json()).toEqual({ requested: 2, created: 2, changed: 0, unchanged: 0 });
+
+        const tooMany = Array.from({ length: 5001 }, (_, i) => id(100000 + i));
+        const refused = await call('POST', votesUrl(), { body: { imageIds: tooMany, vote: 'abnormal' } });
+        expect(refused.status).toBe(400);
+        // 5000 well-formed ids fit the body limit and reach the domain checks.
+        const atLimit = await call('POST', votesUrl(), { body: { imageIds: [one, ...tooMany.slice(0, 4999)], vote: 'abnormal' } });
+        expect(atLimit.status).toBe(400);
+        expect(await atLimit.json()).toMatchObject({ code: 'IMAGES_NOT_IN_SERIES' });
+        expect(await rows(`SELECT vote::text AS vote FROM patient_image_review_votes ORDER BY "patientImageId"`)).toEqual([
+          { vote: 'normal' },
+          { vote: 'normal' },
+        ]);
+      });
+
+      it('select all on a 1000-slice series: one request, one transaction', async () => {
+        const ids: string[] = [];
+        ids.push(...(await addImages(1, 1000)));
+        const response = await call('POST', votesUrl(), { body: { imageIds: ids, vote: 'abnormal' } });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ requested: 1000, created: 1000 });
+        expect(await rows(`SELECT count(*)::int AS n FROM patient_image_review_votes`)).toEqual([{ n: 1000 }]);
+        const complete = await call('POST', `/patients/${PATIENT}/series/${SERIES}/review/complete`, {
+          body: { presentedImageIds: ids },
+        });
+        expect(await complete.json()).toMatchObject({ imageCount: 1000, explicitAbnormal: 1000, implicitNormal: 0 });
       });
 
       it('is refused with a retryable 409 REVIEW_LOCKED while the labels are being captured', async () => {
