@@ -32,11 +32,6 @@
             "output": "html",
             "ignore": [".gitkeep", "**/.gitkeep"]
           },
-          {
-            "input": "apps/be/src",
-            "glob": "ecosystem.config.js",
-            "output": "/"
-          }
         ],
         "deleteOutputPath": true,
         "esbuildOptions": {
