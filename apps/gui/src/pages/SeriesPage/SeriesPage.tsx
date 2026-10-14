@@ -42,7 +42,9 @@ export const SeriesContent = WithLoader<PatientSeriesResponse>(({ data }) => {
       </Stack>
       <BrokenImages data={data} />
       {simple ? (
-        <SeriesImages data={data} />
+        // Keyed: another patient or Series never reuses this Series' viewer,
+        // load result or slice on screen.
+        <SeriesImages key={`${data.patient.id}/${series.id}`} data={data} />
       ) : (
         <Alert severity="error">
           <AlertTitle>This series cannot be reviewed as a whole yet</AlertTitle>
@@ -68,10 +70,17 @@ export const Component = () => {
     patientId: string;
     seriesId: string;
   }>();
-  const { data, isLoading, isError, error } = useGetPatientSeriesQuery(
+  const { currentData, isFetching, isError, error } = useGetPatientSeriesQuery(
     { patientId, seriesId },
     { skip: !patientId || !seriesId }
   );
+  // Only the Series of the URL: while another Series is fetched, `data`
+  // would still be the previous one. A refetch of this Series (e.g. after a
+  // vote) keeps `currentData`, and with it the viewer.
+  const data =
+    currentData?.patient.id === patientId && currentData.series.id === seriesId
+      ? currentData
+      : undefined;
   return (
     <DefaultLayout>
       <PageTmpl
@@ -83,7 +92,7 @@ export const Component = () => {
       >
         <SeriesContent
           data={data}
-          isLoading={isLoading}
+          isLoading={!data && isFetching}
           isError={isError}
           error={error}
         />

@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -61,6 +62,24 @@ export interface DicomViewerSidebarRenderProps {
   jumpTo: (index: number) => void;
 }
 
+/** Where the slice on screen is in the loaded volume (not in the Series). */
+export interface DicomSlicePosition {
+  /** Zero-based slice index in the loaded volume (dwv order). */
+  index: number;
+  /** Slices in the loaded volume. */
+  loadedCount: number;
+}
+
+/** The outcome of loading `list`. */
+export interface DicomLoadResult {
+  /** Slices in the loaded volume. */
+  sliceCount: number;
+  /** Load errors so far. */
+  errorCount: number;
+  /** The `list` entry of each loaded slice (by slice index). */
+  loadedSources: string[];
+}
+
 interface DicomViewerProps {
   list?: string[];
   /**
@@ -69,17 +88,24 @@ interface DicomViewerProps {
    */
   getRequestHeaders?: () => Promise<Record<string, string>>;
   isClean?: boolean;
-  onCurrentItemChange?: (source: string) => void;
+  /**
+   * The slice on screen: its `list` entry (undefined while unresolved) and,
+   * once the volume is loaded, its position in the loaded volume.
+   */
+  onCurrentItemChange?: (
+    source: string | undefined,
+    position?: DicomSlicePosition
+  ) => void;
   toolbar?: ReactElement | ReactNode;
   sidebarItemIcon?: (source: string) => ReactElement;
   /** Replaces the default file list (e.g. a selectable slice list). */
   renderSidebar?: (props: DicomViewerSidebarRenderProps) => ReactNode;
   /**
    * Called when loading `list` ended or failed: the slices in the loaded
-   * volume and the load errors so far (to tell whether everything in
-   * `list` is actually shown).
+   * volume, the load errors so far and which `list` entries the slices are
+   * (to tell whether everything in `list` is actually shown).
    */
-  onLoadResult?: (result: { sliceCount: number; errorCount: number }) => void;
+  onLoadResult?: (result: DicomLoadResult) => void;
 }
 
 /** The viewer's tools: dwv tools, and the two Draw shapes as their own tools. */
@@ -438,6 +464,9 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     return () => {
       isMountedRef.current = false;
       window.removeEventListener('resize', app.onResize);
+      // Requests still in flight belong to this viewer only (e.g. the
+      // previous Series): stop them before the next viewer loads.
+      app.abortAllLoads();
       appRef.current?.reset();
     };
   }, []);
@@ -459,19 +488,50 @@ export const DicomViewer: FC<DicomViewerProps> = ({
 
   useEffect(() => {
     if (onLoadResult && (isDataLoaded || loadErrorEvents.length)) {
+      const loadedSources: string[] = [];
+      if (isDataLoaded) {
+        for (let i = 0; i < sliceCount; i++) {
+          const source = loadedItemsMapping[loadedSlicesMapping[i]];
+          if (source) loadedSources.push(source);
+        }
+      }
       onLoadResult({
         sliceCount: isDataLoaded ? sliceCount : 0,
         errorCount: loadErrorEvents.length,
+        loadedSources,
       });
     }
-  }, [isDataLoaded, sliceCount, loadErrorEvents.length, onLoadResult]);
+  }, [
+    isDataLoaded,
+    sliceCount,
+    loadErrorEvents.length,
+    loadedItemsMapping,
+    loadedSlicesMapping,
+    onLoadResult,
+  ]);
 
+  /** SOP Instance UID -> slice index in the loaded volume. */
+  const sliceIndexByUid = useMemo(() => {
+    const result = new Map<string, number>();
+    for (let i = 0; i < sliceCount; i++) {
+      const uid = loadedSlicesMapping[i];
+      if (uid) result.set(uid, i);
+    }
+    return result;
+  }, [loadedSlicesMapping, sliceCount]);
+
+  // Also re-resolved when the mappings fill in (the slice on screen may be
+  // reported before its item or the volume's slice order is known).
   useEffect(() => {
     if (currentImageId && onCurrentItemChange) {
       const currentSource = loadedItemsMapping[currentImageId];
-      onCurrentItemChange(currentSource);
+      const index = sliceIndexByUid.get(currentImageId);
+      onCurrentItemChange(
+        currentSource,
+        index === undefined ? undefined : { index, loadedCount: sliceCount }
+      );
     }
-  }, [currentImageId]);
+  }, [currentImageId, loadedItemsMapping, sliceIndexByUid, sliceCount, onCurrentItemChange]);
 
   return (
     <Stack spacing={2}>
