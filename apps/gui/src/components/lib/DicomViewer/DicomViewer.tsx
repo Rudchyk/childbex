@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import {
+  Alert,
   Box,
   LinearProgress,
   Stack,
@@ -209,6 +210,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   const [selectedTool, setSelectedTool] = useState(defaultSelectedTool);
   const [canWindowLevel, setCanWindowLevel] = useState(false);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [loadStateError, setLoadStateError] = useState<string | null>(null);
   const [currentMetaData, setCurrentMetaData] = useState<
     Record<string, DataElement>
   >({});
@@ -291,6 +293,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     setCurrentMetaData({});
     setCalibration(undefined);
     setIsDataLoaded(false);
+    setLoadStateError(null);
     setCanWindowLevel(false);
     setSelectedTool(defaultSelectedTool);
     setCanScroll(false);
@@ -361,6 +364,27 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     scaleDrawStyles(app.getStyle() as DwvStyle | undefined);
 
     app.addEventListener('loadend', (event: DicomLoadEndEvent) => {
+      // An in-flight load can finish while this viewer is being removed.
+      if (!isMountedRef.current) return;
+
+      const image = app.getData(event.dataid)?.image;
+      const viewLayer = app.getViewLayersByDataId(event.dataid)?.[0];
+      const vc = viewLayer?.getViewController();
+
+      // DWV can emit loadend after an aborted/failed load, before any view
+      // layer exists. Never report a stack as loaded if it cannot be shown:
+      // Complete Review requires a verified rendered stack.
+      if (!image || !vc) {
+        setLoadStateError('DICOM image stack could not be displayed. Reload this Series.');
+        setIsDataLoaded(false);
+        setIsLoadSuccessful(false);
+        setSliceCount(0);
+        setLoadedSlicesMapping({});
+        setCurrentImageId(undefined);
+        return;
+      }
+
+      setLoadStateError(null);
       const metaRoot = app.getMetaData(event.dataid);
       if (metaRoot) {
         setCurrentMetaData(metaRoot);
@@ -368,11 +392,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
         setCalibration(lengthCalibration);
         custom.labelTexts = measurementLabelTexts(lengthCalibration);
       }
-      const data = app.getData(event.dataid);
-      const image = data?.image;
-      const vls = app.getViewLayersByDataId(event.dataid);
-      const vl = vls[0];
-      const vc = vl.getViewController();
+
       const canScroll = vc.canScroll();
       const canMonochrome = vc.isMonochrome();
       if (canMonochrome) {
@@ -405,21 +425,23 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     });
 
     app.addEventListener('loadprogress', (event: DicomLoadProgressEvent) => {
-      setLoadProgress(event.loaded);
+      if (isMountedRef.current) setLoadProgress(event.loaded);
     });
     app.addEventListener('load', () => {
-      setIsLoadSuccessful(true);
+      if (isMountedRef.current) setIsLoadSuccessful(true);
     });
     app.addEventListener(
       'positionchange',
       (event: DicomPositionChangeEvent) => {
         // dwv also fires it without `data` (e.g. when a drawing starts):
         // throwing here would abort dwv's event dispatch (and the drawing).
+        if (!isMountedRef.current) return;
         const imageUid = event.data?.imageUid;
         if (imageUid) setCurrentImageId(imageUid);
       }
     );
     app.addEventListener('loaditem', (event: DicomLoadItemEvent) => {
+      if (!isMountedRef.current) return;
       let name = '';
       if (typeof event.source === 'string') {
         name = event.source;
@@ -434,13 +456,13 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       }
     });
     app.addEventListener('loaderror', (event: DicomLoadErrorEvent) => {
-      setLoadErrorEvents((state) => [...state, event]);
+      if (isMountedRef.current) setLoadErrorEvents((state) => [...state, event]);
     });
     app.addEventListener('loadabort', (event: DicomLoadErrorEvent) => {
-      setLoadErrorEvents((state) => [...state, event]);
+      if (isMountedRef.current) setLoadErrorEvents((state) => [...state, event]);
     });
     app.addEventListener('keydown', (event: KeyboardEvent) => {
-      app.defaultOnKeydown(event);
+      if (isMountedRef.current) app.defaultOnKeydown(event);
     });
 
     window.addEventListener('resize', app.onResize);
@@ -487,7 +509,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   }, [isDataLoaded]);
 
   useEffect(() => {
-    if (onLoadResult && (isDataLoaded || loadErrorEvents.length)) {
+    if (onLoadResult && (isDataLoaded || loadErrorEvents.length || loadStateError)) {
       const loadedSources: string[] = [];
       if (isDataLoaded) {
         for (let i = 0; i < sliceCount; i++) {
@@ -497,7 +519,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       }
       onLoadResult({
         sliceCount: isDataLoaded ? sliceCount : 0,
-        errorCount: loadErrorEvents.length,
+        errorCount: loadErrorEvents.length + (loadStateError ? 1 : 0),
         loadedSources,
       });
     }
@@ -505,6 +527,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     isDataLoaded,
     sliceCount,
     loadErrorEvents.length,
+    loadStateError,
     loadedItemsMapping,
     loadedSlicesMapping,
     onLoadResult,
@@ -538,6 +561,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       {loadProgress !== 100 && loadProgress !== 0 && (
         <LinearProgress variant="determinate" value={loadProgress} />
       )}
+      {loadStateError && <Alert severity="error">{loadStateError}</Alert>}
       <DicomViewerTools
         tools={VIEWER_TOOLS}
         selectedTool={selectedTool}
@@ -548,7 +572,9 @@ export const DicomViewer: FC<DicomViewerProps> = ({
         isDataLoaded={isDataLoaded}
         metaData={currentMetaData}
         calibration={calibration}
-        isLoadSuccessful={isLoadSuccessful}
+        isLoadSuccessful={
+          isDataLoaded && isLoadSuccessful && !loadStateError && !loadErrorEvents.length
+        }
         loadErrorEvents={loadErrorEvents}
         onClean={isClean ? onClean : undefined}
       />

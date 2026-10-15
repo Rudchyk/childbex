@@ -30,11 +30,18 @@ const drawToolStyle = new MockStyle();
 let mockMeta: Record<string, unknown> = {};
 /** The loaded volume (dwv image); undefined: no slices. */
 let mockImage: unknown;
+let mockViewLayers: unknown[] | undefined;
+const mockImageWithSlices = (count: number) => ({
+  getGeometry: () => ({ getSize: () => ({ get: () => count }) }),
+  getImageUid: (index: { values: number[] }) => `uid-${index.values[2]}`,
+});
 let mockAppOptions: { tools?: Record<string, { options?: string[] }> } = {};
 let mockToolsProps: {
   tools: readonly string[];
   onChangeTool: (tool: string) => void;
   calibration?: { kind: string };
+  isDataLoaded: boolean;
+  isLoadSuccessful: boolean;
 } | null = null;
 
 jest.mock('dwv', () => ({
@@ -55,15 +62,7 @@ jest.mock('dwv', () => ({
     getActiveLayerGroup: () => ({ setActiveLayer: jest.fn() }),
     getMetaData: () => mockMeta,
     getData: () => ({ image: mockImage }),
-    getViewLayersByDataId: () => [
-      {
-        getViewController: () => ({
-          canScroll: () => true,
-          isMonochrome: () => true,
-          getCurrentIndex: () => ({ getValues: () => [0, 0, 0] }),
-        }),
-      },
-    ],
+    getViewLayersByDataId: () => mockViewLayers,
   })),
   AppOptions: jest.fn().mockImplementation(() => {
     mockAppOptions = {};
@@ -111,7 +110,16 @@ const setPixelRatio = (ratio: number, coarse = false) => {
 beforeEach(() => {
   jest.clearAllMocks();
   mockMeta = {};
-  mockImage = undefined;
+  mockImage = mockImageWithSlices(1);
+  mockViewLayers = [
+    {
+      getViewController: () => ({
+        canScroll: () => true,
+        isMonochrome: () => true,
+        getCurrentIndex: () => ({ getValues: () => [0, 0, 0] }),
+      }),
+    },
+  ];
   mockToolsProps = null;
   setPixelRatio(1);
 });
@@ -169,6 +177,54 @@ describe('DicomViewer', () => {
       sliceCount: 0,
       errorCount: 1,
       loadedSources: [],
+    });
+  });
+
+  describe('loadend safety', () => {
+    it.each(['missing image', 'missing view layer', 'missing controller'])(
+      'does not report a loaded stack with %s',
+      (missing) => {
+        if (missing === 'missing image') mockImage = undefined;
+        if (missing === 'missing view layer') mockViewLayers = [];
+        if (missing === 'missing controller') {
+          mockViewLayers = [{ getViewController: () => undefined }];
+        }
+
+        const onLoadResult = jest.fn();
+        render(<DicomViewer list={urls} onLoadResult={onLoadResult} />);
+        act(() => {
+          mockListeners.loadend({ dataid: '0' });
+          // A late successful event cannot turn a non-displayable stack green.
+          mockListeners.load({});
+        });
+
+        expect(screen.getByText(/DICOM image stack could not be displayed/)).toBeTruthy();
+        expect(mockToolsProps?.isDataLoaded).toBe(false);
+        expect(mockToolsProps?.isLoadSuccessful).toBe(false);
+        expect(onLoadResult).toHaveBeenLastCalledWith({
+          sliceCount: 0,
+          errorCount: 1,
+          loadedSources: [],
+        });
+      }
+    );
+
+    it('ignores DWV events delivered after unmount', async () => {
+      const onLoadResult = jest.fn();
+      const { unmount } = render(
+        <DicomViewer list={urls} onLoadResult={onLoadResult} />
+      );
+      await waitFor(() => expect(mockLoadURLs).toHaveBeenCalledTimes(1));
+
+      unmount();
+      act(() => {
+        mockListeners.loadend({ dataid: '0' });
+        mockListeners.loadabort({ error: new Error('cancelled') });
+        mockListeners.load({});
+      });
+
+      expect(mockAbortAllLoads).toHaveBeenCalledTimes(1);
+      expect(onLoadResult).not.toHaveBeenCalled();
     });
   });
 
