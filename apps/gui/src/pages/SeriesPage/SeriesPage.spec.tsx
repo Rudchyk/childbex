@@ -12,13 +12,20 @@ import type {
   SeriesImage,
   SeriesSummary,
 } from '@libs/schemas';
-import { SeriesContent } from './SeriesPage';
+import { Component as SeriesPage, SeriesContent } from './SeriesPage';
 
 type ViewerProps = {
   list: string[];
   getRequestHeaders?: () => Promise<Record<string, string>>;
-  onCurrentItemChange: (source: string) => void;
-  onLoadResult: (result: { sliceCount: number; errorCount: number }) => void;
+  onCurrentItemChange: (
+    source: string | undefined,
+    position?: { index: number; loadedCount: number }
+  ) => void;
+  onLoadResult: (result: {
+    sliceCount: number;
+    errorCount: number;
+    loadedSources: string[];
+  }) => void;
   renderSidebar?: (props: {
     items: { imageUid: string; source: string; index: number }[];
     currentImageId?: string;
@@ -26,7 +33,19 @@ type ViewerProps = {
   }) => unknown;
 };
 let mockViewerProps: ViewerProps | undefined;
+/** Viewer instances mounted so far (a remount loads the images again). */
+let mockViewerMounts = 0;
 let mockCurrentUid: string | undefined;
+let mockParams: { patientId?: string; seriesId?: string } = {};
+let mockSeriesQuery: {
+  currentData?: PatientSeriesResponse;
+  isFetching: boolean;
+  isError: boolean;
+  error?: unknown;
+} = { isFetching: false, isError: false };
+/** Renders the real review panel (vote form) instead of a stand-in. */
+let mockRealReviewPanel = false;
+const mockAddVote = jest.fn();
 const mockJumpTo = jest.fn();
 const mockComplete = jest.fn();
 const mockBulk = jest.fn();
@@ -37,6 +56,9 @@ jest.mock('../../components', () => ({
   // The viewer stand-in renders the slice list it is given (slice i = list[i]).
   DicomViewer: (props: ViewerProps) => {
     mockViewerProps = props;
+    require('react').useEffect(() => {
+      mockViewerMounts++;
+    }, []);
     return (
       <div>
         viewer
@@ -68,6 +90,20 @@ jest.mock('../../store/apis', () => ({
   apiBaseUrl: '/api/v1',
   useCompleteSeriesReviewMutation: () => [mockComplete, { isLoading: false }],
   useBulkReviewVoteMutation: () => [mockBulk, { isLoading: false }],
+  useGetPatientSeriesQuery: () => mockSeriesQuery,
+  // The real review panel's vote form (when rendered).
+  useAddPatientImageReviewVoteMutation: () => [mockAddVote, { isLoading: false }],
+  useUpdatePatientImageReviewVoteMutation: () => [jest.fn(), { isLoading: false }],
+}));
+jest.mock('react-router-dom', () => ({
+  ...jest.requireActual('react-router-dom'),
+  useParams: () => mockParams,
+}));
+jest.mock('../../layouts', () => ({
+  DefaultLayout: ({ children }: { children?: unknown }) => <>{children as never}</>,
+}));
+jest.mock('../../templates', () => ({
+  PageTmpl: ({ children }: { children?: unknown }) => <>{children as never}</>,
 }));
 jest.mock('../../auth/useAuth', () => ({
   useAuth: () => ({ userId: 'sub-me', isDoctor: true, isAdmin: false }),
@@ -79,9 +115,20 @@ jest.mock('../../modules/notifications', () => ({
   useNotifications: () => ({ notifyError: mockNotifyError, notifySuccess: mockNotifySuccess }),
 }));
 jest.mock('./LLMCheckItems', () => ({ LLMCheckItems: () => null }));
-jest.mock('./review/PatientImageReview', () => ({
-  PatientImageReview: ({ item }: { item: { id: string } }) => <div>review:{item.id}</div>,
-}));
+jest.mock('./review/PatientImageReview', () => {
+  const actual = jest.requireActual('./review/PatientImageReview');
+  return {
+    PatientImageReview: (props: { item: { id: string }; targetLabel?: string }) =>
+      mockRealReviewPanel ? (
+        <actual.PatientImageReview {...props} />
+      ) : (
+        <div data-testid="review-panel" data-target-label={props.targetLabel}>
+          review:{props.item.id}
+        </div>
+      ),
+  };
+});
+jest.mock('./review/PatientImageVotes', () => ({ PatientImageVotes: () => null }));
 
 const PATIENT = '11111111-1111-4111-8111-111111111111';
 const SERIES = '55555555-5555-4555-8555-555555555555';
@@ -171,10 +218,33 @@ const rows = () => screen.getAllByTestId('slice-row');
 const rowOf = (imageId: string) =>
   rows().find((row) => row.getAttribute('data-image-id') === imageId) as HTMLElement;
 const checkboxOf = (imageId: string) => within(rowOf(imageId)).getByRole('checkbox');
+/** The viewer's report of a load that shows exactly these images. */
+const loadedAll = (ids: string[]) => ({
+  sliceCount: ids.length,
+  errorCount: 0,
+  loadedSources: ids.map(url),
+});
+const PRESENTED = ['i2', 'i1', 'i3'];
+const header = () => screen.getByTestId('review-header').textContent;
+
+const SERIES_B = '66666666-6666-4666-8666-666666666666';
+/** Another Series of the patient, with as many images as the first one shows. */
+const responseB = (): PatientSeriesResponse => ({
+  ...response({ id: SERIES_B }),
+  images: [
+    image('b1', { instanceNumber: 7 }),
+    image('b2', { instanceNumber: 8 }),
+    image('b3', { instanceNumber: 9 }),
+  ],
+});
 
 beforeEach(() => {
   mockViewerProps = undefined;
+  mockViewerMounts = 0;
   mockCurrentUid = undefined;
+  mockParams = {};
+  mockSeriesQuery = { isFetching: false, isError: false };
+  mockRealReviewPanel = false;
   jest.clearAllMocks();
 });
 
@@ -191,8 +261,75 @@ describe('Series page', () => {
 
   it('shows the review panel of the current image', () => {
     renderSeries(response());
-    act(() => mockViewerProps?.onCurrentItemChange(url('i1')));
+    act(() => mockViewerProps?.onCurrentItemChange(url('i1'), { index: 1, loadedCount: 3 }));
     expect(screen.getByText('review:i1')).toBeTruthy();
+  });
+
+  describe('review header', () => {
+    it('names the slice on screen by its loaded position and Instance Number', () => {
+      renderSeries(response());
+      act(() => mockViewerProps?.onCurrentItemChange(url('i1'), { index: 1, loadedCount: 3 }));
+      expect(header()).toBe('Review — Slice 2 / 3 loaded · Instance #1');
+      // The vote form gets the same image and label.
+      expect(screen.getByTestId('review-panel').textContent).toBe('review:i1');
+      expect(screen.getByTestId('review-panel').getAttribute('data-target-label')).toBe(
+        'Slice 2 / 3 loaded · Instance #1'
+      );
+      // No patient identifiers.
+      expect(header()).not.toContain('synthetic');
+      expect(header()).not.toContain(PATIENT);
+    });
+
+    it('follows wheel scrolling and navigation from the slice list', () => {
+      renderSeries(response());
+      // Wheel scrolling: the viewer reports each slice on screen.
+      act(() => mockViewerProps?.onCurrentItemChange(url('i2'), { index: 0, loadedCount: 3 }));
+      expect(header()).toBe('Review — Slice 1 / 3 loaded · Instance #2');
+      act(() => mockViewerProps?.onCurrentItemChange(url('i1'), { index: 1, loadedCount: 3 }));
+      expect(header()).toBe('Review — Slice 2 / 3 loaded · Instance #1');
+
+      // The list asks the viewer to jump; the viewer then reports the slice.
+      fireEvent.click(screen.getByRole('button', { name: /Show Slice 3/ }));
+      expect(mockJumpTo).toHaveBeenCalledWith(2);
+      act(() => mockViewerProps?.onCurrentItemChange(url('i3'), { index: 2, loadedCount: 3 }));
+      expect(header()).toBe('Review — Slice 3 / 3 loaded · Instance #3');
+      expect(screen.getByText('review:i3')).toBeTruthy();
+    });
+
+    it('says when the Instance Number is missing', () => {
+      const data = response();
+      data.images[0] = { ...data.images[0], instanceNumber: null };
+      renderSeries(data);
+      act(() => mockViewerProps?.onCurrentItemChange(url('i2'), { index: 0, loadedCount: 3 }));
+      expect(header()).toBe('Review — Slice 1 / 3 loaded · no Instance #');
+    });
+
+    it('shows no vote form while the slice on screen is not resolved', () => {
+      renderSeries(response());
+      expect(header()).toBe('Review — no slice shown yet');
+
+      // Known image, position in the loaded volume not known yet.
+      act(() => mockViewerProps?.onCurrentItemChange(url('i1')));
+      expect(header()).toBe('Review — locating the slice on screen…');
+      expect(screen.queryByTestId('review-panel')).toBeNull();
+
+      // Not an image of this Series.
+      act(() =>
+        mockViewerProps?.onCurrentItemChange('/api/v1/patients/x/images/other/file', {
+          index: 0,
+          loadedCount: 3,
+        })
+      );
+      expect(header()).toBe('Review — no slice shown yet');
+      expect(screen.queryByTestId('review-panel')).toBeNull();
+    });
+
+    it('positions are in the loaded volume and a partial load is flagged', () => {
+      renderSeries(response());
+      act(() => mockViewerProps?.onCurrentItemChange(url('i3'), { index: 1, loadedCount: 2 }));
+      expect(header()).toBe('Review — Slice 2 / 2 loaded · Instance #3');
+      expect(screen.getByText(/Only 2 of 3 images\s+of this series are loaded/)).toBeTruthy();
+    });
   });
 
   describe('slice list', () => {
@@ -296,18 +433,32 @@ describe('Series page', () => {
     it('is enabled only after every presented image was loaded', () => {
       renderSeries(response());
       expect(completeButton().disabled).toBe(true);
-      act(() => mockViewerProps?.onLoadResult({ sliceCount: 2, errorCount: 0 }));
+      act(() => mockViewerProps?.onLoadResult(loadedAll(['i2', 'i1'])));
       expect(completeButton().disabled).toBe(true);
-      act(() => mockViewerProps?.onLoadResult({ sliceCount: 3, errorCount: 1 }));
+      act(() => mockViewerProps?.onLoadResult({ ...loadedAll(PRESENTED), errorCount: 1 }));
       expect(completeButton().disabled).toBe(true);
-      act(() => mockViewerProps?.onLoadResult({ sliceCount: 3, errorCount: 0 }));
+      act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
       expect(completeButton().disabled).toBe(false);
+    });
+
+    it.each([
+      ['images of another Series', loadedAll(['b1', 'b2', 'b3'])],
+      ['an image twice and one missing', loadedAll(['i2', 'i1', 'i1'])],
+      ['slices whose source is unknown', { ...loadedAll(['i2', 'i1']), sliceCount: 3 }],
+      ['a load error', { ...loadedAll(PRESENTED), errorCount: 1 }],
+    ])('stays disabled when the viewer shows %s, even with the right slice count', (_, result) => {
+      renderSeries(response());
+      act(() => mockViewerProps?.onLoadResult(result));
+      expect(completeButton().disabled).toBe(true);
+      expect(completeButton().parentElement?.getAttribute('aria-label')).toBe(
+        'Not every image of the series could be shown'
+      );
     });
 
     it('explains the normal-by-default meaning and calls the Series endpoint with the presented images', () => {
       mockComplete.mockReturnValue({ unwrap: () => new Promise(() => undefined) });
       renderSeries(response());
-      act(() => mockViewerProps?.onLoadResult({ sliceCount: 3, errorCount: 0 }));
+      act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
       fireEvent.click(completeButton());
       expect(screen.getByText(/1 Abnormal, 0 Not sure, 0 Normal/)).toBeTruthy();
       expect(screen.getByText(/other 2 image\(s\) will count as Normal/)).toBeTruthy();
@@ -344,6 +495,146 @@ describe('Series page', () => {
         })
       );
       expect(screen.getByText(/1 new image\(s\) not reviewed/)).toBeTruthy();
+    });
+  });
+
+  describe('series isolation', () => {
+    it('Series A -> B with equal slice counts: new viewer, no reuse of A\'s load result', () => {
+      const { rerender } = renderSeries(response());
+      act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
+      act(() => mockViewerProps?.onCurrentItemChange(url('i1'), { index: 1, loadedCount: 3 }));
+      expect(completeButton().disabled).toBe(false);
+
+      rerender(<SeriesContent data={responseB()} isLoading={false} isError={false} />);
+
+      expect(mockViewerMounts).toBe(2);
+      expect(mockViewerProps?.list).toEqual([url('b1'), url('b2'), url('b3')]);
+      expect(completeButton().disabled).toBe(true);
+      expect(header()).toBe('Review — no slice shown yet');
+      expect(screen.queryByTestId('review-panel')).toBeNull();
+
+      act(() => mockViewerProps?.onLoadResult(loadedAll(['b1', 'b2', 'b3'])));
+      expect(completeButton().disabled).toBe(false);
+    });
+
+    it('Series A -> B while A is loading: late reports of A change nothing in B', () => {
+      const { rerender } = renderSeries(response());
+      const viewerA = mockViewerProps as ViewerProps;
+      rerender(<SeriesContent data={responseB()} isLoading={false} isError={false} />);
+
+      act(() => {
+        viewerA.onLoadResult(loadedAll(PRESENTED));
+        viewerA.onCurrentItemChange(url('i1'), { index: 1, loadedCount: 3 });
+      });
+
+      expect(completeButton().disabled).toBe(true);
+      expect(header()).toBe('Review — no slice shown yet');
+      expect(screen.queryByTestId('review-panel')).toBeNull();
+    });
+
+    it('a refetch of the same Series (e.g. after a vote) keeps the viewer and its state', () => {
+      const { rerender } = renderSeries(response());
+      act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
+      act(() => mockViewerProps?.onCurrentItemChange(url('i3'), { index: 2, loadedCount: 3 }));
+
+      const refetched = response();
+      refetched.images[2] = { ...refetched.images[2], votes: [vote('sub-me', 'normal')] };
+      rerender(<SeriesContent data={refetched} isLoading={false} isError={false} />);
+
+      expect(mockViewerMounts).toBe(1);
+      expect(completeButton().disabled).toBe(false);
+      expect(header()).toBe('Review — Slice 3 / 3 loaded · Instance #3');
+      expect(within(rowOf('i3')).getByLabelText('Your opinion: Normal')).toBeTruthy();
+    });
+
+    describe('route', () => {
+      const renderPage = () => render(<SeriesPage />);
+
+      it('never renders the previous Series while another one is fetched', () => {
+        mockParams = { patientId: PATIENT, seriesId: SERIES };
+        mockSeriesQuery = { currentData: response(), isFetching: false, isError: false };
+        const { rerender } = renderPage();
+        expect(mockViewerProps?.list).toEqual([url('i2'), url('i1'), url('i3')]);
+
+        // Navigated to B: RTK Query has no current data for B yet.
+        mockParams = { patientId: PATIENT, seriesId: SERIES_B };
+        mockSeriesQuery = { currentData: undefined, isFetching: true, isError: false };
+        mockViewerProps = undefined as ViewerProps | undefined;
+        rerender(<SeriesPage />);
+        expect(mockViewerProps).toBeUndefined();
+        expect(screen.queryByRole('button', { name: /complete review/i })).toBeNull();
+        expect(screen.getByRole('progressbar')).toBeTruthy();
+
+        mockSeriesQuery = { currentData: responseB(), isFetching: false, isError: false };
+        rerender(<SeriesPage />);
+        expect(mockViewerProps?.list).toEqual([url('b1'), url('b2'), url('b3')]);
+      });
+
+      it('ignores data of another Series than the URL names', () => {
+        mockParams = { patientId: PATIENT, seriesId: SERIES_B };
+        mockSeriesQuery = { currentData: response(), isFetching: false, isError: false };
+        renderPage();
+        expect(mockViewerProps).toBeUndefined();
+        expect(screen.queryByRole('button', { name: /complete review/i })).toBeNull();
+      });
+
+      it('a failed refetch after a vote keeps the Series, the slice on screen and unsaved votes', () => {
+        mockRealReviewPanel = true;
+        mockParams = { patientId: PATIENT, seriesId: SERIES };
+        mockSeriesQuery = { currentData: response(), isFetching: false, isError: false };
+        const { rerender } = renderPage();
+        act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
+        act(() => mockViewerProps?.onCurrentItemChange(url('i3'), { index: 2, loadedCount: 3 }));
+        expect(header()).toBe('Review — Slice 3 / 3 loaded · Instance #3');
+        // Unsaved choice and comment on the slice on screen.
+        fireEvent.click(screen.getByRole('radio', { name: 'Abnormal' }));
+        fireEvent.change(screen.getByRole('textbox', { name: 'Comment' }), {
+          target: { value: 'draft' },
+        });
+
+        // A vote elsewhere invalidated the Series: the refetch runs, then fails.
+        // RTK Query keeps this Series' last data as `currentData`.
+        mockSeriesQuery = { ...mockSeriesQuery, isFetching: true };
+        rerender(<SeriesPage />);
+        mockSeriesQuery = {
+          currentData: mockSeriesQuery.currentData,
+          isFetching: false,
+          isError: true,
+          error: { status: 503, data: { message: 'Service Unavailable.' } },
+        };
+        rerender(<SeriesPage />);
+
+        expect(mockViewerMounts).toBe(1);
+        expect(mockViewerProps?.list).toEqual([url('i2'), url('i1'), url('i3')]);
+        expect(header()).toBe('Review — Slice 3 / 3 loaded · Instance #3');
+        expect((screen.getByRole('radio', { name: 'Abnormal' }) as HTMLInputElement).checked).toBe(true);
+        expect((screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement).value).toBe('draft');
+        expect(completeButton().disabled).toBe(false);
+        // Non-destructive: a warning above the kept content.
+        const warning = screen.getByTestId('series-refresh-error');
+        expect(warning.textContent).toContain('could not be refreshed');
+        expect(warning.textContent).toContain('Service Unavailable.');
+
+        // The next successful refetch clears the warning, still the same viewer.
+        mockSeriesQuery = { currentData: response(), isFetching: false, isError: false };
+        rerender(<SeriesPage />);
+        expect(screen.queryByTestId('series-refresh-error')).toBeNull();
+        expect(mockViewerMounts).toBe(1);
+      });
+
+      it('an initial load error is shown instead of the Series', () => {
+        mockParams = { patientId: PATIENT, seriesId: SERIES };
+        mockSeriesQuery = {
+          currentData: undefined,
+          isFetching: false,
+          isError: true,
+          error: { status: 404, data: { message: 'Not found. This series does not exist.' } },
+        };
+        renderPage();
+        expect(screen.getByText('Not found. This series does not exist.')).toBeTruthy();
+        expect(screen.queryByTestId('series-refresh-error')).toBeNull();
+        expect(mockViewerProps).toBeUndefined();
+      });
     });
   });
 

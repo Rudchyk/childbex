@@ -43,9 +43,11 @@ export type ReviewPanelImage = Pick<
 
 interface PatientImageReviewProps {
   item?: ReviewPanelImage;
+  /** Names the image in vote notifications (e.g. "Slice 3 / 9 loaded · Instance #4"). */
+  targetLabel?: string;
 }
 
-export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
+export const PatientImageReview: FC<PatientImageReviewProps> = ({ item, targetLabel }) => {
   const { hasRole, roles, isDoctor, isAdmin, userId } = useAuth();
   const getStatusColor = (): ChipProps['color'] => {
     switch (item?.status) {
@@ -142,7 +144,14 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item }) => {
                   : 'not marked'}
               </strong>
             </Typography>
-            <PatientImageVote patientImageId={item.id} userVote={userVote} />
+            {/* Keyed by reviewer and image: unsaved choices never move to
+                another image or reviewer. */}
+            <PatientImageVote
+              key={`${userId ?? ''}:${item.id}`}
+              patientImageId={item.id}
+              userVote={userVote}
+              targetLabel={targetLabel}
+            />
             <Divider />
           </>
         )}

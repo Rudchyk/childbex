@@ -9,6 +9,7 @@ import { DicomViewer } from './DicomViewer';
 
 const mockLoadURLs = jest.fn();
 const mockReset = jest.fn();
+const mockAbortAllLoads = jest.fn();
 const mockSetTool = jest.fn();
 const mockSetToolFeatures = jest.fn();
 const mockFitToContainer = jest.fn();
@@ -27,6 +28,8 @@ const mockStyle = new MockStyle();
 /** Another instance of the class (dwv's Draw tool owns its own Style). */
 const drawToolStyle = new MockStyle();
 let mockMeta: Record<string, unknown> = {};
+/** The loaded volume (dwv image); undefined: no slices. */
+let mockImage: unknown;
 let mockAppOptions: { tools?: Record<string, { options?: string[] }> } = {};
 let mockToolsProps: {
   tools: readonly string[];
@@ -43,6 +46,7 @@ jest.mock('dwv', () => ({
     loadURLs: mockLoadURLs,
     loadFiles: jest.fn(),
     reset: mockReset,
+    abortAllLoads: mockAbortAllLoads,
     onResize: jest.fn(),
     fitToContainer: mockFitToContainer,
     getStyle: () => mockStyle,
@@ -50,7 +54,7 @@ jest.mock('dwv', () => ({
     setToolFeatures: mockSetToolFeatures,
     getActiveLayerGroup: () => ({ setActiveLayer: jest.fn() }),
     getMetaData: () => mockMeta,
-    getData: () => ({ image: undefined }),
+    getData: () => ({ image: mockImage }),
     getViewLayersByDataId: () => [
       {
         getViewController: () => ({
@@ -66,7 +70,12 @@ jest.mock('dwv', () => ({
     return mockAppOptions;
   }),
   ViewConfig: jest.fn(),
-  Index: jest.fn(),
+  Index: jest.fn().mockImplementation(function (
+    this: { values: number[] },
+    values: number[]
+  ) {
+    this.values = values;
+  }),
   Point2D: jest.fn(),
   custom: {},
 }));
@@ -102,6 +111,7 @@ const setPixelRatio = (ratio: number, coarse = false) => {
 beforeEach(() => {
   jest.clearAllMocks();
   mockMeta = {};
+  mockImage = undefined;
   mockToolsProps = null;
   setPixelRatio(1);
 });
@@ -155,7 +165,69 @@ describe('DicomViewer', () => {
 
     act(() => mockListeners.loaderror({ error: new Error('404') }));
 
-    expect(onLoadResult).toHaveBeenLastCalledWith({ sliceCount: 0, errorCount: 1 });
+    expect(onLoadResult).toHaveBeenLastCalledWith({
+      sliceCount: 0,
+      errorCount: 1,
+      loadedSources: [],
+    });
+  });
+
+  describe('the slice on screen and the loaded volume', () => {
+    /** A volume of two slices whose order differs from the list order. */
+    const loadTwoSlices = () => {
+      mockImage = {
+        getGeometry: () => ({ getSize: () => ({ get: () => 2 }) }),
+        getImageUid: (index: { values: number[] }) => `uid-${index.values[2]}`,
+      };
+      const sopUid = (uid: string) => ({ '00080018': { value: [uid] } });
+      act(() => {
+        mockListeners.loaditem({ source: urls[0], data: sopUid('uid-1') });
+        mockListeners.loaditem({ source: urls[1], data: sopUid('uid-0') });
+      });
+    };
+
+    it('reports which list entries the loaded slices are', () => {
+      const onLoadResult = jest.fn();
+      render(<DicomViewer list={urls} onLoadResult={onLoadResult} />);
+      loadTwoSlices();
+      act(() => mockListeners.loadend({ dataid: '0' }));
+
+      expect(onLoadResult).toHaveBeenLastCalledWith({
+        sliceCount: 2,
+        errorCount: 0,
+        loadedSources: [urls[1], urls[0]],
+      });
+    });
+
+    it('reports the slice on screen with its position in the loaded volume', () => {
+      const onCurrentItemChange = jest.fn();
+      render(<DicomViewer list={urls} onCurrentItemChange={onCurrentItemChange} />);
+      loadTwoSlices();
+
+      // Before the volume is known: the source, no position.
+      act(() => mockListeners.positionchange({ data: { imageUid: 'uid-1' } }));
+      expect(onCurrentItemChange).toHaveBeenLastCalledWith(urls[0], undefined);
+
+      // dwv shows the last slice once loaded.
+      act(() => mockListeners.loadend({ dataid: '0' }));
+      expect(onCurrentItemChange).toHaveBeenLastCalledWith(urls[0], {
+        index: 1,
+        loadedCount: 2,
+      });
+
+      act(() => mockListeners.positionchange({ data: { imageUid: 'uid-0' } }));
+      expect(onCurrentItemChange).toHaveBeenLastCalledWith(urls[1], {
+        index: 0,
+        loadedCount: 2,
+      });
+    });
+  });
+
+  it('stops loading when unmounted (e.g. another Series is opened)', async () => {
+    const { unmount } = render(<DicomViewer list={urls} />);
+    await waitFor(() => expect(mockLoadURLs).toHaveBeenCalledTimes(1));
+    unmount();
+    expect(mockAbortAllLoads).toHaveBeenCalledTimes(1);
   });
 
   it('loads nothing without a list (local files mode)', async () => {

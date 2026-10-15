@@ -7,6 +7,7 @@ import { DefaultLayout } from '../../layouts';
 import { PageTmpl } from '../../templates';
 import { WithLoader } from '../../hoc';
 import { useGetPatientSeriesQuery } from '../../store/apis';
+import { getErrorMessage } from '../../utils';
 import { ReviewSummaryChips } from '../hierarchy/ReviewSummaryChips';
 import { formatStudyDateTime, seriesTitle } from '../hierarchy/hierarchy.utils';
 import { SeriesImages } from './SeriesImages';
@@ -42,7 +43,9 @@ export const SeriesContent = WithLoader<PatientSeriesResponse>(({ data }) => {
       </Stack>
       <BrokenImages data={data} />
       {simple ? (
-        <SeriesImages data={data} />
+        // Keyed: another patient or Series never reuses this Series' viewer,
+        // load result or slice on screen.
+        <SeriesImages key={`${data.patient.id}/${series.id}`} data={data} />
       ) : (
         <Alert severity="error">
           <AlertTitle>This series cannot be reviewed as a whole yet</AlertTitle>
@@ -68,10 +71,21 @@ export const Component = () => {
     patientId: string;
     seriesId: string;
   }>();
-  const { data, isLoading, isError, error } = useGetPatientSeriesQuery(
+  const { currentData, isFetching, isError, error } = useGetPatientSeriesQuery(
     { patientId, seriesId },
     { skip: !patientId || !seriesId }
   );
+  // Only the Series of the URL: while another Series is fetched, `data`
+  // would still be the previous one. A refetch of this Series (e.g. after a
+  // vote) keeps `currentData`, and with it the viewer.
+  const data =
+    currentData?.patient.id === patientId && currentData.series.id === seriesId
+      ? currentData
+      : undefined;
+  // A failed refetch of this Series keeps its last data (and the viewer,
+  // the slice on screen and unsaved votes); only an initial load error
+  // replaces the content.
+  const refreshFailed = isError && !!data;
   return (
     <DefaultLayout>
       <PageTmpl
@@ -81,10 +95,17 @@ export const Component = () => {
           </Typography>
         }
       >
+        {refreshFailed && (
+          <Alert severity="warning" data-testid="series-refresh-error" sx={{ mb: 2 }}>
+            <AlertTitle>This series could not be refreshed</AlertTitle>
+            {getErrorMessage(error)} You see its last loaded state: recent
+            review changes may not be shown yet.
+          </Alert>
+        )}
         <SeriesContent
           data={data}
-          isLoading={isLoading}
-          isError={isError}
+          isLoading={!data && isFetching}
+          isError={isError && !data}
           error={error}
         />
       </PageTmpl>

@@ -1,7 +1,12 @@
 import { FC, useCallback, useMemo, useState } from 'react';
 import { Box, Divider, Paper, Stack, Typography, useMediaQuery, useTheme } from '@mui/material';
 import type { PatientSeriesResponse } from '@libs/schemas';
-import { DicomViewer, type DicomViewerSidebarRenderProps } from '../../components';
+import {
+  DicomViewer,
+  type DicomLoadResult,
+  type DicomSlicePosition,
+  type DicomViewerSidebarRenderProps,
+} from '../../components';
 import { apiBaseUrl } from '../../store/apis';
 import { keycloakAuthHeaders } from '../../modules/archiveUpload/httpTransport';
 import { useAuth } from '../../auth/useAuth';
@@ -99,10 +104,49 @@ const SliceListPanel: FC<SliceListPanelProps> = ({
   );
 };
 
+/** The slice on screen, as reported by the viewer. */
+interface ActiveSlice {
+  source?: string;
+  position?: DicomSlicePosition;
+}
+
+/**
+ * "Slice 120 / 249 loaded · Instance #157": the position in the loaded
+ * volume (the slice list's numbering), not in the Series, and the DICOM
+ * Instance Number. No patient identifiers.
+ */
+export const sliceLabel = (
+  position: DicomSlicePosition,
+  instanceNumber: number | null
+) =>
+  `Slice ${position.index + 1} / ${position.loadedCount} loaded · ` +
+  (instanceNumber === null ? 'no Instance #' : `Instance #${instanceNumber}`);
+
+/**
+ * Whether the viewer shows exactly the presented images: every presented
+ * file once, nothing else, and no load errors. Compared by file URL (it
+ * carries the patient and image ids), not only by count.
+ */
+const showsExactly = (
+  result: DicomLoadResult | undefined,
+  presentedSources: string[]
+) => {
+  if (!result || result.errorCount !== 0) return false;
+  const loaded = new Set(result.loadedSources);
+  return (
+    result.sliceCount === presentedSources.length &&
+    result.loadedSources.length === presentedSources.length &&
+    loaded.size === presentedSources.length &&
+    presentedSources.every((source) => loaded.has(source))
+  );
+};
+
 /**
  * Viewer and review of a Series that is one simple stack. Broken images are
- * never handed to the viewer; Complete review is enabled only once every
- * presented image was loaded without errors.
+ * never handed to the viewer; Complete review is enabled only once the
+ * viewer verifiably shows every presented image (and nothing else) without
+ * errors. Its state belongs to one Series: render it keyed by patient and
+ * Series.
  */
 export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
   const theme = useTheme();
@@ -125,15 +169,20 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
   // The viewer loads its list once (on mount): a refetch after a vote never
   // reloads it, so the slice on screen, zoom and window/level are kept.
   const [sources] = useState(() => Object.keys(itemsMapping));
-  const [currentSource, setCurrentSource] = useState<string | undefined>();
-  const [loadResult, setLoadResult] = useState<{
-    sliceCount: number;
-    errorCount: number;
-  }>();
-  const fullyLoaded =
-    !!loadResult &&
-    loadResult.errorCount === 0 &&
-    loadResult.sliceCount === presented.length;
+  const [active, setActive] = useState<ActiveSlice>({});
+  const onCurrentItemChange = useCallback(
+    (source: string | undefined, position?: DicomSlicePosition) =>
+      setActive((state) =>
+        state.source === source &&
+        state.position?.index === position?.index &&
+        state.position?.loadedCount === position?.loadedCount
+          ? state
+          : { source, position }
+      ),
+    []
+  );
+  const [loadResult, setLoadResult] = useState<DicomLoadResult>();
+  const fullyLoaded = showsExactly(loadResult, Object.keys(itemsMapping));
   const disabledReason = !presented.length
     ? 'No images to review'
     : !loadResult
@@ -141,7 +190,15 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
       : !fullyLoaded
         ? 'Not every image of the series could be shown'
         : undefined;
-  const currentImage = currentSource ? itemsMapping[currentSource] : undefined;
+  // Only an image of this Series, at a known position in the loaded volume:
+  // the header, the vote form and the vote request all use this one image.
+  const currentImage = active.source ? itemsMapping[active.source] : undefined;
+  const currentLabel =
+    currentImage && active.position
+      ? sliceLabel(active.position, currentImage.instanceNumber)
+      : undefined;
+  const partiallyLoaded =
+    !!active.position && active.position.loadedCount < presented.length;
   const ownVotes = useMemo(() => countOwnVotes(presented, userId), [presented, userId]);
 
   const renderSidebar = useCallback(
@@ -190,11 +247,21 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
           }}
         >
           <Box height="100%" overflow="auto">
-            <Typography variant="subtitle1" px={1} pt={1}>
-              Review:
+            <Typography variant="subtitle1" px={1} pt={1} data-testid="review-header">
+              Review —{' '}
+              {currentLabel ??
+                (currentImage ? 'locating the slice on screen…' : 'no slice shown yet')}
             </Typography>
+            {partiallyLoaded && (
+              <Typography variant="caption" color="warning.main" px={1} component="div">
+                Only {active.position?.loadedCount} of {presented.length} images
+                of this series are loaded.
+              </Typography>
+            )}
             <Divider />
-            {!!currentImage && <PatientImageReview item={currentImage} />}
+            {!!currentImage && !!currentLabel && (
+              <PatientImageReview item={currentImage} targetLabel={currentLabel} />
+            )}
           </Box>
         </Box>
       )}
@@ -202,7 +269,7 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
         <DicomViewer
           list={sources}
           getRequestHeaders={keycloakAuthHeaders}
-          onCurrentItemChange={setCurrentSource}
+          onCurrentItemChange={onCurrentItemChange}
           onLoadResult={setLoadResult}
           renderSidebar={renderSidebar}
         />
