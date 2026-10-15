@@ -116,3 +116,9 @@ The SSH account should be a dedicated deployment identity with passwordless sudo
 ```
 
 Do not place production application secrets or model data in GitHub Actions.
+
+## Nginx DICOM rate limiting (manual deployment)
+
+- Proposed, repository-owned Nginx snippets: `ops/nginx/conf.d/99-ratelimit.conf` and `ops/nginx/snippets/childbex-dicom-location.conf`.
+- Controlled deployment, verification and rollback: [`docs/operations/dicom-rate-limit.md`](../docs/operations/dicom-rate-limit.md).
+- The main vhost is still server-local/Certbot-managed. These snippets are **not** installed automatically and do not affect `app` or `ml` releases. See #29 and broader ops-source-of-truth work #9.
