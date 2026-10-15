@@ -198,7 +198,9 @@ describe('DicomViewer', () => {
           mockListeners.load({});
         });
 
-        expect(screen.getByText(/DICOM image stack could not be displayed/)).toBeTruthy();
+        expect(
+          screen.getByText(/DICOM image stack could not be displayed/)
+        ).toBeTruthy();
         expect(mockToolsProps?.isDataLoaded).toBe(false);
         expect(mockToolsProps?.isLoadSuccessful).toBe(false);
         expect(onLoadResult).toHaveBeenLastCalledWith({
@@ -208,6 +210,23 @@ describe('DicomViewer', () => {
         });
       }
     );
+
+    it('ignores DWV events emitted synchronously during cleanup', async () => {
+      const onLoadResult = jest.fn();
+      const { unmount } = render(
+        <DicomViewer list={urls} onLoadResult={onLoadResult} />
+      );
+      await waitFor(() => expect(mockLoadURLs).toHaveBeenCalledTimes(1));
+      mockViewLayers = [];
+      mockAbortAllLoads.mockImplementationOnce(() => {
+        mockListeners.loadend({ dataid: '0' });
+        mockListeners.loadabort({ error: new Error('cancelled') });
+      });
+      unmount();
+
+      expect(mockAbortAllLoads).toHaveBeenCalledTimes(1);
+      expect(onLoadResult).not.toHaveBeenCalled();
+    });
 
     it('ignores DWV events delivered after unmount', async () => {
       const onLoadResult = jest.fn();

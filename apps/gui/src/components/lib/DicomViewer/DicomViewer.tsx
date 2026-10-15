@@ -375,7 +375,9 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       // layer exists. Never report a stack as loaded if it cannot be shown:
       // Complete Review requires a verified rendered stack.
       if (!image || !vc) {
-        setLoadStateError('DICOM image stack could not be displayed. Reload this Series.');
+        setLoadStateError(
+          'DICOM image stack could not be displayed. Reload this Series.'
+        );
         setIsDataLoaded(false);
         setIsLoadSuccessful(false);
         setSliceCount(0);
@@ -509,7 +511,10 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   }, [isDataLoaded]);
 
   useEffect(() => {
-    if (onLoadResult && (isDataLoaded || loadErrorEvents.length || loadStateError)) {
+    if (
+      onLoadResult &&
+      (isDataLoaded || loadErrorEvents.length || loadStateError)
+    ) {
       const loadedSources: string[] = [];
       if (isDataLoaded) {
         for (let i = 0; i < sliceCount; i++) {
@@ -573,7 +578,10 @@ export const DicomViewer: FC<DicomViewerProps> = ({
         metaData={currentMetaData}
         calibration={calibration}
         isLoadSuccessful={
-          isDataLoaded && isLoadSuccessful && !loadStateError && !loadErrorEvents.length
+          isDataLoaded &&
+          isLoadSuccessful &&
+          !loadStateError &&
+          !loadErrorEvents.length
         }
         loadErrorEvents={loadErrorEvents}
         onClean={isClean ? onClean : undefined}
