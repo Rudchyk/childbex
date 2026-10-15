@@ -144,9 +144,10 @@ export const PatientImageReview: FC<PatientImageReviewProps> = ({ item, targetLa
                   : 'not marked'}
               </strong>
             </Typography>
-            {/* Keyed by image: unsaved choices never move to another image. */}
+            {/* Keyed by reviewer and image: unsaved choices never move to
+                another image or reviewer. */}
             <PatientImageVote
-              key={item.id}
+              key={`${userId ?? ''}:${item.id}`}
               patientImageId={item.id}
               userVote={userVote}
               targetLabel={targetLabel}

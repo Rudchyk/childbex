@@ -7,6 +7,7 @@ import { DefaultLayout } from '../../layouts';
 import { PageTmpl } from '../../templates';
 import { WithLoader } from '../../hoc';
 import { useGetPatientSeriesQuery } from '../../store/apis';
+import { getErrorMessage } from '../../utils';
 import { ReviewSummaryChips } from '../hierarchy/ReviewSummaryChips';
 import { formatStudyDateTime, seriesTitle } from '../hierarchy/hierarchy.utils';
 import { SeriesImages } from './SeriesImages';
@@ -81,6 +82,10 @@ export const Component = () => {
     currentData?.patient.id === patientId && currentData.series.id === seriesId
       ? currentData
       : undefined;
+  // A failed refetch of this Series keeps its last data (and the viewer,
+  // the slice on screen and unsaved votes); only an initial load error
+  // replaces the content.
+  const refreshFailed = isError && !!data;
   return (
     <DefaultLayout>
       <PageTmpl
@@ -90,10 +95,17 @@ export const Component = () => {
           </Typography>
         }
       >
+        {refreshFailed && (
+          <Alert severity="warning" data-testid="series-refresh-error" sx={{ mb: 2 }}>
+            <AlertTitle>This series could not be refreshed</AlertTitle>
+            {getErrorMessage(error)} You see its last loaded state: recent
+            review changes may not be shown yet.
+          </Alert>
+        )}
         <SeriesContent
           data={data}
           isLoading={!data && isFetching}
-          isError={isError}
+          isError={isError && !data}
           error={error}
         />
       </PageTmpl>

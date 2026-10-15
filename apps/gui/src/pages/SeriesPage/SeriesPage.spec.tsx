@@ -41,7 +41,11 @@ let mockSeriesQuery: {
   currentData?: PatientSeriesResponse;
   isFetching: boolean;
   isError: boolean;
+  error?: unknown;
 } = { isFetching: false, isError: false };
+/** Renders the real review panel (vote form) instead of a stand-in. */
+let mockRealReviewPanel = false;
+const mockAddVote = jest.fn();
 const mockJumpTo = jest.fn();
 const mockComplete = jest.fn();
 const mockBulk = jest.fn();
@@ -87,6 +91,9 @@ jest.mock('../../store/apis', () => ({
   useCompleteSeriesReviewMutation: () => [mockComplete, { isLoading: false }],
   useBulkReviewVoteMutation: () => [mockBulk, { isLoading: false }],
   useGetPatientSeriesQuery: () => mockSeriesQuery,
+  // The real review panel's vote form (when rendered).
+  useAddPatientImageReviewVoteMutation: () => [mockAddVote, { isLoading: false }],
+  useUpdatePatientImageReviewVoteMutation: () => [jest.fn(), { isLoading: false }],
 }));
 jest.mock('react-router-dom', () => ({
   ...jest.requireActual('react-router-dom'),
@@ -108,13 +115,20 @@ jest.mock('../../modules/notifications', () => ({
   useNotifications: () => ({ notifyError: mockNotifyError, notifySuccess: mockNotifySuccess }),
 }));
 jest.mock('./LLMCheckItems', () => ({ LLMCheckItems: () => null }));
-jest.mock('./review/PatientImageReview', () => ({
-  PatientImageReview: ({ item, targetLabel }: { item: { id: string }; targetLabel?: string }) => (
-    <div data-testid="review-panel" data-target-label={targetLabel}>
-      review:{item.id}
-    </div>
-  ),
-}));
+jest.mock('./review/PatientImageReview', () => {
+  const actual = jest.requireActual('./review/PatientImageReview');
+  return {
+    PatientImageReview: (props: { item: { id: string }; targetLabel?: string }) =>
+      mockRealReviewPanel ? (
+        <actual.PatientImageReview {...props} />
+      ) : (
+        <div data-testid="review-panel" data-target-label={props.targetLabel}>
+          review:{props.item.id}
+        </div>
+      ),
+  };
+});
+jest.mock('./review/PatientImageVotes', () => ({ PatientImageVotes: () => null }));
 
 const PATIENT = '11111111-1111-4111-8111-111111111111';
 const SERIES = '55555555-5555-4555-8555-555555555555';
@@ -230,6 +244,7 @@ beforeEach(() => {
   mockCurrentUid = undefined;
   mockParams = {};
   mockSeriesQuery = { isFetching: false, isError: false };
+  mockRealReviewPanel = false;
   jest.clearAllMocks();
 });
 
@@ -561,6 +576,64 @@ describe('Series page', () => {
         renderPage();
         expect(mockViewerProps).toBeUndefined();
         expect(screen.queryByRole('button', { name: /complete review/i })).toBeNull();
+      });
+
+      it('a failed refetch after a vote keeps the Series, the slice on screen and unsaved votes', () => {
+        mockRealReviewPanel = true;
+        mockParams = { patientId: PATIENT, seriesId: SERIES };
+        mockSeriesQuery = { currentData: response(), isFetching: false, isError: false };
+        const { rerender } = renderPage();
+        act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
+        act(() => mockViewerProps?.onCurrentItemChange(url('i3'), { index: 2, loadedCount: 3 }));
+        expect(header()).toBe('Review — Slice 3 / 3 loaded · Instance #3');
+        // Unsaved choice and comment on the slice on screen.
+        fireEvent.click(screen.getByRole('radio', { name: 'Abnormal' }));
+        fireEvent.change(screen.getByRole('textbox', { name: 'Comment' }), {
+          target: { value: 'draft' },
+        });
+
+        // A vote elsewhere invalidated the Series: the refetch runs, then fails.
+        // RTK Query keeps this Series' last data as `currentData`.
+        mockSeriesQuery = { ...mockSeriesQuery, isFetching: true };
+        rerender(<SeriesPage />);
+        mockSeriesQuery = {
+          currentData: mockSeriesQuery.currentData,
+          isFetching: false,
+          isError: true,
+          error: { status: 503, data: { message: 'Service Unavailable.' } },
+        };
+        rerender(<SeriesPage />);
+
+        expect(mockViewerMounts).toBe(1);
+        expect(mockViewerProps?.list).toEqual([url('i2'), url('i1'), url('i3')]);
+        expect(header()).toBe('Review — Slice 3 / 3 loaded · Instance #3');
+        expect((screen.getByRole('radio', { name: 'Abnormal' }) as HTMLInputElement).checked).toBe(true);
+        expect((screen.getByRole('textbox', { name: 'Comment' }) as HTMLTextAreaElement).value).toBe('draft');
+        expect(completeButton().disabled).toBe(false);
+        // Non-destructive: a warning above the kept content.
+        const warning = screen.getByTestId('series-refresh-error');
+        expect(warning.textContent).toContain('could not be refreshed');
+        expect(warning.textContent).toContain('Service Unavailable.');
+
+        // The next successful refetch clears the warning, still the same viewer.
+        mockSeriesQuery = { currentData: response(), isFetching: false, isError: false };
+        rerender(<SeriesPage />);
+        expect(screen.queryByTestId('series-refresh-error')).toBeNull();
+        expect(mockViewerMounts).toBe(1);
+      });
+
+      it('an initial load error is shown instead of the Series', () => {
+        mockParams = { patientId: PATIENT, seriesId: SERIES };
+        mockSeriesQuery = {
+          currentData: undefined,
+          isFetching: false,
+          isError: true,
+          error: { status: 404, data: { message: 'Not found. This series does not exist.' } },
+        };
+        renderPage();
+        expect(screen.getByText('Not found. This series does not exist.')).toBeTruthy();
+        expect(screen.queryByTestId('series-refresh-error')).toBeNull();
+        expect(mockViewerProps).toBeUndefined();
       });
     });
   });

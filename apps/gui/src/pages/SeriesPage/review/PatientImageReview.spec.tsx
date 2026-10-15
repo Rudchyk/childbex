@@ -157,6 +157,29 @@ describe('PatientImageReview vote form', () => {
     expect(commentField().value).toBe('bulk');
   });
 
+  it('a saved vote that disappears resets the form to the Normal default', () => {
+    const { rerender } = render(
+      <PatientImageReview item={image('A', [vote('A', 'abnormal', 'saved')])} targetLabel={LABEL_A} />
+    );
+    fireEvent.change(commentField(), { target: { value: 'unsaved edit' } });
+
+    // Same image, the reviewer's vote is no longer there.
+    rerender(<PatientImageReview item={image('A')} targetLabel={LABEL_A} />);
+    expect(radio('Normal').checked).toBe(true);
+    expect(radio('Abnormal').checked).toBe(false);
+    expect(commentField().value).toBe('');
+
+    // Without a vote, an equivalent refetch keeps new unsaved edits.
+    fireEvent.click(radio('Not sure'));
+    rerender(<PatientImageReview item={image('A')} targetLabel={LABEL_A} />);
+    expect(radio('Not sure').checked).toBe(true);
+
+    // A new vote is a POST again (no stale vote id).
+    fireEvent.click(voteButton());
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockAdd).toHaveBeenCalledWith({ id: 'A', vote: 'uncertain', comment: '' });
+  });
+
   it('changes an existing vote of the image the form belongs to', async () => {
     render(<PatientImageReview item={image('A', [vote('A', 'abnormal', 'x')])} targetLabel={LABEL_A} />);
     fireEvent.click(radio('Not sure'));
@@ -198,7 +221,7 @@ describe('PatientImageReview vote form', () => {
   });
 
   it("the saving state is per image: A's pending vote does not block B, and shows again on A", () => {
-    mockSaving.add('review-vote:A');
+    mockSaving.add('review-vote:sub-me:A');
     const { rerender } = render(<PatientImageReview item={image('A')} targetLabel={LABEL_A} />);
     expect(voteButton().disabled).toBe(true);
 
@@ -207,7 +230,7 @@ describe('PatientImageReview vote form', () => {
 
     rerender(<PatientImageReview item={image('A')} targetLabel={LABEL_A} />);
     expect(voteButton().disabled).toBe(true);
-    expect(mockHookOptions.add).toContainEqual({ fixedCacheKey: 'review-vote:A' });
-    expect(mockHookOptions.add).toContainEqual({ fixedCacheKey: 'review-vote:B' });
+    expect(mockHookOptions.add).toContainEqual({ fixedCacheKey: 'review-vote:sub-me:A' });
+    expect(mockHookOptions.add).toContainEqual({ fixedCacheKey: 'review-vote:sub-me:B' });
   });
 });

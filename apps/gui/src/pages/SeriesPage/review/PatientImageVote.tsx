@@ -16,6 +16,7 @@ import {
   useAddPatientImageReviewVoteMutation,
 } from '../../../store/apis';
 import { getErrorMessage } from '../../../utils';
+import { useAuth } from '../../../auth/useAuth';
 import { opinionLabels } from './reviewOpinions';
 
 interface PatientImageVoteProps {
@@ -29,8 +30,8 @@ interface PatientImageVoteProps {
 }
 
 /**
- * The current reviewer's vote on one image. Render it keyed by the image
- * id: the choice and the unsaved comment belong to that image only.
+ * The current reviewer's vote on one image. Render it keyed by reviewer and
+ * image: the choice and the unsaved comment belong to that pair only.
  */
 export const PatientImageVote: FC<PatientImageVoteProps> = ({
   patientImageId,
@@ -41,9 +42,11 @@ export const PatientImageVote: FC<PatientImageVoteProps> = ({
     userVote?.vote ?? PatientImageReviewVoteTypes.NORMAL
   );
   const [comment, setComment] = useState(userVote?.comment ?? '');
-  // Per image, shared by every mount of its form: a vote still being saved
-  // is shown as pending when the image is shown again.
-  const fixedCacheKey = `review-vote:${patientImageId}`;
+  const { userId } = useAuth();
+  // Per reviewer and image, shared by every mount of its form: a vote still
+  // being saved is shown as pending when the image is shown again, never to
+  // another reviewer and never on another image.
+  const fixedCacheKey = `review-vote:${userId ?? 'anonymous'}:${patientImageId}`;
   const [updatePatientImageReviewVote, updatePatientImageReviewVoteState] =
     useUpdatePatientImageReviewVoteMutation({ fixedCacheKey });
   const [addPatientImageReviewVote, addPatientImageReviewVoteState] =
@@ -76,14 +79,14 @@ export const PatientImageVote: FC<PatientImageVoteProps> = ({
     }
   };
 
-  // Shows the saved vote when it changes (initially, after a save, after a
-  // bulk vote); a refetched copy of the same vote keeps unsaved edits.
+  // Shows the saved vote when it changes (after a save, a bulk vote, or
+  // when it is gone: the Normal default and no comment); a refetched copy
+  // of the same vote keeps unsaved edits.
   const savedVoteId = userVote?.id;
   const savedVote = userVote?.vote;
   const savedComment = userVote?.comment ?? '';
   useEffect(() => {
-    if (!savedVoteId || !savedVote) return;
-    setVote(savedVote);
+    setVote(savedVote ?? PatientImageReviewVoteTypes.NORMAL);
     setComment(savedComment);
   }, [savedVoteId, savedVote, savedComment]);
 
