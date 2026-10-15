@@ -41,7 +41,7 @@ jobs:
         run: npm ci --legacy-peer-deps
 
       - name: Lint, test, build and typecheck
-        run: npx nx run-many -t lint test build typecheck --outputStyle=stream
+        run: NX_DAEMON=false NX_VERBOSE_LOGGING=true npx nx run-many -t lint test build typecheck --parallel=1 --outputStyle=stream --verbose
 
   python:
     name: Python / LLM service
