@@ -1,0 +1,64 @@
+# ChildBEx-specific alert definitions. Install on the central shared Prometheus
+# server only after verifying the metric exists under job="childbex-node".
+# This file is NOT loaded or installed by the ChildBEx app/ML deploy workflow.
+groups:
+  - name: childbex-keycloak-release-monitoring
+    rules:
+      - alert: ChildbexKeycloakUpdateAvailable
+        expr: |
+          keycloak_release_update_available{
+            job="childbex-node",
+            deployment="childbex"
+          } == 1
+        for: 10m
+        labels:
+          severity: warning
+          category: maintenance
+        annotations:
+          summary: "New stable Keycloak version available for ChildBEx"
+          description: "Installed: {{ $labels.installed_version }}; upstream stable: {{ $labels.latest_version }}. Review Keycloak compatibility and plan a tested manual upgrade; no auto-update."
+
+      - alert: ChildbexKeycloakReleaseCheckFailed
+        expr: |
+          keycloak_release_check_success{
+            job="childbex-node",
+            deployment="childbex"
+          } == 0
+        for: 15m
+        labels:
+          severity: warning
+          category: maintenance
+        annotations:
+          summary: "ChildBEx Keycloak release check failed"
+          description: "Cannot check stable Keycloak releases on ChildBEx. Inspect childbex-keycloak-release-check.service and GitHub API reachability."
+
+      - alert: ChildbexKeycloakReleaseCheckStale
+        expr: |
+          time() -
+          keycloak_release_check_timestamp_seconds{
+            job="childbex-node",
+            deployment="childbex"
+          } > 9 * 3600
+        for: 15m
+        labels:
+          severity: warning
+          category: maintenance
+        annotations:
+          summary: "ChildBEx Keycloak release check is stale"
+          description: "No ChildBEx Keycloak release-check attempt in over 9 hours. Inspect its systemd timer and service."
+
+      - alert: ChildbexKeycloakReleaseMetricsMissing
+        expr: |
+          absent(
+            keycloak_release_check_success{
+              job="childbex-node",
+              deployment="childbex"
+            }
+          )
+        for: 30m
+        labels:
+          severity: warning
+          category: maintenance
+        annotations:
+          summary: "ChildBEx Keycloak release-monitoring metrics missing"
+          description: "Prometheus is not receiving ChildBEx Keycloak release-check metrics from the existing node exporter."
