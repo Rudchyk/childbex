@@ -65,6 +65,43 @@ bash -n ops/install/install-keycloak-release-rules.sh
 
 Self-test covers the exact verified multi-line `kc.sh --version` output, invalid/duplicate version responses, mock unprivileged subprocess invocation, version ordering, exclusion of drafts/prereleases, responses over 1 MB, >8 MB rejection, update-available labels, and failure metrics. GitHub Actions Ops job also runs these tests. On shared, additionally validate the rule file with `promtool check rules ops/prometheus/rules/76-childbex-keycloak-release.yml`.
 
+## ChildBEx systemd UID-switch incident and scoped correction (2026-10-16)
+
+The first two *manual* production starts of `childbex-keycloak-release-check.service` failed:
+`CalledProcessError`, `runuser: cannot set user id: Operation not permitted`,
+and `keycloak_release_check_success{deployment="childbex"} 0`.
+The installed timer remained disabled/inactive, and no central Prometheus
+release rules were installed.
+
+Read-only diagnostics showed:
+1. `runuser -u keycloak -- /opt/keycloak/bin/kc.sh --version` returned
+   `Keycloak 26.7.3` in a hardened transient systemd unit.
+2. Calling **the installed Python function** `installed_version()` within a
+   transient oneshot with matching sandbox, `UMask=0077` and `Nice=10`
+   also succeeded.
+3. Repeating the transient Python test with explicit
+   `-p User=root -p Group=root` failed, displaying
+   `runuser: cannot set user id: Operation not permitted`.
+
+The proposed **unit-only correction** omits both `User=root` and
+`Group=root`, which lets systemd use its system-service default root
+identity before the Python subprocess drops privileges through `runuser`.
+All other sandbox restrictions, including `NoNewPrivileges=true`,
+`ProtectSystem=strict` and `ReadWritePaths=`, remain unchanged.
+The real checker still must pass in its **persistent** unit; the successful
+transient tests do not constitute a production rollout PASS.
+
+**Scoped manual update for a previously installed old unit:** verify the
+exact installed unit is byte-for-byte identical to Git revision
+`737cf9eec2a1709ac2ae5e4ae065e715a98150a6:ops/keycloak/childbex-keycloak-release-check.service`.
+Only after this comparison, install the reviewed new unit from the pinned
+PR commit, run `systemd-analyze verify`, `systemctl daemon-reload`, then
+test the existing oneshot manually. Do **not** rerun the fresh-install
+script because it intentionally refuses to overwrite previously installed
+files. Never enable the timer or install central rules if the persistent
+oneshot still fails. Preserve the exact former unit for rollback if
+validation fails.
+
 ## Controlled rollout (separate approval and checkpoints)
 
 **1. ChildBEx host — install only, no activation.** First inspect actual production paths above and make sure no destination already exists. After owner approval, on a verified ChildBEx checkout:
