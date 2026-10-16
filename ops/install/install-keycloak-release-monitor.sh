@@ -15,7 +15,7 @@ service='/etc/systemd/system/childbex-keycloak-release-check.service'
 timer='/etc/systemd/system/childbex-keycloak-release-check.timer'
 textfile_dir='/var/lib/node_exporter/textfile_collector'
 
-for cmd in python3 bash systemctl systemd-analyze install readlink grep cmp rm; do
+for cmd in python3 bash systemctl systemd-analyze install runuser id grep cmp rm; do
   command -v "$cmd" >/dev/null 2>&1 || die "Missing required command: $cmd"
 done
 for file in release-check.py childbex-keycloak-release-check.service childbex-keycloak-release-check.timer; do
@@ -26,8 +26,10 @@ for dest in "$runner" "$service" "$timer"; do
     die "Already installed: $dest. Refusing unreviewed replacement."
 done
 
-[[ -L /opt/keycloak/current ]] ||
-  die "Expected /opt/keycloak/current symlink absent; audit actual ChildBEx layout."
+[[ -f /opt/keycloak/bin/kc.sh && -x /opt/keycloak/bin/kc.sh ]] ||
+  die "Expected executable /opt/keycloak/bin/kc.sh absent; audit actual ChildBEx layout."
+id keycloak >/dev/null 2>&1 || die "Expected Keycloak OS user does not exist."
+[[ -x /usr/sbin/runuser ]] || die "Expected /usr/sbin/runuser absent."
 [[ -d "$textfile_dir" && ! -L "$textfile_dir" ]] ||
   die "Textfile collector directory absent or symlinked: $textfile_dir"
 systemctl is-active --quiet node_exporter.service ||
@@ -38,7 +40,7 @@ systemctl cat node_exporter.service |
 
 echo "==> Offline checker tests"
 python3 -B "$src/release-check.py" --self-test
-echo "==> Verify local Keycloak release path (without contacting Keycloak)"
+echo "==> Verify installed Keycloak version via unprivileged kc.sh --version"
 python3 -B - "$src/release-check.py" <<'PY'
 import runpy, sys
 installed = runpy.run_path(sys.argv[1])["installed_version"]()
