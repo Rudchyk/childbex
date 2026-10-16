@@ -446,6 +446,8 @@ describe('Series page', () => {
       ['an image twice and one missing', loadedAll(['i2', 'i1', 'i1'])],
       ['slices whose source is unknown', { ...loadedAll(['i2', 'i1']), sliceCount: 3 }],
       ['a load error', { ...loadedAll(PRESENTED), errorCount: 1 }],
+      ['a partial load', { ...loadedAll(['i2']), errorCount: 1 }],
+      ['no stack that could be displayed', { ...loadedAll([]), errorCount: 3 }],
     ])('stays disabled when the viewer shows %s, even with the right slice count', (_, result) => {
       renderSeries(response());
       act(() => mockViewerProps?.onLoadResult(result));
