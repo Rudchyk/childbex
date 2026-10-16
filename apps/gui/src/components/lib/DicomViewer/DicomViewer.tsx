@@ -405,23 +405,21 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       }
       onChangeTool(canScroll ? 'Scroll' : 'ZoomAndPan');
       const vals = vc.getCurrentIndex().getValues();
-      if (image) {
-        const geometry = image.getGeometry();
-        const size = geometry.getSize();
-        const sliceCount = size.get(2);
-        const _loadedSlicesMapping: typeof loadedSlicesMapping = {};
-        for (let i = 0; i < sliceCount; i++) {
-          const idxVals = [...vals];
-          idxVals[2] = i;
-          const index = new Index(idxVals);
-          const uid = image.getImageUid(index);
-          _loadedSlicesMapping[i] = uid;
-        }
-        setLoadedSlicesMapping(_loadedSlicesMapping);
-        setCurrentImageId(_loadedSlicesMapping[sliceCount - 1]);
-        setSliceCount(sliceCount);
-        setIsShowDropbox(sliceCount === 0);
+      const geometry = image.getGeometry();
+      const size = geometry.getSize();
+      const sliceCount = size.get(2);
+      const _loadedSlicesMapping: typeof loadedSlicesMapping = {};
+      for (let i = 0; i < sliceCount; i++) {
+        const idxVals = [...vals];
+        idxVals[2] = i;
+        const index = new Index(idxVals);
+        const uid = image.getImageUid(index);
+        _loadedSlicesMapping[i] = uid;
       }
+      setLoadedSlicesMapping(_loadedSlicesMapping);
+      setCurrentImageId(_loadedSlicesMapping[sliceCount - 1]);
+      setSliceCount(sliceCount);
+      setIsShowDropbox(sliceCount === 0);
 
       setIsDataLoaded(true);
     });
@@ -458,10 +456,12 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       }
     });
     app.addEventListener('loaderror', (event: DicomLoadErrorEvent) => {
-      if (isMountedRef.current) setLoadErrorEvents((state) => [...state, event]);
+      if (!isMountedRef.current) return;
+      setLoadErrorEvents((state) => [...state, event]);
     });
     app.addEventListener('loadabort', (event: DicomLoadErrorEvent) => {
-      if (isMountedRef.current) setLoadErrorEvents((state) => [...state, event]);
+      if (!isMountedRef.current) return;
+      setLoadErrorEvents((state) => [...state, event]);
     });
     app.addEventListener('keydown', (event: KeyboardEvent) => {
       if (isMountedRef.current) app.defaultOnKeydown(event);
