@@ -7,8 +7,9 @@ ConditionPathExists=/opt/keycloak/bin/kc.sh
 
 [Service]
 Type=oneshot
-User=root
-Group=root
+# No explicit User=root/Group=root: the privileged oneshot runs as root
+# by systemd default, then runuser enters the unprivileged keycloak account.
+# Explicit root identity plus sandboxing reproduced "cannot set user id".
 ExecStart=/usr/local/sbin/childbex-keycloak-release-check
 TimeoutStartSec=45s
 UMask=0077
