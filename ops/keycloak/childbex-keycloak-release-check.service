@@ -1,0 +1,30 @@
+[Unit]
+Description=ChildBEx Keycloak stable release check for Prometheus
+Documentation=https://github.com/Rudchyk/childbex
+Wants=network-online.target
+After=network-online.target
+ConditionPathIsSymbolicLink=/opt/keycloak/current
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/childbex-keycloak-release-check
+TimeoutStartSec=45s
+UMask=0077
+
+# Read-only access to the existing Keycloak release symlink.
+# Only the dedicated Node Exporter textfile directory may be written.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/opt/keycloak
+ReadWritePaths=/var/lib/node_exporter/textfile_collector
+Nice=10
