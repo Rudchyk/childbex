@@ -88,3 +88,6 @@ jobs:
           bash -n ops/deploy/childbex-app-deploy
           bash -n ops/deploy/childbex-ml-deploy
           bash -n ops/install/install-production-deploy.sh
+          bash -n ops/install/install-keycloak-release-monitor.sh
+          bash -n ops/install/install-keycloak-release-rules.sh
+          python3 -B ops/keycloak/release-check.py --self-test
