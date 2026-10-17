@@ -40,7 +40,14 @@ export const HeadProvider: FC<HelmetProviderProps> = ({ children }) => {
       <link rel="icon" type="image/svg+xml" href="favicon.svg" />
       <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       <meta name="apple-mobile-web-app-title" content={manifest.short_name} />
-      <link rel="manifest" href="/manifest.json" />
+      {/* Browsers fetch the manifest without cookies unless asked to: the
+          Cloudflare Access session cookie must go with it, or Access
+          redirects it to the (cross-origin) login and CORS blocks it. */}
+      <link
+        rel="manifest"
+        href="/manifest.json"
+        crossOrigin="use-credentials"
+      />
       {manifest.icons.map(({ sizes, type, src }) => (
         <link
           key={src + type}
