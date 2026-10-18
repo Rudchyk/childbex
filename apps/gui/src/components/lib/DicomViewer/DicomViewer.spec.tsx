@@ -4,6 +4,7 @@
  * lengths by their real calibration and renders at the display's pixel
  * ratio. dwv itself (canvas rendering) is replaced by a fake App.
  */
+import { useState } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { DicomViewer } from './DicomViewer';
 
@@ -13,6 +14,7 @@ const mockAbortAllLoads = jest.fn();
 const mockSetTool = jest.fn();
 const mockSetToolFeatures = jest.fn();
 const mockFitToContainer = jest.fn();
+const mockResetZoomPan = jest.fn();
 const mockDefaultOnKeydown = jest.fn();
 /** Listeners the viewer registered on the (fake) dwv App, by event. */
 const mockListeners: Record<string, (event: unknown) => void> = {};
@@ -59,6 +61,7 @@ jest.mock('dwv', () => ({
     abortAllLoads: mockAbortAllLoads,
     onResize: jest.fn(),
     fitToContainer: mockFitToContainer,
+    resetZoomPan: mockResetZoomPan,
     defaultOnKeydown: mockDefaultOnKeydown,
     getStyle: () => mockStyle,
     setTool: mockSetTool,
@@ -85,10 +88,12 @@ jest.mock('dwv', () => ({
 jest.mock('./DicomViewerTools', () => ({
   DicomViewerTools: (props: typeof mockToolsProps) => {
     mockToolsProps = props;
-    return null;
+    return <div data-testid="viewer-tools" />;
   },
 }));
-jest.mock('./DicomViewerSidebar', () => ({ DicomViewerSidebar: () => null }));
+jest.mock('./DicomViewerSidebar', () => ({
+  DicomViewerSidebar: () => <div data-testid="default-sidebar" />,
+}));
 jest.mock('./DicomViewerFooter', () => ({ DicomViewerFooter: () => null }));
 jest.mock('./DicomViewerDropbox', () => ({ DicomViewerDropbox: () => null }));
 
@@ -432,6 +437,152 @@ describe('DicomViewer', () => {
     });
   });
 
+  describe('custom slice list', () => {
+    /** Counts its mounts and keeps local state (e.g. a selection). */
+    let probeMounts = 0;
+    const Probe = ({ label }: { label: string }) => {
+      const [state] = useState(() => ++probeMounts);
+      return <div data-testid="custom-sidebar">{`${label}:${state}`}</div>;
+    };
+    beforeEach(() => {
+      probeMounts = 0;
+    });
+
+    it('stays mounted when its render function changes (e.g. collapsed)', () => {
+      const { rerender } = render(
+        <DicomViewer list={urls} renderSidebar={() => <Probe label="expanded" />} />
+      );
+      rerender(<DicomViewer list={urls} renderSidebar={() => <Probe label="collapsed" />} />);
+      rerender(<DicomViewer list={urls} renderSidebar={() => <Probe label="expanded" />} />);
+      expect(screen.getByTestId('custom-sidebar').textContent).toBe('expanded:1');
+      expect(probeMounts).toBe(1);
+      expect(jest.requireMock('dwv').App).toHaveBeenCalledTimes(1);
+    });
+
+    const flexDirection = () =>
+      getComputedStyle(screen.getByTestId('dicom-viewport-row')).flexDirection;
+
+    /** CSS order of each slot of the viewport row. */
+    const slotOrder = (testId: string) => getComputedStyle(screen.getByTestId(testId)).order;
+
+    it('sits next to the viewport by default, not over it', () => {
+      render(<DicomViewer list={urls} renderSidebar={() => <Probe label="list" />} />);
+      const viewport = screen.getByTestId('dicom-viewport');
+      const row = screen.getByTestId('dicom-viewport-row');
+      expect(row.contains(screen.getByTestId('custom-sidebar'))).toBe(true);
+      expect(viewport.contains(screen.getByTestId('custom-sidebar'))).toBe(false);
+      expect(flexDirection()).toBe('row');
+      expect(screen.queryByTestId('default-sidebar')).toBeNull();
+    });
+
+    it('centres the toolbar over the viewport only, between the two panels', () => {
+      render(
+        <DicomViewer
+          list={urls}
+          toolbar={<div data-testid="custom-toolbar" />}
+          leadingPanel={<div data-testid="leading-panel" />}
+          renderSidebar={() => <Probe label="list" />}
+        />
+      );
+      const main = screen.getByTestId('dicom-viewer-main');
+      // The toolbar's column is exactly the viewport's column...
+      expect(main.contains(screen.getByTestId('viewer-tools'))).toBe(true);
+      expect(main.contains(screen.getByTestId('custom-toolbar'))).toBe(true);
+      expect(main.contains(screen.getByTestId('dicom-viewport'))).toBe(true);
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport')).width).toBe('100%');
+      // ...and the panels are outside it, on both sides.
+      expect(main.contains(screen.getByTestId('leading-panel'))).toBe(false);
+      expect(main.contains(screen.getByTestId('custom-sidebar'))).toBe(false);
+      expect(getComputedStyle(main).flexGrow).toBe('1');
+      expect([slotOrder('dicom-viewer-leading'), slotOrder('dicom-viewer-main'), slotOrder('dicom-viewer-sidebar')]).toEqual(['0', '1', '2']);
+      // Panels are as high as the toolbar and viewport (stretched, no own height).
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport-row')).height).toBe('');
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport-row')).alignItems).not.toBe('flex-start');
+    });
+
+    it('below: viewport first, then the sidebar, then the leading panel; nothing remounts', () => {
+      const LeadingProbe = () => {
+        const [state] = useState(() => ++probeMounts);
+        return <div data-testid="leading-panel">{state}</div>;
+      };
+      const view = (placement: 'beside' | 'below') => (
+        <DicomViewer
+          list={urls}
+          leadingPanel={<LeadingProbe />}
+          renderSidebar={() => <Probe label="list" />}
+          sidebarPlacement={placement}
+        />
+      );
+      const { rerender } = render(view('beside'));
+      rerender(view('below'));
+      expect(flexDirection()).toBe('column');
+      expect([slotOrder('dicom-viewer-main'), slotOrder('dicom-viewer-sidebar'), slotOrder('dicom-viewer-leading')]).toEqual(['1', '2', '3']);
+      // The toolbar is still centred over the (now full-width) viewport.
+      expect(screen.getByTestId('dicom-viewer-main').contains(screen.getByTestId('viewer-tools'))).toBe(true);
+      rerender(view('beside'));
+      expect(flexDirection()).toBe('row');
+      expect(probeMounts).toBe(2); // one sidebar, one leading panel: never remounted
+      expect(jest.requireMock('dwv').App).toHaveBeenCalledTimes(1);
+    });
+
+    it('goes below a full-width viewport on request, without remounting', () => {
+      const { rerender } = render(
+        <DicomViewer list={urls} renderSidebar={() => <Probe label="list" />} />
+      );
+      rerender(
+        <DicomViewer
+          list={urls}
+          renderSidebar={() => <Probe label="list" />}
+          sidebarPlacement="below"
+        />
+      );
+      expect(flexDirection()).toBe('column');
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport')).width).toBe('100%');
+      rerender(
+        <DicomViewer
+          list={urls}
+          renderSidebar={() => <Probe label="list" />}
+          sidebarPlacement="beside"
+        />
+      );
+      expect(flexDirection()).toBe('row');
+      expect(probeMounts).toBe(1);
+      expect(jest.requireMock('dwv').App).toHaveBeenCalledTimes(1);
+      expect(mockLoadURLs.mock.calls.length).toBeLessThanOrEqual(1);
+    });
+
+    it('without one, the viewport is full width with the default file list (DWV page)', () => {
+      render(<DicomViewer list={urls} />);
+      expect(flexDirection()).toBe('column');
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport')).width).toBe('100%');
+      expect(screen.getByTestId('default-sidebar')).toBeTruthy();
+      // No panel slots: the toolbar is centred over the full-width viewport.
+      expect(screen.queryByTestId('dicom-viewer-leading')).toBeNull();
+      expect(screen.queryByTestId('dicom-viewer-sidebar')).toBeNull();
+      expect(screen.getByTestId('dicom-viewer-main').contains(screen.getByTestId('viewer-tools'))).toBe(true);
+    });
+
+    it('is still rendered on small screens; the default file list is not', () => {
+      // Every media query matches: the smallest breakpoint.
+      window.matchMedia = jest.fn().mockImplementation((query: string) => ({
+        matches: true,
+        media: query,
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+        addListener: jest.fn(),
+        removeListener: jest.fn(),
+      })) as never;
+      const { unmount } = render(
+        <DicomViewer list={urls} renderSidebar={() => <Probe label="list" />} />
+      );
+      expect(screen.getByTestId('custom-sidebar')).toBeTruthy();
+      unmount();
+
+      render(<DicomViewer list={urls} />);
+      expect(screen.queryByTestId('default-sidebar')).toBeNull();
+    });
+  });
+
   describe('display resolution', () => {
     const sizeViewport = (width: number, height: number) => {
       jest.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(width);
@@ -452,6 +603,48 @@ describe('DicomViewer', () => {
       expect(drawToolStyle.applyZoomScale(6)).toEqual({ x: 12, y: 12 });
       expect(drawToolStyle.getStrokeWidth()).toBe(4);
       expect(screen.getByTestId('dicom-viewport')).toBeTruthy();
+    });
+
+    it('refits in place when the viewport is resized (e.g. a side panel collapsed)', async () => {
+      let resize: () => void = () => undefined;
+      (window as { ResizeObserver?: unknown }).ResizeObserver = jest
+        .fn()
+        .mockImplementation((callback: () => void) => {
+          resize = () => act(() => callback());
+          return { observe: jest.fn(), disconnect: jest.fn() };
+        });
+      try {
+        sizeViewport(800, 600);
+        setPixelRatio(2);
+        const { App } = jest.requireMock('dwv');
+        render(<DicomViewer list={urls} />);
+        await waitFor(() => expect(mockLoadURLs).toHaveBeenCalledTimes(1));
+        act(() => mockListeners.loadend({ dataid: '0' }));
+        const toolCalls = mockSetTool.mock.calls.length;
+        const fits = mockFitToContainer.mock.calls.length;
+        expect(fits).toBeGreaterThan(0);
+
+        // The viewport gets the width of a collapsed panel.
+        sizeViewport(1070, 600);
+        resize();
+
+        const container = document.getElementById('layerGroup0') as HTMLElement;
+        expect(container.style.width).toBe('2140px');
+        expect(container.style.height).toBe('1200px');
+        expect(container.style.transform).toBe('scale(0.5)');
+        expect(mockFitToContainer).toHaveBeenCalledTimes(fits + 1);
+        // dwv keeps zoom/pan relative to the fit: nothing resets them, the
+        // tool, the drawings or the loaded data.
+        expect(mockResetZoomPan).not.toHaveBeenCalled();
+        expect(mockReset).not.toHaveBeenCalled();
+        expect(mockAbortAllLoads).not.toHaveBeenCalled();
+        expect(mockSetTool).toHaveBeenCalledTimes(toolCalls);
+        expect(mockLoadURLs).toHaveBeenCalledTimes(1);
+        expect(App).toHaveBeenCalledTimes(1);
+        expect(mockToolsProps?.isDataLoaded).toBe(true);
+      } finally {
+        delete (window as { ResizeObserver?: unknown }).ResizeObserver;
+      }
     });
 
     it('keeps CSS pixels on standard displays and with touch input', () => {

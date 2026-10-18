@@ -102,6 +102,17 @@ interface DicomViewerProps {
   /** Replaces the default file list (e.g. a selectable slice list). */
   renderSidebar?: (props: DicomViewerSidebarRenderProps) => ReactNode;
   /**
+   * A panel on the other side of the viewport (e.g. a review form): left
+   * of it when beside, after the sidebar when below.
+   */
+  leadingPanel?: ReactNode;
+  /**
+   * Where `leadingPanel` and `renderSidebar` go: next to the toolbar and
+   * viewport (as high as both) or below them (e.g. where the viewport would
+   * be too narrow otherwise).
+   */
+  sidebarPlacement?: 'beside' | 'below';
+  /**
    * Called when loading `list` ended or failed: the slices in the loaded
    * volume, the load errors so far and which `list` entries the slices are
    * (to tell whether everything in `list` is actually shown).
@@ -180,6 +191,8 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   toolbar,
   sidebarItemIcon,
   renderSidebar,
+  leadingPanel,
+  sidebarPlacement = 'beside',
   onLoadResult,
 }) => {
   /** The viewport (CSS size). */
@@ -216,6 +229,9 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   >({});
   const [calibration, setCalibration] = useState<LengthCalibration>();
   const [currentImageId, setCurrentImageId] = useState<string | undefined>();
+  /** Custom panels next to the viewport (without any: full width). */
+  const panelsBeside =
+    (!!renderSidebar || !!leadingPanel) && sidebarPlacement === 'beside';
 
   const onChangeTool = (tool: string) => {
     if (appRef.current) {
@@ -567,63 +583,97 @@ export const DicomViewer: FC<DicomViewerProps> = ({
         <LinearProgress variant="determinate" value={loadProgress} />
       )}
       {loadStateError && <Alert severity="error">{loadStateError}</Alert>}
-      <DicomViewerTools
-        tools={VIEWER_TOOLS}
-        selectedTool={selectedTool}
-        onChangeTool={onChangeTool}
-        onReset={onReset}
-        onActualPixels={onActualPixels}
-        canRunTool={canRunTool}
-        isDataLoaded={isDataLoaded}
-        metaData={currentMetaData}
-        calibration={calibration}
-        isLoadSuccessful={
-          isDataLoaded &&
-          isLoadSuccessful &&
-          !loadStateError &&
-          !loadErrorEvents.length
-        }
-        loadErrorEvents={loadErrorEvents}
-        onClean={isClean ? onClean : undefined}
-      />
-      {toolbar}
-      <Box
-        ref={viewportRef}
-        data-testid="dicom-viewport"
-        sx={{
-          position: 'relative',
-          height: VIEWPORT_HEIGHT,
-          width: '100%',
-          overflow: 'hidden',
-          bgcolor: 'common.black',
-        }}
+      {/*
+        Custom panels sit on both sides of the toolbar and viewport (or below
+        them) and are always rendered: they keep their state when the
+        placement changes, and the viewport takes the width they leave (e.g.
+        when one is collapsed; dwv refits in place on the resize). The
+        toolbar is centred over the viewport only.
+      */}
+      <Stack
+        data-testid="dicom-viewport-row"
+        direction={panelsBeside ? 'row' : 'column'}
+        spacing={panelsBeside ? 1 : 2}
+        useFlexGap
       >
-        <div
-          ref={containerRef}
-          id="layerGroup0"
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            width: layout?.width ?? '100%',
-            height: layout?.height ?? '100%',
-            transform: layout ? `scale(${layout.scale})` : undefined,
-            transformOrigin: '0 0',
-          }}
-        />
-        <DicomViewerDropbox isShow={isShowDropbox} onLoadFiles={onLoadFiles} />
-      </Box>
-      {!matches &&
-        (renderSidebar ? (
-          renderSidebar({ items, currentImageId, jumpTo })
-        ) : (
-          <DicomViewerSidebar
-            currentImageId={currentImageId}
-            items={items}
-            icon={sidebarItemIcon}
-            onJumpTo={jumpTo}
+        {!!leadingPanel && (
+          <Box
+            data-testid="dicom-viewer-leading"
+            sx={{ display: 'flex', flexShrink: 0, order: panelsBeside ? 0 : 3 }}
+          >
+            {leadingPanel}
+          </Box>
+        )}
+        <Stack
+          data-testid="dicom-viewer-main"
+          spacing={2}
+          sx={{ flex: panelsBeside ? 1 : undefined, minWidth: 0, order: 1 }}
+        >
+          <DicomViewerTools
+            tools={VIEWER_TOOLS}
+            selectedTool={selectedTool}
+            onChangeTool={onChangeTool}
+            onReset={onReset}
+            onActualPixels={onActualPixels}
+            canRunTool={canRunTool}
+            isDataLoaded={isDataLoaded}
+            metaData={currentMetaData}
+            calibration={calibration}
+            isLoadSuccessful={
+              isDataLoaded &&
+              isLoadSuccessful &&
+              !loadStateError &&
+              !loadErrorEvents.length
+            }
+            loadErrorEvents={loadErrorEvents}
+            onClean={isClean ? onClean : undefined}
           />
-        ))}
+          {toolbar}
+          <Box
+            ref={viewportRef}
+            data-testid="dicom-viewport"
+            sx={{
+              position: 'relative',
+              height: VIEWPORT_HEIGHT,
+              width: '100%',
+              minWidth: 0,
+              overflow: 'hidden',
+              bgcolor: 'common.black',
+            }}
+          >
+            <div
+              ref={containerRef}
+              id="layerGroup0"
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                width: layout?.width ?? '100%',
+                height: layout?.height ?? '100%',
+                transform: layout ? `scale(${layout.scale})` : undefined,
+                transformOrigin: '0 0',
+              }}
+            />
+            <DicomViewerDropbox isShow={isShowDropbox} onLoadFiles={onLoadFiles} />
+          </Box>
+        </Stack>
+        {!!renderSidebar && (
+          <Box
+            data-testid="dicom-viewer-sidebar"
+            sx={{ display: 'flex', flexShrink: 0, order: 2 }}
+          >
+            {renderSidebar({ items, currentImageId, jumpTo })}
+          </Box>
+        )}
+      </Stack>
+      {!matches && !renderSidebar && (
+        <DicomViewerSidebar
+          currentImageId={currentImageId}
+          items={items}
+          icon={sidebarItemIcon}
+          onJumpTo={jumpTo}
+        />
+      )}
       <DicomViewerFooter />
     </Stack>
   );

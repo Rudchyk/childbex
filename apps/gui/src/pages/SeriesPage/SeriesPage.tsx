@@ -100,7 +100,9 @@ export const Component = () => {
     series: data?.series,
   });
   return (
-    <DefaultLayout breadcrumbs={breadcrumbs}>
+    // Full width: the review workspace (viewer and side panels) uses the
+    // whole window, and a collapsed panel gives its width to the viewer.
+    <DefaultLayout breadcrumbs={breadcrumbs} slotProps={{ ContainerProps: { maxWidth: false } }}>
       <PageTmpl
         customTitle={
           <Typography component="h1" variant="h3">

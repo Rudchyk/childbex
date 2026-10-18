@@ -182,18 +182,31 @@ export const SeriesSliceList: FC<SeriesSliceListProps> = ({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(FALLBACK_HEIGHT);
+  /** Counts the times the list was shown again after being hidden. */
+  const [shownCount, setShownCount] = useState(0);
 
   useEffect(() => {
     const element = scrollRef.current;
     if (!element || typeof ResizeObserver === 'undefined') return;
+    let visible = !!element.clientHeight;
     const observer = new ResizeObserver(() => {
-      if (element.clientHeight) setViewportHeight(element.clientHeight);
+      if (!element.clientHeight) {
+        // Hidden (e.g. its panel collapsed): the browser drops the scroll
+        // position, so it is read again once shown.
+        visible = false;
+        return;
+      }
+      setViewportHeight(element.clientHeight);
+      setScrollTop(element.scrollTop);
+      if (!visible) setShownCount((count) => count + 1);
+      visible = true;
     });
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
 
-  // Keep the active slice visible (scrolling through the stack).
+  // Keep the active slice visible (scrolling through the stack, and when
+  // the list is shown again).
   const activePosition = useMemo(
     () => rows.findIndex(({ id }) => id === activeId),
     [rows, activeId]
@@ -206,7 +219,7 @@ export const SeriesSliceList: FC<SeriesSliceListProps> = ({
       element.scrollTop = Math.max(0, top - element.clientHeight / 2);
       setScrollTop(element.scrollTop);
     }
-  }, [activePosition]);
+  }, [activePosition, shownCount]);
 
   const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const last = Math.min(
