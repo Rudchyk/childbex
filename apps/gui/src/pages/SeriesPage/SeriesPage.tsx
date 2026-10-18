@@ -10,6 +10,8 @@ import { useGetPatientSeriesQuery } from '../../store/apis';
 import { getErrorMessage } from '../../utils';
 import { ReviewSummaryChips } from '../hierarchy/ReviewSummaryChips';
 import { formatStudyDateTime, seriesTitle } from '../hierarchy/hierarchy.utils';
+import { seriesPageCrumbs } from '../hierarchy/hierarchyBreadcrumbs';
+import { useBreadcrumbPatient } from '../hierarchy/useBreadcrumbPatient';
 import { SeriesImages } from './SeriesImages';
 
 const BrokenImages: FC<{ data: PatientSeriesResponse }> = ({ data }) => {
@@ -67,8 +69,13 @@ export const SeriesContent = WithLoader<PatientSeriesResponse>(({ data }) => {
 });
 
 export const Component = () => {
-  const { patientId = '', seriesId = '' } = useParams<{
+  const {
+    patientId = '',
+    studyId = '',
+    seriesId = '',
+  } = useParams<{
     patientId: string;
+    studyId: string;
     seriesId: string;
   }>();
   const { currentData, isFetching, isError, error } = useGetPatientSeriesQuery(
@@ -86,8 +93,21 @@ export const Component = () => {
   // the slice on screen and unsaved votes); only an initial load error
   // replaces the content.
   const refreshFailed = isError && !!data;
+  // The patient's name (the Series carries only the patient's slug). The
+  // Series' slug links the patient while its name loads or fails to, but
+  // never once the patient is confirmed missing (e.g. deleted since).
+  const { patient, missing: patientMissing } = useBreadcrumbPatient(patientId);
+  const breadcrumbs = seriesPageCrumbs({
+    patientId,
+    studyId,
+    patient: patientMissing
+      ? undefined
+      : { name: patient?.name, slug: data?.patient.slug ?? patient?.slug },
+    study: data?.study,
+    series: data?.series,
+  });
   return (
-    <DefaultLayout>
+    <DefaultLayout breadcrumbs={breadcrumbs}>
       <PageTmpl
         customTitle={
           <Typography component="h1" variant="h3">

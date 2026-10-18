@@ -1,19 +1,9 @@
 import {
   LoaderFunctionArgs,
-  Outlet,
   createBrowserRouter,
   redirect,
 } from 'react-router-dom';
-import ErrorPage from '../pages/ErrorPage/ErrorPage';
-import { LoaderData } from '../types';
-import { guiRoutes } from '@libs/constants';
-import { ProtectedRoute } from '../auth/ProtectedRoute';
-
-const defaultOptions = {
-  handle: {
-    crumb: (data: LoaderData) => data,
-  },
-};
+import { appRoutes } from './appRoutes';
 
 export async function requireAuth({ request }: LoaderFunctionArgs) {
   if (!window.keycloak?.authenticated) {
@@ -22,101 +12,4 @@ export async function requireAuth({ request }: LoaderFunctionArgs) {
   return null;
 }
 
-export default createBrowserRouter([
-  {
-    element: <Outlet />,
-    errorElement: <ErrorPage />,
-    ...defaultOptions,
-    children: [
-      {
-        index: true,
-        loader: () => ({ title: '' }),
-        lazy: () => import('../pages/HomePage/HomePage'),
-        ...defaultOptions,
-      },
-      {
-        path: guiRoutes.about,
-        lazy: () => import('../pages/AboutPage/AboutPage'),
-        ...defaultOptions,
-      },
-      {
-        loader: () => ({ title: 'Brief' }),
-        path: guiRoutes.brief,
-        lazy: () => import('../pages/BriefPage/BriefPage'),
-        ...defaultOptions,
-      },
-      {
-        loader: () => ({ title: 'Playground' }),
-        path: guiRoutes.playground,
-        lazy: () => import('../pages/PlaygroundPage/PlaygroundPage'),
-        ...defaultOptions,
-      },
-      {
-        path: guiRoutes.contacts,
-        lazy: () => import('../pages/ContactsPage/ContactsPage'),
-        ...defaultOptions,
-      },
-      {
-        loader: () => ({ title: 'Dashboard' }),
-        path: guiRoutes.dashboard,
-        lazy: () => import('../pages/DashboardPage/DashboardPage'),
-        ...defaultOptions,
-      },
-      {
-        loader: () => ({ title: 'Dicom Viewer' }),
-        path: guiRoutes.dwv,
-        lazy: () => import('../pages/DWVPage/DWVPage'),
-        ...defaultOptions,
-      },
-      {
-        path: guiRoutes.error,
-        lazy: () =>
-          import('../pages/ClientExpectedErrorPage/ClientExpectedErrorPage'),
-        ...defaultOptions,
-      },
-      {
-        path: guiRoutes.llm,
-        lazy: () => import('../pages/LLMPage/LLMPage'),
-        ...defaultOptions,
-      },
-      {
-        element: (
-          <ProtectedRoute>
-            <Outlet />
-          </ProtectedRoute>
-        ),
-        // loader: requireAuth,
-        children: [
-          {
-            loader: () => ({ title: 'Patients' }),
-            path: guiRoutes.patients,
-            lazy: () => import('../pages/PatientsPage/PatientsPage'),
-            ...defaultOptions,
-          },
-          {
-            // loader: ({ params }) => ({ title: startCase(params[SERVICE_ID_KEY]) }),
-            path: guiRoutes.patient,
-            lazy: () => import('../pages/PatientPage/PatientPage'),
-            ...defaultOptions,
-          },
-          {
-            path: guiRoutes.patientStudy,
-            lazy: () => import('../pages/StudyPage/StudyPage'),
-            ...defaultOptions,
-          },
-          {
-            path: guiRoutes.patientSeries,
-            lazy: () => import('../pages/SeriesPage/SeriesPage'),
-            ...defaultOptions,
-          },
-          {
-            // Old bookmarks of the removed cluster page: a notice, no redirect.
-            path: guiRoutes.legacyClusterPage,
-            lazy: () => import('../pages/LegacyClusterPage/LegacyClusterPage'),
-            ...defaultOptions,
-          },
-        ],
-      },
-    ],
-  },
-]);
+export default createBrowserRouter(appRoutes);

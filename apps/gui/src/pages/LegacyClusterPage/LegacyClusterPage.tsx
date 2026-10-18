@@ -23,7 +23,12 @@ export const LegacyClusterNotice = () => {
 };
 
 export const Component = () => (
-  <DefaultLayout>
+  <DefaultLayout
+    breadcrumbs={[
+      { label: 'Patients', to: guiRoutes.patients },
+      { label: 'Page no longer exists' },
+    ]}
+  >
     <PageTmpl>
       <LegacyClusterNotice />
     </PageTmpl>

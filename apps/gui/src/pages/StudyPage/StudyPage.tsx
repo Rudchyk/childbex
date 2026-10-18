@@ -21,6 +21,8 @@ import { WithLoader } from '../../hoc';
 import { useGetStudySeriesQuery } from '../../store/apis';
 import { ReviewSummaryChips } from '../hierarchy/ReviewSummaryChips';
 import { formatStudyDateTime, seriesTitle } from '../hierarchy/hierarchy.utils';
+import { studyPageCrumbs } from '../hierarchy/hierarchyBreadcrumbs';
+import { useBreadcrumbPatient } from '../hierarchy/useBreadcrumbPatient';
 
 interface StudySeriesListProps {
   patientId: string;
@@ -80,8 +82,15 @@ export const Component = () => {
     { patientId, studyId },
     { skip: !patientId || !studyId }
   );
+  // The patient's name and slug (the Patient page is addressed by slug).
+  const { patient } = useBreadcrumbPatient(patientId);
+  // Only the Study of the URL, never the previous one.
+  const breadcrumbs = studyPageCrumbs({
+    patient,
+    study: data?.study.id === studyId ? data.study : undefined,
+  });
   return (
-    <DefaultLayout>
+    <DefaultLayout breadcrumbs={breadcrumbs}>
       <PageTmpl customTitle={<StudyTitle data={data} />}>
         <StudySeriesList
           patientId={patientId}
