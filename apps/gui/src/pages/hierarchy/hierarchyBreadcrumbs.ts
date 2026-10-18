@@ -49,28 +49,29 @@ export const studyPageCrumbs = ({
 
 export const seriesPageCrumbs = ({
   patientId,
-  studyId,
+  patientMissing = false,
   patient,
   study,
   series,
 }: {
   patientId: string;
-  /** The URL's study id: the Study route is known before the data. */
-  studyId: string;
+  /** The patient is confirmed not to exist: nothing of it is linked. */
+  patientMissing?: boolean;
   patient?: Partial<PatientInfo>;
+  /**
+   * The Study of the loaded Series of the URL (the server checked it is the
+   * patient's): the Study is linked only from it, never from URL params.
+   */
   study?: StudyInfo;
   series?: SeriesInfo;
 }): BreadcrumbItem[] => [
   patientsCrumb,
-  patientCrumb(patient),
+  patientCrumb(patientMissing ? undefined : patient),
   {
     label: studyLabel(study),
     to:
-      patientId && (study?.id || studyId)
-        ? generatePath(guiRoutes.patientStudy, {
-            patientId,
-            studyId: study?.id || studyId,
-          })
+      !patientMissing && study
+        ? generatePath(guiRoutes.patientStudy, { patientId, studyId: study.id })
         : undefined,
   },
   { label: series ? seriesTitle(series) : 'Series' },

@@ -85,8 +85,12 @@ let requests: string[] = [];
 /** Answers that replace a URL's response (e.g. a 404). */
 let failures: Record<string, unknown> = {};
 
+/** URLs whose requests stay pending (never answered). */
+let held = new Set<string>();
+
 const fakeBaseQuery: BaseQueryFn<string, unknown, unknown> = async (url) => {
   requests.push(url);
+  if (held.has(url)) return new Promise(() => undefined);
   if (failures[url]) return { error: failures[url] };
   return { data: responses[url] };
 };
@@ -147,10 +151,20 @@ const tree = (url: string, store: ReturnType<typeof makeStore>) => (
     </MemoryRouter>
   </Provider>
 );
-const makeStore = () =>
+const createStore = () =>
   configureStore({
     reducer: { [mockApi.reducerPath]: mockApi.reducer },
     middleware: (getDefault) => getDefault().concat(mockApi.middleware),
+  });
+let lastStore: ReturnType<typeof createStore>;
+const makeStore = () => (lastStore = createStore());
+/** Waits until the patient request of the last store was answered. */
+const patientSettled = () =>
+  waitFor(() => {
+    const query = mockApi.endpoints.getPatient.select({ id: PATIENT })(
+      lastStore.getState()
+    );
+    expect(query.isSuccess || query.isError).toBe(true);
   });
 
 const nav = () => screen.getByRole('navigation', { name: 'breadcrumb' });
@@ -160,6 +174,7 @@ const requestsOf = (url: string) => requests.filter((r) => r === url).length;
 beforeEach(() => {
   requests = [];
   failures = {};
+  held = new Set();
 });
 
 describe('breadcrumb patient requests', () => {
@@ -171,6 +186,10 @@ describe('breadcrumb patient requests', () => {
     act(() => navigate(seriesUrl));
     await screen.findByText('#3 CT Abdomen');
     expect(within(nav()).getByRole('link', { name: 'Test Patient A' })).toBeTruthy();
+    // A valid Series links its Study (from the Series' validated Study).
+    expect(
+      within(nav()).getByRole('link', { name: 'Study 2026-01-02 10:15' }).getAttribute('href')
+    ).toBe(studyUrl);
 
     // Back to the Study through its breadcrumb.
     fireEvent.click(within(nav()).getByRole('link', { name: 'Study 2026-01-02 10:15' }));
@@ -186,17 +205,65 @@ describe('breadcrumb patient requests', () => {
     failures[patientUrl] = { status: 404, data: { message: 'Not found' } };
     render(tree(seriesUrl, makeStore()));
     await screen.findByText('#3 CT Abdomen');
-    await waitFor(() => expect(requestsOf(patientUrl)).toBe(1));
+    await patientSettled();
+    expect(requestsOf(patientUrl)).toBe(1);
     await waitFor(() => expect(patientCrumb().textContent).toBe('Patient'));
     // The Series' slug would lead to a patient page that no longer exists.
     expect(patientCrumb().querySelector('a')).toBeNull();
+  });
+
+  it('cached Series data and a patient 404: neither the patient nor the Study is linked', async () => {
+    failures[patientUrl] = { status: 404, data: { message: 'Not found' } };
+    const store = makeStore();
+    // The Series is already cached when its page opens.
+    await act(() =>
+      store.dispatch(
+        mockApi.endpoints.getPatientSeries.initiate({ patientId: PATIENT, seriesId: SERIES })
+      )
+    );
+    render(tree(seriesUrl, store));
+    expect(screen.getByText('#3 CT Abdomen')).toBeTruthy();
+    await patientSettled();
+    expect(requestsOf(patientUrl)).toBe(1);
+    await waitFor(() => expect(patientCrumb().textContent).toBe('Patient'));
+    expect(within(nav()).queryAllByRole('link').map((a) => a.textContent)).toEqual([
+      'Home',
+      'Patients',
+    ]);
+    // The Study label stays readable, as text.
+    expect(within(nav()).getByText('Study 2026-01-02 10:15').closest('a')).toBeNull();
+  });
+
+  it("Patient A / Study X -> Patient B / Study X: never A's Study metadata", async () => {
+    const OTHER = '22222222-2222-4222-8222-222222222222';
+    const store = makeStore();
+    render(tree(studyUrl, store));
+    await screen.findByRole('link', { name: 'Test Patient A' });
+    expect(screen.getByText('Study 2026-01-02 10:15')).toBeTruthy();
+
+    // Patient B's patient and Study requests stay pending.
+    held = new Set([
+      generatePath(apiRoutes.patient, { id: OTHER }),
+      generatePath(apiRoutes.patientStudySeries, { patientId: OTHER, studyId: STUDY }),
+    ]);
+    act(() =>
+      navigate(generatePath(guiRoutes.patientStudy, { patientId: OTHER, studyId: STUDY }))
+    );
+    await waitFor(() => expect(requests).toHaveLength(4));
+    expect(within(nav()).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'Home',
+      'Patients',
+      'Patient',
+      'Study',
+    ]);
   });
 
   it('a network failure keeps the Series patient link (the Series confirmed the patient)', async () => {
     failures[patientUrl] = { status: 'FETCH_ERROR', error: 'TypeError: Failed to fetch' };
     render(tree(seriesUrl, makeStore()));
     await screen.findByText('#3 CT Abdomen');
-    await waitFor(() => expect(requestsOf(patientUrl)).toBe(1));
+    await patientSettled();
+    expect(requestsOf(patientUrl)).toBe(1);
     expect(within(nav()).getByRole('link', { name: 'Patient' }).getAttribute('href')).toBe(
       '/patients/test-patient-a'
     );
@@ -206,7 +273,8 @@ describe('breadcrumb patient requests', () => {
     failures[patientUrl] = { status: 404, data: { message: 'Not found' } };
     render(tree(studyUrl, makeStore()));
     await screen.findByText('Study 2026-01-02 10:15');
-    await waitFor(() => expect(requestsOf(patientUrl)).toBe(1));
+    await patientSettled();
+    expect(requestsOf(patientUrl)).toBe(1);
     expect(patientCrumb().textContent).toBe('Patient');
     expect(patientCrumb().querySelector('a')).toBeNull();
   });

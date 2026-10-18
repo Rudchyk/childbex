@@ -69,13 +69,8 @@ export const SeriesContent = WithLoader<PatientSeriesResponse>(({ data }) => {
 });
 
 export const Component = () => {
-  const {
-    patientId = '',
-    studyId = '',
-    seriesId = '',
-  } = useParams<{
+  const { patientId = '', seriesId = '' } = useParams<{
     patientId: string;
-    studyId: string;
     seriesId: string;
   }>();
   const { currentData, isFetching, isError, error } = useGetPatientSeriesQuery(
@@ -94,15 +89,13 @@ export const Component = () => {
   // replaces the content.
   const refreshFailed = isError && !!data;
   // The patient's name (the Series carries only the patient's slug). The
-  // Series' slug links the patient while its name loads or fails to, but
-  // never once the patient is confirmed missing (e.g. deleted since).
+  // Series' slug and Study link their pages while the name loads or fails
+  // to, but never once the patient is confirmed missing (e.g. deleted since).
   const { patient, missing: patientMissing } = useBreadcrumbPatient(patientId);
   const breadcrumbs = seriesPageCrumbs({
     patientId,
-    studyId,
-    patient: patientMissing
-      ? undefined
-      : { name: patient?.name, slug: data?.patient.slug ?? patient?.slug },
+    patientMissing,
+    patient: { name: patient?.name, slug: data?.patient.slug ?? patient?.slug },
     study: data?.study,
     series: data?.series,
   });

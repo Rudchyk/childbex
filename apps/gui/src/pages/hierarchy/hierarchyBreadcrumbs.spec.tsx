@@ -114,9 +114,16 @@ jest.mock('../../store/apis', () => ({
       ? { currentData: mockPatients[id] }
       : { error: { status: 404, data: { message: 'Not found' } } };
   },
-  useGetStudySeriesQuery: ({ studyId }: { studyId: string }) => {
-    if (!mockPending.has(studyId)) mockLastStudy = mockStudies[studyId];
-    return { data: mockLastStudy, isLoading: mockPending.has(studyId), isError: false };
+  useGetStudySeriesQuery: ({ patientId, studyId }: { patientId: string; studyId: string }) => {
+    // Pending by Study id, or by this query (patient and Study).
+    const pending = mockPending.has(studyId) || mockPending.has(`${patientId}/${studyId}`);
+    if (!pending) mockLastStudy = mockStudies[studyId];
+    return {
+      data: mockLastStudy,
+      currentData: pending ? undefined : mockStudies[studyId],
+      isLoading: pending,
+      isError: false,
+    };
   },
   useGetPatientSeriesQuery: ({ seriesId }: { seriesId: string }) => ({
     currentData: mockPending.has(seriesId) ? undefined : mockSeriesById[seriesId],
@@ -332,8 +339,8 @@ describe('hierarchy breadcrumbs', () => {
       ['Home', '/'],
       ['Patients', '/patients'],
       ['Patient', null],
-      // The Study route is known from the URL before its data.
-      ['Study', studyUrl(P_A, STUDY_A)],
+      // Not linked from URL params: only once the Series confirmed its Study.
+      ['Study', null],
       ['Series', null],
     ]);
     expect(current()).toBe('Series');
@@ -386,9 +393,25 @@ describe('hierarchy breadcrumbs', () => {
     ]);
   });
 
-  it('never requests the patient of an id that cannot exist', () => {
+  it('Series deep link with an invalid patient id: no request, no ancestor links', () => {
     setup(seriesUrl('not-a-patient-id', STUDY_A, SERIES_A));
     expect(mockPatientQueryIds).toEqual([]);
-    expect(crumbs()[2]).toEqual(['Patient', null]);
+    expect(crumbs()).toEqual([
+      ['Home', '/'],
+      ['Patients', '/patients'],
+      ['Patient', null],
+      ['Study', null],
+      ['Series', null],
+    ]);
+  });
+
+  it("Patient A / Study X -> Patient B / Study X: never A's Study metadata", () => {
+    const app = setup(studyUrl(P_A, STUDY_A));
+    expect(current()).toBe('Study 2026-01-02 10:15');
+    // The same Study id under another patient: RTK `data` is still A's.
+    mockPending = new Set([P_B, `${P_B}/${STUDY_A}`]);
+    app.navigate(studyUrl(P_B, STUDY_A));
+    expect(current()).toBe('Study');
+    expect(nav().textContent).not.toMatch(/2026-01-02|Test Patient A/);
   });
 });

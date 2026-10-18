@@ -78,17 +78,15 @@ const StudyTitle: FC<{ data?: StudySeriesResponse }> = ({ data }) => (
 
 export const Component = () => {
   const { patientId = '', studyId = '' } = useParams<PatientStudyParams>();
-  const { data, isLoading, isError, error } = useGetStudySeriesQuery(
+  const { data, currentData, isLoading, isError, error } = useGetStudySeriesQuery(
     { patientId, studyId },
     { skip: !patientId || !studyId }
   );
   // The patient's name and slug (the Patient page is addressed by slug).
   const { patient } = useBreadcrumbPatient(patientId);
-  // Only the Study of the URL, never the previous one.
-  const breadcrumbs = studyPageCrumbs({
-    patient,
-    study: data?.study.id === studyId ? data.study : undefined,
-  });
+  // Only the Study of this query (patient and Study of the URL): `data`
+  // would still be the previous query's, e.g. of another patient.
+  const breadcrumbs = studyPageCrumbs({ patient, study: currentData?.study });
   return (
     <DefaultLayout breadcrumbs={breadcrumbs}>
       <PageTmpl customTitle={<StudyTitle data={data} />}>
