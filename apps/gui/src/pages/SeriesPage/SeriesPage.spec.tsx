@@ -91,6 +91,7 @@ jest.mock('../../store/apis', () => ({
   useCompleteSeriesReviewMutation: () => [mockComplete, { isLoading: false }],
   useBulkReviewVoteMutation: () => [mockBulk, { isLoading: false }],
   useGetPatientSeriesQuery: () => mockSeriesQuery,
+  useGetPatientQuery: () => ({ currentData: undefined }),
   // The real review panel's vote form (when rendered).
   useAddPatientImageReviewVoteMutation: () => [mockAddVote, { isLoading: false }],
   useUpdatePatientImageReviewVoteMutation: () => [jest.fn(), { isLoading: false }],

@@ -7,6 +7,7 @@ import { SlugProperty } from '@libs/schemas';
 import { PageTitle } from '../../components';
 import { AddPatientImages } from './AddPatientImages/AddPatientImages';
 import { WithLoader } from '../../hoc';
+import { patientPageCrumbs } from '../hierarchy/hierarchyBreadcrumbs';
 
 // The page lists the patient's DICOM Studies.
 const PatientContent = WithLoader<{ id: string }>(({ data }) => (
@@ -19,8 +20,10 @@ export const Component = () => {
     { slug },
     { skip: !slug }
   );
+  // Never the previous patient's name while another patient is loaded.
+  const patient = data?.slug === slug ? data : undefined;
   return (
-    <DefaultLayout>
+    <DefaultLayout breadcrumbs={patientPageCrumbs(patient)}>
       <PageTmpl
         customTitle={
           <PageTitle
