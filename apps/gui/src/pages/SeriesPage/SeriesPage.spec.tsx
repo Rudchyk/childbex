@@ -36,6 +36,8 @@ let mockViewerProps: ViewerProps | undefined;
 /** Viewer instances mounted so far (a remount loads the images again). */
 let mockViewerMounts = 0;
 let mockCurrentUid: string | undefined;
+/** Slices the viewer stand-in reports (default: every list entry). */
+let mockViewerItems: { imageUid: string; source: string; index: number }[] | undefined;
 let mockParams: { patientId?: string; seriesId?: string } = {};
 let mockSeriesQuery: {
   currentData?: PatientSeriesResponse;
@@ -63,7 +65,9 @@ jest.mock('../../components', () => ({
       <div>
         viewer
         {props.renderSidebar?.({
-          items: props.list.map((source, index) => ({ imageUid: `uid-${index}`, source, index })),
+          items:
+            mockViewerItems ??
+            props.list.map((source, index) => ({ imageUid: `uid-${index}`, source, index })),
           currentImageId: mockCurrentUid,
           jumpTo: mockJumpTo,
         }) as never}
@@ -243,6 +247,7 @@ beforeEach(() => {
   mockViewerProps = undefined;
   mockViewerMounts = 0;
   mockCurrentUid = undefined;
+  mockViewerItems = undefined;
   mockParams = {};
   mockSeriesQuery = { isFetching: false, isError: false };
   mockRealReviewPanel = false;
@@ -638,6 +643,187 @@ describe('Series page', () => {
         expect(screen.queryByTestId('series-refresh-error')).toBeNull();
         expect(mockViewerProps).toBeUndefined();
       });
+    });
+  });
+
+  describe('collapsible side panels', () => {
+    const toggle = (name: RegExp) => screen.getByRole('button', { name }) as HTMLButtonElement;
+    const reviewToggle = () => toggle(/review panel$/);
+    const sliceToggle = () => toggle(/slice list$/);
+    const reviewContent = () => document.getElementById('series-review-panel') as HTMLElement;
+    const sliceContent = () => document.getElementById('series-slice-list') as HTMLElement;
+    /** Expanded: the toggle says so and the content it controls is shown. */
+    const expectPanel = (button: HTMLButtonElement, content: HTMLElement, expanded: boolean) => {
+      expect(button.getAttribute('aria-expanded')).toBe(String(expanded));
+      expect(button.getAttribute('aria-controls')).toBe(content.id);
+      expect(content.hidden).toBe(!expanded);
+    };
+
+    it('the review panel collapses and restores without changing the slice list', () => {
+      renderSeries(response());
+      expect(reviewToggle().getAttribute('aria-label')).toBe('Hide review panel');
+      expectPanel(reviewToggle(), reviewContent(), true);
+
+      fireEvent.click(reviewToggle());
+      expect(reviewToggle().getAttribute('aria-label')).toBe('Show review panel');
+      expectPanel(reviewToggle(), reviewContent(), false);
+      expectPanel(sliceToggle(), sliceContent(), true);
+
+      fireEvent.click(reviewToggle());
+      expectPanel(reviewToggle(), reviewContent(), true);
+      expectPanel(sliceToggle(), sliceContent(), true);
+    });
+
+    it('the slice list collapses and restores without changing the review panel', () => {
+      renderSeries(response());
+      expect(sliceToggle().getAttribute('aria-label')).toBe('Hide slice list');
+
+      fireEvent.click(sliceToggle());
+      expect(sliceToggle().getAttribute('aria-label')).toBe('Show slice list');
+      expectPanel(sliceToggle(), sliceContent(), false);
+      expectPanel(reviewToggle(), reviewContent(), true);
+
+      fireEvent.click(sliceToggle());
+      expectPanel(sliceToggle(), sliceContent(), true);
+      expectPanel(reviewToggle(), reviewContent(), true);
+    });
+
+    it('both panels can be collapsed; their restore controls stay usable', () => {
+      renderSeries(response());
+      fireEvent.click(reviewToggle());
+      fireEvent.click(sliceToggle());
+      expectPanel(reviewToggle(), reviewContent(), false);
+      expectPanel(sliceToggle(), sliceContent(), false);
+      // The restore controls are outside the hidden content.
+      expect(reviewContent().contains(reviewToggle())).toBe(false);
+      expect(sliceContent().contains(sliceToggle())).toBe(false);
+
+      fireEvent.click(sliceToggle());
+      expectPanel(sliceToggle(), sliceContent(), true);
+      expectPanel(reviewToggle(), reviewContent(), false);
+      fireEvent.click(reviewToggle());
+      expectPanel(reviewToggle(), reviewContent(), true);
+    });
+
+    it('the toggle is a native button that keeps keyboard focus across states', async () => {
+      renderSeries(response());
+      const button = reviewToggle();
+      expect(button.tagName).toBe('BUTTON');
+      // Async: MUI starts the focus ripple after the focus event.
+      await act(async () => button.focus());
+      fireEvent.click(button);
+      // The same element, still focused (focus never lands in hidden content).
+      expect(reviewToggle()).toBe(button);
+      expect(document.activeElement).toBe(button);
+      fireEvent.click(button);
+      expect(document.activeElement).toBe(button);
+    });
+
+    it("keeps the reviewer's unsaved input, the slice on screen and the viewer", () => {
+      mockRealReviewPanel = true;
+      renderSeries(response());
+      const list = mockViewerProps?.list;
+      act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
+      act(() => mockViewerProps?.onCurrentItemChange(url('i3'), { index: 2, loadedCount: 3 }));
+      fireEvent.click(screen.getByRole('radio', { name: 'Abnormal' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Comment' }), {
+        target: { value: 'draft' },
+      });
+      const form = screen.getByRole('textbox', { name: 'Comment' });
+
+      fireEvent.click(reviewToggle());
+      fireEvent.click(sliceToggle());
+      fireEvent.click(reviewToggle());
+      fireEvent.click(sliceToggle());
+
+      // The same (never remounted) form, with the unsaved choice and comment.
+      expect(screen.getByRole('textbox', { name: 'Comment' })).toBe(form);
+      expect((form as HTMLTextAreaElement).value).toBe('draft');
+      expect((screen.getByRole('radio', { name: 'Abnormal' }) as HTMLInputElement).checked).toBe(true);
+      expect(mockAddVote).not.toHaveBeenCalled();
+      expect(header()).toBe('Review — Slice 3 / 3 loaded · Instance #3');
+      // One viewer, its image list unchanged: nothing is loaded again.
+      expect(mockViewerMounts).toBe(1);
+      expect(mockViewerProps?.list).toBe(list);
+      expect(mockJumpTo).not.toHaveBeenCalled();
+    });
+
+    it('keeps the slice selection, the active slice and the bulk actions', () => {
+      mockCurrentUid = 'uid-1'; // viewer slice 1 = i1
+      renderSeries(response());
+      fireEvent.click(checkboxOf('i3'));
+      fireEvent.click(checkboxOf('i2'));
+      const list = screen.getByRole('list', { name: 'Series slices' });
+
+      fireEvent.click(sliceToggle());
+      expect(sliceContent().hidden).toBe(true);
+      fireEvent.click(reviewToggle());
+      fireEvent.click(sliceToggle());
+
+      expect(screen.getByRole('list', { name: 'Series slices' })).toBe(list);
+      expect(screen.getByTestId('selection-count').textContent).toBe('2 of 3 selected');
+      expect(rows().map((row) => row.getAttribute('aria-selected'))).toEqual(['true', 'false', 'true']);
+      expect(screen.getByRole('button', { name: /Show Slice 2/ }).getAttribute('aria-current')).toBe('true');
+      expect(screen.getByTestId('bulk-review-actions')).toBeTruthy();
+      expect(mockJumpTo).not.toHaveBeenCalled();
+      expect(mockViewerMounts).toBe(1);
+    });
+
+    it('leaves the Complete review safety checks unchanged', () => {
+      renderSeries(response());
+      fireEvent.click(reviewToggle());
+      fireEvent.click(sliceToggle());
+      // Not loaded yet: still disabled with the panels collapsed.
+      expect(completeButton().disabled).toBe(true);
+      act(() => mockViewerProps?.onLoadResult(loadedAll(['i2', 'i1'])));
+      expect(completeButton().disabled).toBe(true);
+
+      fireEvent.click(reviewToggle());
+      act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
+      expect(completeButton().disabled).toBe(false);
+      fireEvent.click(sliceToggle());
+      fireEvent.click(reviewToggle());
+      expect(completeButton().disabled).toBe(false);
+    });
+
+    it('opens another Series with both panels expanded (state is per Series)', () => {
+      const { rerender } = renderSeries(response());
+      fireEvent.click(reviewToggle());
+      fireEvent.click(sliceToggle());
+      rerender(<SeriesContent data={responseB()} isLoading={false} isError={false} />);
+      expectPanel(reviewToggle(), reviewContent(), true);
+      expectPanel(sliceToggle(), sliceContent(), true);
+    });
+
+    it('offers the slice list with its toggle while nothing is loaded yet', () => {
+      mockViewerItems = [];
+      renderSeries(response());
+      expect(screen.getByText('No slices loaded yet.')).toBeTruthy();
+      fireEvent.click(sliceToggle());
+      expectPanel(sliceToggle(), sliceContent(), false);
+    });
+
+    it('keeps the review panel reachable on small screens', () => {
+      const matchMedia = window.matchMedia;
+      // Every media query matches: the smallest breakpoint.
+      window.matchMedia = jest.fn().mockImplementation((query: string) => ({
+        matches: true,
+        media: query,
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+        addListener: jest.fn(),
+        removeListener: jest.fn(),
+      })) as never;
+      try {
+        renderSeries(response());
+        act(() => mockViewerProps?.onCurrentItemChange(url('i1'), { index: 1, loadedCount: 3 }));
+        expect(screen.getByText('review:i1')).toBeTruthy();
+        expectPanel(reviewToggle(), reviewContent(), true);
+        fireEvent.click(reviewToggle());
+        expectPanel(reviewToggle(), reviewContent(), false);
+      } finally {
+        window.matchMedia = matchMedia;
+      }
     });
   });
 

@@ -587,43 +587,55 @@ export const DicomViewer: FC<DicomViewerProps> = ({
         onClean={isClean ? onClean : undefined}
       />
       {toolbar}
-      <Box
-        ref={viewportRef}
-        data-testid="dicom-viewport"
-        sx={{
-          position: 'relative',
-          height: VIEWPORT_HEIGHT,
-          width: '100%',
-          overflow: 'hidden',
-          bgcolor: 'common.black',
-        }}
+      {/*
+        A custom slice list sits next to the viewport (below it on small
+        screens) and is always rendered: it keeps its state across
+        breakpoints, and the viewport takes the width it leaves (e.g. when
+        it is collapsed; dwv refits in place on the resize).
+      */}
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        spacing={1}
+        sx={{ height: renderSidebar ? { sm: VIEWPORT_HEIGHT } : undefined }}
       >
-        <div
-          ref={containerRef}
-          id="layerGroup0"
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            width: layout?.width ?? '100%',
-            height: layout?.height ?? '100%',
-            transform: layout ? `scale(${layout.scale})` : undefined,
-            transformOrigin: '0 0',
+        <Box
+          ref={viewportRef}
+          data-testid="dicom-viewport"
+          sx={{
+            position: 'relative',
+            height: VIEWPORT_HEIGHT,
+            width: { xs: '100%', sm: 'auto' },
+            flex: { sm: 1 },
+            minWidth: 0,
+            overflow: 'hidden',
+            bgcolor: 'common.black',
           }}
-        />
-        <DicomViewerDropbox isShow={isShowDropbox} onLoadFiles={onLoadFiles} />
-      </Box>
-      {!matches &&
-        (renderSidebar ? (
-          renderSidebar({ items, currentImageId, jumpTo })
-        ) : (
-          <DicomViewerSidebar
-            currentImageId={currentImageId}
-            items={items}
-            icon={sidebarItemIcon}
-            onJumpTo={jumpTo}
+        >
+          <div
+            ref={containerRef}
+            id="layerGroup0"
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: layout?.width ?? '100%',
+              height: layout?.height ?? '100%',
+              transform: layout ? `scale(${layout.scale})` : undefined,
+              transformOrigin: '0 0',
+            }}
           />
-        ))}
+          <DicomViewerDropbox isShow={isShowDropbox} onLoadFiles={onLoadFiles} />
+        </Box>
+        {renderSidebar?.({ items, currentImageId, jumpTo })}
+      </Stack>
+      {!matches && !renderSidebar && (
+        <DicomViewerSidebar
+          currentImageId={currentImageId}
+          items={items}
+          icon={sidebarItemIcon}
+          onJumpTo={jumpTo}
+        />
+      )}
       <DicomViewerFooter />
     </Stack>
   );
