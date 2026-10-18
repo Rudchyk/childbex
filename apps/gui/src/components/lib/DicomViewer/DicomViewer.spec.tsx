@@ -459,12 +459,49 @@ describe('DicomViewer', () => {
       expect(jest.requireMock('dwv').App).toHaveBeenCalledTimes(1);
     });
 
-    it('sits next to the viewport, not over it', () => {
+    const flexDirection = () =>
+      getComputedStyle(screen.getByTestId('dicom-viewport-row')).flexDirection;
+
+    it('sits next to the viewport by default, not over it', () => {
       render(<DicomViewer list={urls} renderSidebar={() => <Probe label="list" />} />);
       const viewport = screen.getByTestId('dicom-viewport');
       expect(viewport.parentElement?.contains(screen.getByTestId('custom-sidebar'))).toBe(true);
       expect(viewport.contains(screen.getByTestId('custom-sidebar'))).toBe(false);
+      expect(flexDirection()).toBe('row');
       expect(screen.queryByTestId('default-sidebar')).toBeNull();
+    });
+
+    it('goes below a full-width viewport on request, without remounting', () => {
+      const { rerender } = render(
+        <DicomViewer list={urls} renderSidebar={() => <Probe label="list" />} />
+      );
+      rerender(
+        <DicomViewer
+          list={urls}
+          renderSidebar={() => <Probe label="list" />}
+          sidebarPlacement="below"
+        />
+      );
+      expect(flexDirection()).toBe('column');
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport')).width).toBe('100%');
+      rerender(
+        <DicomViewer
+          list={urls}
+          renderSidebar={() => <Probe label="list" />}
+          sidebarPlacement="beside"
+        />
+      );
+      expect(flexDirection()).toBe('row');
+      expect(probeMounts).toBe(1);
+      expect(jest.requireMock('dwv').App).toHaveBeenCalledTimes(1);
+      expect(mockLoadURLs.mock.calls.length).toBeLessThanOrEqual(1);
+    });
+
+    it('without one, the viewport is full width with the default file list (DWV page)', () => {
+      render(<DicomViewer list={urls} />);
+      expect(flexDirection()).toBe('column');
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport')).width).toBe('100%');
+      expect(screen.getByTestId('default-sidebar')).toBeTruthy();
     });
 
     it('is still rendered on small screens; the default file list is not', () => {

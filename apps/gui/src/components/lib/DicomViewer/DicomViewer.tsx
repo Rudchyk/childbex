@@ -102,6 +102,11 @@ interface DicomViewerProps {
   /** Replaces the default file list (e.g. a selectable slice list). */
   renderSidebar?: (props: DicomViewerSidebarRenderProps) => ReactNode;
   /**
+   * Where `renderSidebar` goes: next to the viewport (as high as it) or
+   * below it (e.g. where the viewport would be too narrow otherwise).
+   */
+  sidebarPlacement?: 'beside' | 'below';
+  /**
    * Called when loading `list` ended or failed: the slices in the loaded
    * volume, the load errors so far and which `list` entries the slices are
    * (to tell whether everything in `list` is actually shown).
@@ -180,6 +185,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   toolbar,
   sidebarItemIcon,
   renderSidebar,
+  sidebarPlacement = 'beside',
   onLoadResult,
 }) => {
   /** The viewport (CSS size). */
@@ -216,6 +222,8 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   >({});
   const [calibration, setCalibration] = useState<LengthCalibration>();
   const [currentImageId, setCurrentImageId] = useState<string | undefined>();
+  /** A custom slice list next to the viewport (without one: full width). */
+  const sidebarBeside = !!renderSidebar && sidebarPlacement === 'beside';
 
   const onChangeTool = (tool: string) => {
     if (appRef.current) {
@@ -588,15 +596,16 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       />
       {toolbar}
       {/*
-        A custom slice list sits next to the viewport (below it on small
-        screens) and is always rendered: it keeps its state across
-        breakpoints, and the viewport takes the width it leaves (e.g. when
-        it is collapsed; dwv refits in place on the resize).
+        A custom slice list sits next to or below the viewport and is always
+        rendered: it keeps its state when the placement changes, and the
+        viewport takes the width it leaves (e.g. when it is collapsed; dwv
+        refits in place on the resize).
       */}
       <Stack
-        direction={{ xs: 'column', sm: 'row' }}
+        data-testid="dicom-viewport-row"
+        direction={sidebarBeside ? 'row' : 'column'}
         spacing={1}
-        sx={{ height: renderSidebar ? { sm: VIEWPORT_HEIGHT } : undefined }}
+        sx={{ height: sidebarBeside ? VIEWPORT_HEIGHT : undefined }}
       >
         <Box
           ref={viewportRef}
@@ -604,8 +613,8 @@ export const DicomViewer: FC<DicomViewerProps> = ({
           sx={{
             position: 'relative',
             height: VIEWPORT_HEIGHT,
-            width: { xs: '100%', sm: 'auto' },
-            flex: { sm: 1 },
+            width: sidebarBeside ? 'auto' : '100%',
+            flex: sidebarBeside ? 1 : undefined,
             minWidth: 0,
             overflow: 'hidden',
             bgcolor: 'common.black',

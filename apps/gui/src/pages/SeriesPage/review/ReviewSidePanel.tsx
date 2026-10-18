@@ -3,7 +3,7 @@ import { Box, IconButton, Paper, Stack, SxProps, Theme, Tooltip, Typography } fr
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 
-/** Width of a collapsed panel (its restore control). */
+/** Width of a collapsed side panel (its restore control). */
 export const COLLAPSED_PANEL_WIDTH = 40;
 
 export interface ReviewSidePanelProps {
@@ -13,9 +13,14 @@ export interface ReviewSidePanelProps {
   title: string;
   /** Names the panel in the toggle's label, e.g. "review panel". */
   name: string;
-  /** Edge of the workspace the panel sits on (from `sm` up). */
+  /** Edge of the workspace the panel sits on (side by side). */
   side: 'left' | 'right';
-  /** Width when expanded (from `sm` up; full width below). */
+  /**
+   * Stacked under the viewer (full width; collapses to a bar) instead of
+   * next to it (`width`; collapses to a narrow rail).
+   */
+  stacked: boolean;
+  /** Width when expanded next to the viewer. */
   width: number;
   expanded: boolean;
   onToggle: () => void;
@@ -27,13 +32,14 @@ export interface ReviewSidePanelProps {
  * A side panel of the Series review workspace that collapses to a compact
  * restore control. Collapsing only hides the content (`hidden`): it stays
  * mounted, so its state (unsaved votes, selection) is kept. The toggle is
- * the same element in both states, so keyboard focus stays on it.
+ * the same element in every state and layout, so keyboard focus stays on it.
  */
 export const ReviewSidePanel: FC<ReviewSidePanelProps> = ({
   id,
   title,
   name,
   side,
+  stacked,
   width,
   expanded,
   onToggle,
@@ -43,8 +49,11 @@ export const ReviewSidePanel: FC<ReviewSidePanelProps> = ({
   const label = `${expanded ? 'Hide' : 'Show'} ${name}`;
   // Expanded: points to the edge it collapses to; collapsed: back.
   const towardsEdge = expanded === (side === 'left');
-  // Stacked below `sm`: the chevron points up (hide) or down (show).
-  const stackedRotation = side === 'left' ? 'rotate(90deg)' : 'rotate(-90deg)';
+  // Stacked: the chevron points up (hide) or down (show).
+  const iconSx = stacked
+    ? { transform: side === 'left' ? 'rotate(90deg)' : 'rotate(-90deg)' }
+    : undefined;
+  const rail = !stacked && !expanded;
   return (
     <Paper
       component="section"
@@ -52,31 +61,30 @@ export const ReviewSidePanel: FC<ReviewSidePanelProps> = ({
       aria-label={title}
       data-testid={`${id}-panel`}
       data-expanded={expanded}
+      data-layout={stacked ? 'stacked' : 'side'}
       sx={[
         {
           display: 'flex',
           flexDirection: 'column',
           flexShrink: 0,
           overflow: 'hidden',
-          width: { xs: '100%', sm: expanded ? width : COLLAPSED_PANEL_WIDTH },
+          width: stacked ? '100%' : expanded ? width : COLLAPSED_PANEL_WIDTH,
         },
         ...(Array.isArray(sx) ? sx : [sx]),
       ]}
     >
       <Stack
-        direction={{
-          xs: 'row-reverse',
-          sm: expanded ? (side === 'left' ? 'row-reverse' : 'row') : 'column',
-        }}
+        direction={
+          rail ? 'column' : stacked || side === 'left' ? 'row-reverse' : 'row'
+        }
         alignItems="center"
         spacing={0.5}
-        sx={{
-          p: 0.5,
-          borderBottom: expanded ? 1 : 0,
-          borderColor: 'divider',
-        }}
+        sx={{ p: 0.5, borderBottom: expanded ? 1 : 0, borderColor: 'divider' }}
       >
-        <Tooltip title={label} placement={side === 'left' ? 'right' : 'left'}>
+        <Tooltip
+          title={label}
+          placement={stacked ? 'top' : side === 'left' ? 'right' : 'left'}
+        >
           <IconButton
             size="small"
             onClick={onToggle}
@@ -84,21 +92,17 @@ export const ReviewSidePanel: FC<ReviewSidePanelProps> = ({
             aria-expanded={expanded}
             aria-controls={id}
           >
-            {towardsEdge ? (
-              <ChevronLeftIcon sx={{ transform: { xs: stackedRotation, sm: 'none' } }} />
-            ) : (
-              <ChevronRightIcon sx={{ transform: { xs: stackedRotation, sm: 'none' } }} />
-            )}
+            {towardsEdge ? <ChevronLeftIcon sx={iconSx} /> : <ChevronRightIcon sx={iconSx} />}
           </IconButton>
         </Tooltip>
         <Typography
           variant="overline"
           noWrap
           sx={{
-            flex: { xs: 1, sm: expanded ? 1 : 'none' },
+            flex: rail ? 'none' : 1,
             lineHeight: 1.5,
             px: 0.5,
-            writingMode: { sm: expanded ? 'horizontal-tb' : 'vertical-rl' },
+            writingMode: rail ? 'vertical-rl' : undefined,
           }}
         >
           {title}

@@ -12,7 +12,13 @@ import type {
   SeriesImage,
   SeriesSummary,
 } from '@libs/schemas';
+import { createTheme } from '@mui/material';
 import { Component as SeriesPage, SeriesContent } from './SeriesPage';
+import {
+  REVIEW_PANEL_WIDTH,
+  SIDE_BY_SIDE_BREAKPOINT,
+  SLICE_PANEL_WIDTH,
+} from './SeriesImages';
 
 type ViewerProps = {
   list: string[];
@@ -31,6 +37,7 @@ type ViewerProps = {
     currentImageId?: string;
     jumpTo: (index: number) => void;
   }) => unknown;
+  sidebarPlacement?: 'beside' | 'below';
 };
 let mockViewerProps: ViewerProps | undefined;
 /** Viewer instances mounted so far (a remount loads the images again). */
@@ -803,27 +810,129 @@ describe('Series page', () => {
       expectPanel(sliceToggle(), sliceContent(), false);
     });
 
-    it('keeps the review panel reachable on small screens', () => {
-      const matchMedia = window.matchMedia;
-      // Every media query matches: the smallest breakpoint.
-      window.matchMedia = jest.fn().mockImplementation((query: string) => ({
-        matches: true,
-        media: query,
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
-        addListener: jest.fn(),
-        removeListener: jest.fn(),
-      })) as never;
-      try {
+    describe('responsive layout', () => {
+      /**
+       * jsdom has no layout engine: the window width only drives media
+       * queries (min-/max-width), which decide the layout. Real pixel sizes
+       * are checked in a browser.
+       */
+      let windowWidth = 1920;
+      const mediaListeners = new Set<() => void>();
+      const matchesWidth = (query: string) => {
+        const features = [...query.matchAll(/\((min|max)-width:\s*([\d.]+)px\)/g)];
+        return (
+          features.length > 0 &&
+          features.every(([, kind, px]) =>
+            kind === 'min' ? windowWidth >= Number(px) : windowWidth <= Number(px)
+          )
+        );
+      };
+      const resizeWindow = (width: number) => {
+        windowWidth = width;
+        act(() => mediaListeners.forEach((listener) => listener()));
+      };
+      const originalMatchMedia = window.matchMedia;
+      beforeEach(() => {
+        windowWidth = 1920;
+        mediaListeners.clear();
+        window.matchMedia = ((query: string) => ({
+          get matches() {
+            return matchesWidth(query);
+          },
+          media: query,
+          addEventListener: (_: string, listener: () => void) => mediaListeners.add(listener),
+          removeEventListener: (_: string, listener: () => void) =>
+            mediaListeners.delete(listener),
+          addListener: (listener: () => void) => mediaListeners.add(listener),
+          removeListener: (listener: () => void) => mediaListeners.delete(listener),
+        })) as never;
+      });
+      afterEach(() => {
+        window.matchMedia = originalMatchMedia;
+      });
+      const workspace = () => screen.getByTestId('series-review-workspace');
+
+      it.each([
+        [375, 'stacked', 'below'],
+        [600, 'stacked', 'below'],
+        [768, 'stacked', 'below'],
+        [1024, 'stacked', 'below'],
+        [1199, 'stacked', 'below'],
+        [1200, 'side', 'beside'],
+        [1366, 'side', 'beside'],
+        [1920, 'side', 'beside'],
+      ])('at %ipx: panels %s, slice list %s the viewport; both toggles work', (width, layout, placement) => {
+        windowWidth = width;
         renderSeries(response());
-        act(() => mockViewerProps?.onCurrentItemChange(url('i1'), { index: 1, loadedCount: 3 }));
-        expect(screen.getByText('review:i1')).toBeTruthy();
-        expectPanel(reviewToggle(), reviewContent(), true);
+        expect(workspace().getAttribute('data-layout')).toBe(layout);
+        expect(screen.getByTestId('series-review-panel-panel').getAttribute('data-layout')).toBe(layout);
+        expect(screen.getByTestId('series-slice-list-panel').getAttribute('data-layout')).toBe(layout);
+        expect(mockViewerProps?.sidebarPlacement).toBe(placement);
+        // Stacked: the viewer comes first, the review panel after it.
+        expect(getComputedStyle(workspace()).flexDirection).toBe(layout === 'side' ? 'row' : 'column');
+
         fireEvent.click(reviewToggle());
         expectPanel(reviewToggle(), reviewContent(), false);
-      } finally {
-        window.matchMedia = matchMedia;
-      }
+        expectPanel(sliceToggle(), sliceContent(), true);
+        fireEvent.click(sliceToggle());
+        expectPanel(sliceToggle(), sliceContent(), false);
+        fireEvent.click(reviewToggle());
+        fireEvent.click(sliceToggle());
+        expectPanel(reviewToggle(), reviewContent(), true);
+        expectPanel(sliceToggle(), sliceContent(), true);
+      });
+
+      it('side by side only where both expanded panels leave the image a usable width', () => {
+        const theme = createTheme();
+        const narrowest = theme.breakpoints.values[SIDE_BY_SIDE_BREAKPOINT];
+        // Page gutters (Container, 24px each side) and the two 8px gaps.
+        const viewport = narrowest - 2 * 24 - REVIEW_PANEL_WIDTH - SLICE_PANEL_WIDTH - 2 * 8;
+        expect(viewport).toBeGreaterThanOrEqual(500);
+      });
+
+      it('crossing the breakpoint keeps every panel, the viewer and the review state', () => {
+        mockRealReviewPanel = true;
+        mockCurrentUid = 'uid-2';
+        windowWidth = 1366;
+        renderSeries(response());
+        const list = mockViewerProps?.list;
+        act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
+        act(() => mockViewerProps?.onCurrentItemChange(url('i3'), { index: 2, loadedCount: 3 }));
+        fireEvent.click(screen.getByRole('radio', { name: 'Abnormal' }));
+        fireEvent.change(screen.getByRole('textbox', { name: 'Comment' }), {
+          target: { value: 'draft' },
+        });
+        fireEvent.click(checkboxOf('i1'));
+        fireEvent.click(sliceToggle());
+        const form = screen.getByRole('textbox', { name: 'Comment' });
+        // Collapsed: hidden from the accessibility tree, still mounted.
+        const sliceList = screen.getByRole('list', { name: 'Series slices', hidden: true });
+        const toggles = [reviewToggle(), sliceToggle()];
+
+        for (const width of [768, 375, 1920, 1024]) {
+          resizeWindow(width);
+          expect(workspace().getAttribute('data-layout')).toBe(width >= 1200 ? 'side' : 'stacked');
+          // The same elements (nothing remounted), with their state.
+          expect(screen.getByRole('textbox', { name: 'Comment' })).toBe(form);
+          expect((form as HTMLTextAreaElement).value).toBe('draft');
+          expect((screen.getByRole('radio', { name: 'Abnormal' }) as HTMLInputElement).checked).toBe(true);
+          expect(screen.getByRole('list', { name: 'Series slices', hidden: true })).toBe(sliceList);
+          expect(screen.getByTestId('selection-count').textContent).toBe('1 of 3 selected');
+          expect(
+            screen.getByRole('button', { name: /Show Slice 3/, hidden: true }).getAttribute('aria-current')
+          ).toBe('true');
+          expect([reviewToggle(), sliceToggle()]).toEqual(toggles);
+          // Panel states are kept too.
+          expectPanel(reviewToggle(), reviewContent(), true);
+          expectPanel(sliceToggle(), sliceContent(), false);
+          expect(header()).toBe('Review — Slice 3 / 3 loaded · Instance #3');
+          expect(completeButton().disabled).toBe(false);
+        }
+        expect(mockViewerMounts).toBe(1);
+        expect(mockViewerProps?.list).toBe(list);
+        expect(mockJumpTo).not.toHaveBeenCalled();
+        expect(mockAddVote).not.toHaveBeenCalled();
+      });
     });
   });
 

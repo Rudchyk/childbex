@@ -1,5 +1,5 @@
 import { FC, useCallback, useMemo, useState } from 'react';
-import { Box, Divider, Stack, Typography } from '@mui/material';
+import { Box, Divider, Stack, Typography, useMediaQuery, useTheme } from '@mui/material';
 import type { PatientSeriesResponse } from '@libs/schemas';
 import {
   DicomViewer,
@@ -25,9 +25,15 @@ interface SeriesImagesProps {
 
 type SeriesImage = PatientSeriesResponse['images'][number];
 
-/** Expanded side panel widths (from `sm` up). */
-const REVIEW_PANEL_WIDTH = 300;
-const SLICE_PANEL_WIDTH = 270;
+/** Expanded side panel widths (side by side). */
+export const REVIEW_PANEL_WIDTH = 300;
+export const SLICE_PANEL_WIDTH = 270;
+/**
+ * From this breakpoint the panels sit next to the viewer; below it they are
+ * stacked under it, so the image keeps a usable width (at 1200px both
+ * expanded panels still leave the viewport about 560px).
+ */
+export const SIDE_BY_SIDE_BREAKPOINT = 'lg';
 
 interface SliceListPanelProps extends DicomViewerSidebarRenderProps {
   data: PatientSeriesResponse;
@@ -35,6 +41,8 @@ interface SliceListPanelProps extends DicomViewerSidebarRenderProps {
   imagesBySource: Record<string, SeriesImage>;
   reviewerId?: string;
   canVote: boolean;
+  /** Below the viewport instead of next to it. */
+  stacked: boolean;
   expanded: boolean;
   onToggle: () => void;
 }
@@ -53,6 +61,7 @@ const SliceListPanel: FC<SliceListPanelProps> = ({
   imagesBySource,
   reviewerId,
   canVote,
+  stacked,
   expanded,
   onToggle,
 }) => {
@@ -90,11 +99,12 @@ const SliceListPanel: FC<SliceListPanelProps> = ({
       title="Slices"
       name="slice list"
       side="right"
+      stacked={stacked}
       width={SLICE_PANEL_WIDTH}
       expanded={expanded}
       onToggle={onToggle}
-      // Next to the viewport: its height; stacked below it on small screens.
-      sx={{ height: { xs: expanded ? '60vh' : 'auto', sm: '100%' } }}
+      // Next to the viewport: its height. Below it: a bounded list.
+      sx={{ height: stacked ? (expanded ? '60vh' : 'auto') : '100%' }}
     >
       {rows.length ? (
         <SeriesSliceList
@@ -169,6 +179,13 @@ const showsExactly = (
  * Series.
  */
 export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
+  const theme = useTheme();
+  // Read at the first render (no flip after mount). Only props change with
+  // it, never the tree: the viewer and the panels stay mounted.
+  const sideBySide = useMediaQuery(theme.breakpoints.up(SIDE_BY_SIDE_BREAKPOINT), {
+    noSsr: true,
+  });
+  const stacked = !sideBySide;
   const { userId, isDoctor, isAdmin } = useAuth();
   const canVote = isDoctor || isAdmin;
   const presented = useMemo(
@@ -233,11 +250,12 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
         imagesBySource={itemsMapping}
         reviewerId={userId}
         canVote={canVote}
+        stacked={stacked}
         expanded={slicePanelOpen}
         onToggle={toggleSlicePanel}
       />
     ),
-    [data, itemsMapping, userId, canVote, slicePanelOpen, toggleSlicePanel]
+    [data, itemsMapping, userId, canVote, stacked, slicePanelOpen, toggleSlicePanel]
   );
 
   return (
@@ -261,25 +279,35 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
       </Stack>
       {/*
         The panels take their own room next to the viewer (no overlay), so a
-        collapsed panel gives its width to the viewport. Below `sm` they are
-        stacked under the viewer.
+        collapsed panel gives its width to the viewport. Below
+        SIDE_BY_SIDE_BREAKPOINT they are stacked under the viewer.
       */}
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} useFlexGap>
+      <Stack
+        data-testid="series-review-workspace"
+        data-layout={stacked ? 'stacked' : 'side'}
+        direction={stacked ? 'column' : 'row'}
+        spacing={1}
+        useFlexGap
+      >
         <ReviewSidePanel
           id="series-review-panel"
           title="Review"
           name="review panel"
           side="left"
+          stacked={stacked}
           width={REVIEW_PANEL_WIDTH}
           expanded={reviewPanelOpen}
           onToggle={toggleReviewPanel}
-          sx={{
-            order: { xs: 1, sm: 0 },
-            alignSelf: { sm: 'flex-start' },
-            position: { sm: 'sticky' },
-            top: { sm: 16 },
-            maxHeight: { sm: 'calc(100vh - 32px)' },
-          }}
+          sx={
+            stacked
+              ? { order: 1 }
+              : {
+                  alignSelf: 'flex-start',
+                  position: 'sticky',
+                  top: 16,
+                  maxHeight: 'calc(100vh - 32px)',
+                }
+          }
         >
           <Typography variant="subtitle1" px={1} pt={1} data-testid="review-header">
             Review —{' '}
@@ -298,13 +326,14 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
           )}
         </ReviewSidePanel>
         {!!sources.length && (
-          <Box sx={{ flex: { sm: 1 }, minWidth: 0 }}>
+          <Box sx={{ flex: stacked ? undefined : 1, minWidth: 0 }}>
             <DicomViewer
               list={sources}
               getRequestHeaders={keycloakAuthHeaders}
               onCurrentItemChange={onCurrentItemChange}
               onLoadResult={setLoadResult}
               renderSidebar={renderSidebar}
+              sidebarPlacement={stacked ? 'below' : 'beside'}
             />
           </Box>
         )}
