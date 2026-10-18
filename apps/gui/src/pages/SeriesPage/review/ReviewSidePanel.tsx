@@ -1,5 +1,5 @@
 import { FC, ReactNode } from 'react';
-import { Box, IconButton, Paper, Stack, SxProps, Theme, Tooltip, Typography } from '@mui/material';
+import { Box, IconButton, Paper, Stack, Tooltip, Typography } from '@mui/material';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 
@@ -22,9 +22,13 @@ export interface ReviewSidePanelProps {
   stacked: boolean;
   /** Width when expanded next to the viewer. */
   width: number;
+  /**
+   * Height when expanded and stacked (the content scrolls inside it);
+   * without it, the content's own height.
+   */
+  stackedHeight?: string;
   expanded: boolean;
   onToggle: () => void;
-  sx?: SxProps<Theme>;
   children: ReactNode;
 }
 
@@ -33,6 +37,11 @@ export interface ReviewSidePanelProps {
  * restore control. Collapsing only hides the content (`hidden`): it stays
  * mounted, so its state (unsaved votes, selection) is kept. The toggle is
  * the same element in every state and layout, so keyboard focus stays on it.
+ *
+ * Both sides share one look: next to the viewer a panel is as high as its
+ * row (it never sets the height itself: its content scrolls inside it), and
+ * collapsed it is a rail of the same width, toggle on top, vertical title.
+ * Only the chevron direction and the toggle's inner edge depend on the side.
  */
 export const ReviewSidePanel: FC<ReviewSidePanelProps> = ({
   id,
@@ -41,9 +50,9 @@ export const ReviewSidePanel: FC<ReviewSidePanelProps> = ({
   side,
   stacked,
   width,
+  stackedHeight,
   expanded,
   onToggle,
-  sx,
   children,
 }) => {
   const label = `${expanded ? 'Hide' : 'Show'} ${name}`;
@@ -54,6 +63,9 @@ export const ReviewSidePanel: FC<ReviewSidePanelProps> = ({
     ? { transform: side === 'left' ? 'rotate(90deg)' : 'rotate(-90deg)' }
     : undefined;
   const rail = !stacked && !expanded;
+  // The content fills a height the panel gets from outside (its row, or
+  // `stackedHeight`) instead of setting it.
+  const fill = !stacked || !!stackedHeight;
   return (
     <Paper
       component="section"
@@ -62,16 +74,14 @@ export const ReviewSidePanel: FC<ReviewSidePanelProps> = ({
       data-testid={`${id}-panel`}
       data-expanded={expanded}
       data-layout={stacked ? 'stacked' : 'side'}
-      sx={[
-        {
-          display: 'flex',
-          flexDirection: 'column',
-          flexShrink: 0,
-          overflow: 'hidden',
-          width: stacked ? '100%' : expanded ? width : COLLAPSED_PANEL_WIDTH,
-        },
-        ...(Array.isArray(sx) ? sx : [sx]),
-      ]}
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        flexShrink: 0,
+        overflow: 'hidden',
+        width: stacked ? '100%' : expanded ? width : COLLAPSED_PANEL_WIDTH,
+        height: stacked && expanded ? stackedHeight : undefined,
+      }}
     >
       <Stack
         direction={
@@ -116,10 +126,22 @@ export const ReviewSidePanel: FC<ReviewSidePanelProps> = ({
           flexDirection: 'column',
           flex: 1,
           minHeight: 0,
-          overflow: 'auto',
+          position: 'relative',
         }}
       >
-        {children}
+        <Box
+          data-testid={`${id}-content`}
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'auto',
+            // Out of the flow: the content never makes the panel (or its
+            // row) higher; it scrolls inside.
+            ...(fill ? { position: 'absolute', inset: 0 } : {}),
+          }}
+        >
+          {children}
+        </Box>
       </Box>
     </Paper>
   );

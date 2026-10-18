@@ -103,8 +103,8 @@ const SliceListPanel: FC<SliceListPanelProps> = ({
       width={SLICE_PANEL_WIDTH}
       expanded={expanded}
       onToggle={onToggle}
-      // Next to the viewport: its height. Below it: a bounded list.
-      sx={{ height: stacked ? (expanded ? '60vh' : 'auto') : '100%' }}
+      // Below the viewport: a bounded, scrollable list.
+      stackedHeight="60vh"
     >
       {rows.length ? (
         <SeriesSliceList
@@ -258,6 +258,35 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
     [data, itemsMapping, userId, canVote, stacked, slicePanelOpen, toggleSlicePanel]
   );
 
+  const reviewPanel = (
+    <ReviewSidePanel
+      id="series-review-panel"
+      title="Review"
+      name="review panel"
+      side="left"
+      stacked={stacked}
+      width={REVIEW_PANEL_WIDTH}
+      expanded={reviewPanelOpen}
+      onToggle={toggleReviewPanel}
+    >
+      <Typography variant="subtitle1" px={1} pt={1} data-testid="review-header">
+        Review —{' '}
+        {currentLabel ??
+          (currentImage ? 'locating the slice on screen…' : 'no slice shown yet')}
+      </Typography>
+      {partiallyLoaded && (
+        <Typography variant="caption" color="warning.main" px={1} component="div">
+          Only {active.position?.loadedCount} of {presented.length} images
+          of this series are loaded.
+        </Typography>
+      )}
+      <Divider />
+      {!!currentImage && !!currentLabel && (
+        <PatientImageReview item={currentImage} targetLabel={currentLabel} />
+      )}
+    </ReviewSidePanel>
+  );
+
   return (
     <Stack spacing={2}>
       <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
@@ -278,66 +307,27 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
         />
       </Stack>
       {/*
-        The panels take their own room next to the viewer (no overlay), so a
-        collapsed panel gives its width to the viewport. Below
-        SIDE_BY_SIDE_BREAKPOINT they are stacked under the viewer.
+        The panels take their own room on both sides of the viewer (no
+        overlay), so a collapsed panel gives its width to the viewport. Below
+        SIDE_BY_SIDE_BREAKPOINT they are stacked under the viewer. The review
+        panel is always the viewer's leading panel (it never moves to another
+        parent, so it is never remounted).
       */}
-      <Stack
-        data-testid="series-review-workspace"
-        data-layout={stacked ? 'stacked' : 'side'}
-        direction={stacked ? 'column' : 'row'}
-        spacing={1}
-        useFlexGap
-      >
-        <ReviewSidePanel
-          id="series-review-panel"
-          title="Review"
-          name="review panel"
-          side="left"
-          stacked={stacked}
-          width={REVIEW_PANEL_WIDTH}
-          expanded={reviewPanelOpen}
-          onToggle={toggleReviewPanel}
-          sx={
-            stacked
-              ? { order: 1 }
-              : {
-                  alignSelf: 'flex-start',
-                  position: 'sticky',
-                  top: 16,
-                  maxHeight: 'calc(100vh - 32px)',
-                }
-          }
-        >
-          <Typography variant="subtitle1" px={1} pt={1} data-testid="review-header">
-            Review —{' '}
-            {currentLabel ??
-              (currentImage ? 'locating the slice on screen…' : 'no slice shown yet')}
-          </Typography>
-          {partiallyLoaded && (
-            <Typography variant="caption" color="warning.main" px={1} component="div">
-              Only {active.position?.loadedCount} of {presented.length} images
-              of this series are loaded.
-            </Typography>
-          )}
-          <Divider />
-          {!!currentImage && !!currentLabel && (
-            <PatientImageReview item={currentImage} targetLabel={currentLabel} />
-          )}
-        </ReviewSidePanel>
-        {!!sources.length && (
-          <Box sx={{ flex: stacked ? undefined : 1, minWidth: 0 }}>
-            <DicomViewer
-              list={sources}
-              getRequestHeaders={keycloakAuthHeaders}
-              onCurrentItemChange={onCurrentItemChange}
-              onLoadResult={setLoadResult}
-              renderSidebar={renderSidebar}
-              sidebarPlacement={stacked ? 'below' : 'beside'}
-            />
-          </Box>
+      <Box data-testid="series-review-workspace" data-layout={stacked ? 'stacked' : 'side'}>
+        {sources.length ? (
+          <DicomViewer
+            list={sources}
+            getRequestHeaders={keycloakAuthHeaders}
+            onCurrentItemChange={onCurrentItemChange}
+            onLoadResult={setLoadResult}
+            leadingPanel={reviewPanel}
+            renderSidebar={renderSidebar}
+            sidebarPlacement={stacked ? 'below' : 'beside'}
+          />
+        ) : (
+          reviewPanel
         )}
-      </Stack>
+      </Box>
     </Stack>
   );
 };

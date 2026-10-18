@@ -38,6 +38,7 @@ type ViewerProps = {
     jumpTo: (index: number) => void;
   }) => unknown;
   sidebarPlacement?: 'beside' | 'below';
+  leadingPanel?: unknown;
 };
 let mockViewerProps: ViewerProps | undefined;
 /** Viewer instances mounted so far (a remount loads the images again). */
@@ -70,6 +71,7 @@ jest.mock('../../components', () => ({
     }, []);
     return (
       <div>
+        {props.leadingPanel as never}
         viewer
         {props.renderSidebar?.({
           items:
@@ -851,6 +853,73 @@ describe('Series page', () => {
         window.matchMedia = originalMatchMedia;
       });
       const workspace = () => screen.getByTestId('series-review-workspace');
+      const panel = (id: string) => screen.getByTestId(`${id}-panel`);
+      const expectPanelWidth = (id: string, width: string) =>
+        expect(getComputedStyle(panel(id)).width).toBe(width);
+
+      it('collapsed side by side, both panels are the same rail', () => {
+        renderSeries(response());
+        fireEvent.click(reviewToggle());
+        fireEvent.click(sliceToggle());
+        const [left, right] = ['series-review-panel', 'series-slice-list'].map(panel);
+        const style = (element: HTMLElement) => {
+          const computed = getComputedStyle(element);
+          return {
+            width: computed.width,
+            height: computed.height,
+            display: computed.display,
+            flexDirection: computed.flexDirection,
+            overflow: computed.overflow,
+            borderRadius: computed.borderRadius,
+            boxShadow: computed.boxShadow,
+          };
+        };
+        expect(style(left)).toEqual(style(right));
+        expect(style(left).width).toBe('40px');
+        // Neither sets its own height: both are as high as the viewer's row.
+        expect(style(left).height).toBe('');
+        expect(left.className.replace(/css-S+/g, '')).toBe(right.className.replace(/css-S+/g, ''));
+        // The same structure: the toggle on top, then the vertical title.
+        for (const element of [left, right]) {
+          const header = element.firstElementChild as HTMLElement;
+          expect(getComputedStyle(header).flexDirection).toBe('column');
+          expect(header.firstElementChild?.tagName).toBe('BUTTON');
+          expect(getComputedStyle(header.lastElementChild as HTMLElement).writingMode).toBe('vertical-rl');
+        }
+        // Only the chevrons differ: each points back to the viewer.
+        expect(reviewToggle().querySelector('[data-testid="ChevronRightIcon"]')).toBeTruthy();
+        expect(sliceToggle().querySelector('[data-testid="ChevronLeftIcon"]')).toBeTruthy();
+
+        // One collapsed, one expanded: the collapsed one is the same rail.
+        fireEvent.click(sliceToggle());
+        expectPanelWidth('series-review-panel', '40px');
+        expectPanelWidth('series-slice-list', '270px');
+        fireEvent.click(reviewToggle());
+        fireEvent.click(sliceToggle());
+        expectPanelWidth('series-review-panel', '300px');
+        expectPanelWidth('series-slice-list', '40px');
+      });
+
+      it('expanded side by side, both panels fill the row and scroll their content', () => {
+        renderSeries(response());
+        for (const id of ['series-review-panel', 'series-slice-list']) {
+          expect(getComputedStyle(panel(id)).height).toBe('');
+          const content = screen.getByTestId(`${id}-content`);
+          expect(getComputedStyle(content).position).toBe('absolute');
+          expect(getComputedStyle(content).overflow).toBe('auto');
+        }
+      });
+
+      it('stacked, the review form keeps its own height; the slice list is bounded', () => {
+        windowWidth = 768;
+        renderSeries(response());
+        expect(getComputedStyle(screen.getByTestId('series-review-panel-content')).position).not.toBe(
+          'absolute'
+        );
+        expect(getComputedStyle(panel('series-slice-list')).height).toBe('60vh');
+        fireEvent.click(sliceToggle());
+        expect(getComputedStyle(panel('series-slice-list')).height).toBe('');
+      });
 
       it.each([
         [375, 'stacked', 'below'],
@@ -868,8 +937,10 @@ describe('Series page', () => {
         expect(screen.getByTestId('series-review-panel-panel').getAttribute('data-layout')).toBe(layout);
         expect(screen.getByTestId('series-slice-list-panel').getAttribute('data-layout')).toBe(layout);
         expect(mockViewerProps?.sidebarPlacement).toBe(placement);
-        // Stacked: the viewer comes first, the review panel after it.
-        expect(getComputedStyle(workspace()).flexDirection).toBe(layout === 'side' ? 'row' : 'column');
+        // Both panels go to the viewer, on its two sides (or below it).
+        expect(screen.getByTestId('series-review-panel-panel')).toBeTruthy();
+        expectPanelWidth('series-review-panel', layout === 'side' ? '300px' : '100%');
+        expectPanelWidth('series-slice-list', layout === 'side' ? '270px' : '100%');
 
         fireEvent.click(reviewToggle());
         expectPanel(reviewToggle(), reviewContent(), false);

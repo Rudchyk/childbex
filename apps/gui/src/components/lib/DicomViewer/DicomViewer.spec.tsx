@@ -88,7 +88,7 @@ jest.mock('dwv', () => ({
 jest.mock('./DicomViewerTools', () => ({
   DicomViewerTools: (props: typeof mockToolsProps) => {
     mockToolsProps = props;
-    return null;
+    return <div data-testid="viewer-tools" />;
   },
 }));
 jest.mock('./DicomViewerSidebar', () => ({
@@ -462,13 +462,67 @@ describe('DicomViewer', () => {
     const flexDirection = () =>
       getComputedStyle(screen.getByTestId('dicom-viewport-row')).flexDirection;
 
+    /** CSS order of each slot of the viewport row. */
+    const slotOrder = (testId: string) => getComputedStyle(screen.getByTestId(testId)).order;
+
     it('sits next to the viewport by default, not over it', () => {
       render(<DicomViewer list={urls} renderSidebar={() => <Probe label="list" />} />);
       const viewport = screen.getByTestId('dicom-viewport');
-      expect(viewport.parentElement?.contains(screen.getByTestId('custom-sidebar'))).toBe(true);
+      const row = screen.getByTestId('dicom-viewport-row');
+      expect(row.contains(screen.getByTestId('custom-sidebar'))).toBe(true);
       expect(viewport.contains(screen.getByTestId('custom-sidebar'))).toBe(false);
       expect(flexDirection()).toBe('row');
       expect(screen.queryByTestId('default-sidebar')).toBeNull();
+    });
+
+    it('centres the toolbar over the viewport only, between the two panels', () => {
+      render(
+        <DicomViewer
+          list={urls}
+          toolbar={<div data-testid="custom-toolbar" />}
+          leadingPanel={<div data-testid="leading-panel" />}
+          renderSidebar={() => <Probe label="list" />}
+        />
+      );
+      const main = screen.getByTestId('dicom-viewer-main');
+      // The toolbar's column is exactly the viewport's column...
+      expect(main.contains(screen.getByTestId('viewer-tools'))).toBe(true);
+      expect(main.contains(screen.getByTestId('custom-toolbar'))).toBe(true);
+      expect(main.contains(screen.getByTestId('dicom-viewport'))).toBe(true);
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport')).width).toBe('100%');
+      // ...and the panels are outside it, on both sides.
+      expect(main.contains(screen.getByTestId('leading-panel'))).toBe(false);
+      expect(main.contains(screen.getByTestId('custom-sidebar'))).toBe(false);
+      expect(getComputedStyle(main).flexGrow).toBe('1');
+      expect([slotOrder('dicom-viewer-leading'), slotOrder('dicom-viewer-main'), slotOrder('dicom-viewer-sidebar')]).toEqual(['0', '1', '2']);
+      // Panels are as high as the toolbar and viewport (stretched, no own height).
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport-row')).height).toBe('');
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport-row')).alignItems).not.toBe('flex-start');
+    });
+
+    it('below: viewport first, then the sidebar, then the leading panel; nothing remounts', () => {
+      const LeadingProbe = () => {
+        const [state] = useState(() => ++probeMounts);
+        return <div data-testid="leading-panel">{state}</div>;
+      };
+      const view = (placement: 'beside' | 'below') => (
+        <DicomViewer
+          list={urls}
+          leadingPanel={<LeadingProbe />}
+          renderSidebar={() => <Probe label="list" />}
+          sidebarPlacement={placement}
+        />
+      );
+      const { rerender } = render(view('beside'));
+      rerender(view('below'));
+      expect(flexDirection()).toBe('column');
+      expect([slotOrder('dicom-viewer-main'), slotOrder('dicom-viewer-sidebar'), slotOrder('dicom-viewer-leading')]).toEqual(['1', '2', '3']);
+      // The toolbar is still centred over the (now full-width) viewport.
+      expect(screen.getByTestId('dicom-viewer-main').contains(screen.getByTestId('viewer-tools'))).toBe(true);
+      rerender(view('beside'));
+      expect(flexDirection()).toBe('row');
+      expect(probeMounts).toBe(2); // one sidebar, one leading panel: never remounted
+      expect(jest.requireMock('dwv').App).toHaveBeenCalledTimes(1);
     });
 
     it('goes below a full-width viewport on request, without remounting', () => {
@@ -502,6 +556,10 @@ describe('DicomViewer', () => {
       expect(flexDirection()).toBe('column');
       expect(getComputedStyle(screen.getByTestId('dicom-viewport')).width).toBe('100%');
       expect(screen.getByTestId('default-sidebar')).toBeTruthy();
+      // No panel slots: the toolbar is centred over the full-width viewport.
+      expect(screen.queryByTestId('dicom-viewer-leading')).toBeNull();
+      expect(screen.queryByTestId('dicom-viewer-sidebar')).toBeNull();
+      expect(screen.getByTestId('dicom-viewer-main').contains(screen.getByTestId('viewer-tools'))).toBe(true);
     });
 
     it('is still rendered on small screens; the default file list is not', () => {
