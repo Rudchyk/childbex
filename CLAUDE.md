@@ -17,9 +17,12 @@ The physician remains responsible for interpretation and diagnosis.
 
 ## Repository rules
 
-Work only in the current Claude worktree and branch:
+Follow the shared Git workflow in `AGENTS.md`: one Issue, one dedicated
+branch, independent review, then PR/CI and an authorized merge.
 
-`agent/claude`
+Work only in the assigned Claude worktree, but create or reuse a branch for
+**each Issue** (for example, `fix/36-breadcrumbs`). The old `agent/claude`
+branch is **not** the default implementation branch.
 
 Do not work directly on:
 
@@ -190,29 +193,23 @@ Prefer backward-compatible schema changes when possible.
 
 ## Git workflow
 
-Before starting substantial work, check:
+Before changing files, inspect the worktree, current branch, working-tree
+status, and relationship to `origin/main`, as specified in `AGENTS.md`.
+Do not assume an existing branch or dirty worktree is safe to reuse.
 
-`git status`
+Work on a dedicated Issue branch rather than `agent/claude` or `main`.
+Commit only task-related changes with clear messages, and publish the
+validated branch for independent review by default. If the user requests
+an uncommitted or unpushed review, stop at that boundary instead.
 
-and:
-
-`git branch --show-current`
-
-The expected branch is:
-
-`agent/claude`
-
-Commit only changes related to the current task.
-
-Use clear commit messages.
-
-Do not push or create a pull request unless explicitly requested.
+Create a PR after review approval or an explicit request. Do not merge or
+deploy without separate authorization. See `AGENTS.md` for the exact flow.
 
 ## Working with Codex
 
-Codex works independently in:
-
-`agent/codex`
+Codex works independently in its assigned worktree, using its own dedicated
+per-Issue branches. Its former `agent/codex` workspace branch must not
+be used to accumulate unrelated Issue changes.
 
 Do not modify the Codex worktree.
 
