@@ -34,6 +34,9 @@ let mockMeta: Record<string, unknown> = {};
 /** The loaded volume (dwv image); undefined: no slices. */
 let mockImage: unknown;
 let mockViewLayers: unknown[] | undefined;
+/** The view layer `jumpTo` moves (undefined: nothing to show yet). */
+let mockActiveViewLayer: unknown;
+const mockSetCurrentIndex = jest.fn();
 const mockImageWithSlices = (count: number) => ({
   getGeometry: () => ({ getSize: () => ({ get: () => count }) }),
   getImageUid: (index: { values: number[] }) => `uid-${index.values[2]}`,
@@ -66,7 +69,10 @@ jest.mock('dwv', () => ({
     getStyle: () => mockStyle,
     setTool: mockSetTool,
     setToolFeatures: mockSetToolFeatures,
-    getActiveLayerGroup: () => ({ setActiveLayer: jest.fn() }),
+    getActiveLayerGroup: () => ({
+      setActiveLayer: jest.fn(),
+      getActiveViewLayer: () => mockActiveViewLayer,
+    }),
     getMetaData: () => mockMeta,
     getData: () => ({ image: mockImage }),
     getViewLayersByDataId: () => mockViewLayers,
@@ -129,6 +135,7 @@ beforeEach(() => {
       }),
     },
   ];
+  mockActiveViewLayer = undefined;
   mockToolsProps = null;
   setPixelRatio(1);
 });
@@ -379,6 +386,64 @@ describe('DicomViewer', () => {
       expect(onCurrentItemChange).toHaveBeenLastCalledWith(urls[1], {
         index: 0,
         loadedCount: 2,
+      });
+    });
+
+    /**
+     * A custom list's jump is only a request: the slice on screen (and so
+     * the list's active slice) changes only when dwv reports it.
+     */
+    describe('jumpTo', () => {
+      let sidebar: { jumpTo: (index: number) => void; currentImageId?: string };
+      const renderWithList = () =>
+        render(
+          <DicomViewer
+            list={urls}
+            renderSidebar={(props) => {
+              sidebar = props;
+              return null;
+            }}
+          />
+        );
+
+      it('asks dwv for the slice and keeps the slice on screen until dwv reports it', () => {
+        mockActiveViewLayer = {
+          getViewController: () => ({
+            getCurrentIndex: () => ({ getValues: () => [0, 0, 1] }),
+            setCurrentIndex: mockSetCurrentIndex,
+          }),
+        };
+        renderWithList();
+        loadTwoSlices();
+        act(() => mockListeners.loadend({ dataid: '0' }));
+        expect(sidebar.currentImageId).toBe('uid-1');
+
+        act(() => sidebar.jumpTo(0));
+        expect(mockSetCurrentIndex).toHaveBeenCalledTimes(1);
+        expect(mockSetCurrentIndex.mock.calls[0][0].values).toEqual([0, 0, 0]);
+        expect(sidebar.currentImageId).toBe('uid-1');
+
+        act(() => mockListeners.positionchange({ data: { imageUid: 'uid-0' } }));
+        expect(sidebar.currentImageId).toBe('uid-0');
+      });
+
+      it('does nothing (and claims nothing) without a view layer', () => {
+        renderWithList();
+        expect(() => act(() => sidebar.jumpTo(0))).not.toThrow();
+        expect(mockSetCurrentIndex).not.toHaveBeenCalled();
+        expect(sidebar.currentImageId).toBeUndefined();
+      });
+
+      it.each([NaN, -1, 0.5])('never hands dwv an invalid index (%p)', (index) => {
+        mockActiveViewLayer = {
+          getViewController: () => ({
+            getCurrentIndex: () => ({ getValues: () => [0, 0, 1] }),
+            setCurrentIndex: mockSetCurrentIndex,
+          }),
+        };
+        renderWithList();
+        act(() => sidebar.jumpTo(index));
+        expect(mockSetCurrentIndex).not.toHaveBeenCalled();
       });
     });
   });

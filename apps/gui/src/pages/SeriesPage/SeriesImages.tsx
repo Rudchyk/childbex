@@ -48,10 +48,12 @@ interface SliceListPanelProps extends DicomViewerSidebarRenderProps {
 }
 
 /**
- * The selectable slice list next to the viewer: the active slice follows
- * the viewer; checkboxes select (never navigate); bulk actions apply the
- * current doctor's vote to the selection. Always rendered (also while
- * collapsed or loading), so the selection survives collapsing it.
+ * The selectable slice list next to the viewer: the active slice is only
+ * ever the one the viewer reports on screen; a checkbox click selects and
+ * asks the viewer to show that slice; Select all and bulk actions never
+ * navigate; bulk actions apply the current doctor's vote to the selection.
+ * Always rendered (also while collapsed or loading), so the selection
+ * survives collapsing it.
  */
 const SliceListPanel: FC<SliceListPanelProps> = ({
   data,

@@ -15,7 +15,9 @@ import {
   Stack,
   Tooltip,
   Typography,
+  type Theme,
 } from '@mui/material';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { PatientImageReviewVoteTypes, ReviewState } from '@libs/schemas';
 import { opinionLabels, type ReviewerOpinion } from './reviewOpinions';
 
@@ -34,13 +36,21 @@ export interface SliceRow {
 
 export interface SeriesSliceListProps {
   rows: readonly SliceRow[];
-  /** The slice on screen (independent of the selection). */
+  /**
+   * The slice on screen, as the viewer reports it (independent of the
+   * selection). Never the slice merely asked for: a jump the viewer did
+   * not make leaves it unchanged.
+   */
   activeId?: string;
   selected: ReadonlySet<string>;
-  /** Checkbox: never navigates. `range` for shift-click. */
+  /**
+   * Checkbox: changes the selection (`range` for shift-click). The same
+   * click then asks to show that slice (`onNavigate`, once).
+   */
   onToggle: (id: string, range: boolean) => void;
+  /** Select all: changes the selection only (never navigates). */
   onToggleAll: () => void;
-  /** Row: shows the slice. */
+  /** Asks the viewer to show the slice (row and checkbox clicks). */
   onNavigate: (index: number) => void;
   /** Rendered above the list (e.g. bulk actions). */
   header?: ReactNode;
@@ -100,15 +110,35 @@ interface RowProps {
   onNavigate: SeriesSliceListProps['onNavigate'];
 }
 
+/**
+ * The slice on screen: a primary (not error/warning) tint over the whole
+ * row, a frame with a thick leading bar, bold text and an eye marker, so it
+ * reads without colour too. Selection keeps its neutral background and
+ * checked box underneath (active + selected shows both); the opinion and
+ * conflict marks keep their own colours. No transition (fast scrolling).
+ */
+const activeRowSx = {
+  backgroundImage: (theme: Theme) => {
+    const tint = theme.alpha((theme.vars ?? theme).palette.primary.main, 0.2);
+    return `linear-gradient(${tint}, ${tint})`;
+  },
+  boxShadow: (theme: Theme) => {
+    const color = (theme.vars ?? theme).palette.primary.main;
+    return `inset 6px 0 0 ${color}, inset 0 0 0 2px ${color}`;
+  },
+};
+
 /** Memoised: a checkbox change re-renders only its own row. */
 const Row = memo<RowProps>(({ row, top, active, selected, onToggle, onNavigate }) => {
   const label = `Slice ${row.index + 1}${
     row.instanceNumber === null ? '' : ` · #${row.instanceNumber}`
   }`;
   const onCheckboxClick = (event: MouseEvent) => {
-    // Selecting never navigates.
+    // One handler for the checkbox (mouse, and Space on the focused box):
+    // select, then ask to show this slice once. Not the row's handler.
     event.stopPropagation();
     onToggle(row.id, event.shiftKey);
+    onNavigate(row.index);
   };
   return (
     <Stack
@@ -116,6 +146,7 @@ const Row = memo<RowProps>(({ row, top, active, selected, onToggle, onNavigate }
       alignItems="center"
       data-testid="slice-row"
       data-image-id={row.id}
+      data-active={active}
       aria-selected={selected}
       sx={{
         position: 'absolute',
@@ -126,7 +157,7 @@ const Row = memo<RowProps>(({ row, top, active, selected, onToggle, onNavigate }
         borderBottom: '1px solid',
         borderColor: 'divider',
         bgcolor: selected ? 'action.selected' : undefined,
-        boxShadow: active ? (theme) => `inset 4px 0 0 ${theme.palette.primary.main}` : undefined,
+        ...(active ? activeRowSx : {}),
       }}
     >
       <Checkbox
@@ -151,6 +182,17 @@ const Row = memo<RowProps>(({ row, top, active, selected, onToggle, onNavigate }
           {label}
         </Typography>
         <Stack direction="row" spacing={0.5} alignItems="center">
+          {active && (
+            <Tooltip title="Shown in the viewer">
+              <VisibilityIcon
+                data-testid="active-slice-marker"
+                // The button already says so (aria-current).
+                aria-hidden
+                color="primary"
+                sx={{ fontSize: 18 }}
+              />
+            </Tooltip>
+          )}
           {row.reviewState === ReviewState.CONFLICTED && (
             <Tooltip title="Reviewers disagree on this slice">
               <Typography variant="caption" color="error" aria-label="Conflict">
@@ -168,7 +210,8 @@ Row.displayName = 'SliceRow';
 
 /**
  * The slices of a Series with checkboxes (Gmail-like selection) and the
- * active slice. Only the visible rows are mounted (Series of 1000+ slices).
+ * active slice: one slice is active (on screen), any number are selected.
+ * Only the visible rows are mounted (Series of 1000+ slices).
  */
 export const SeriesSliceList: FC<SeriesSliceListProps> = ({
   rows,

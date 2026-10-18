@@ -317,8 +317,12 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     setLoadedItemsMapping({});
     setLoadErrorEvents([]);
   };
-  // Stable: memoised slice rows receive it.
+  // Stable: memoised slice rows receive it. Only a request: nothing loaded
+  // yet (no view layer) or an index out of the volume changes nothing, and
+  // the slice on screen is still only what dwv reports (positionchange).
   const jumpTo = useCallback((i: number) => {
+    // dwv's bounds check lets a NaN index through.
+    if (!Number.isInteger(i) || i < 0) return;
     const lg = appRef.current?.getActiveLayerGroup();
     const vl = lg?.getActiveViewLayer();
     if (vl) {
