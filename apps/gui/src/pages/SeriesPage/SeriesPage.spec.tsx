@@ -15,6 +15,8 @@ import type {
   SeriesSummary,
 } from '@libs/schemas';
 import { createTheme } from '@mui/material';
+import { format } from 'date-fns';
+import { defaultDateFormat } from '@libs/constants';
 import { Component as SeriesPage, SeriesContent } from './SeriesPage';
 import {
   REVIEW_PANEL_WIDTH,
@@ -1469,5 +1471,189 @@ describe('aggregate review state in the slice list', () => {
     expect(rows().every((row) => row.getAttribute('data-review-state') === 'ABNORMAL')).toBe(true);
     fireEvent.click(within(rowOf('s250')).getByRole('button', { name: 'Show Slice 251 · #251' }));
     expect(mockJumpTo.mock.calls).toEqual([[250]]);
+  });
+});
+
+describe('reviewer progress (#44)', () => {
+  type Completion = PatientSeriesResponse['review']['completions'][number];
+  const named = (reviewerId: string, reviewerName: string, value: 'normal' | 'abnormal' | 'uncertain') => ({
+    ...vote(reviewerId, value),
+    reviewerName,
+  });
+  const done = (reviewerId: string, reviewerName: string, overrides: Partial<Completion> = {}): Completion => ({
+    reviewerId,
+    reviewerName,
+    completedAt: '2026-10-02T10:00:00.000Z',
+    imageSetRevision: 'rev',
+    imageCount: 3,
+    current: true,
+    uncoveredImageCount: 0,
+    ...overrides,
+  });
+  /** The signed-in doctor is `sub-me` (Doctor B). */
+  const withReviews = (
+    completions: Completion[],
+    votesByImage: Record<string, SeriesImage['votes']> = {}
+  ): PatientSeriesResponse => {
+    const base = response({}, { imageSetRevision: 'rev', completions });
+    return {
+      ...base,
+      images: base.images.map((item) => ({ ...item, votes: votesByImage[item.id] ?? [], implicitNormals: [] })),
+    };
+  };
+  const progress = () => screen.getByTestId('review-progress');
+  const reviewerRows = () => within(progress()).queryAllByTestId('reviewer-progress');
+  const rowOfReviewer = (id: string) =>
+    reviewerRows().find((row) => row.getAttribute('data-reviewer-id') === id) as HTMLElement;
+  const statuses = () =>
+    reviewerRows().map((row) => [row.getAttribute('data-reviewer-id'), row.getAttribute('data-status')]);
+  const summaryText = () => within(progress()).queryByTestId('review-progress-summary')?.textContent;
+  const at = (iso: string) => format(iso, defaultDateFormat);
+
+  it("Doctor B sees Doctor A's completed review; B's own review stays separate and not completed", () => {
+    renderSeries(withReviews([done('sub-a', 'Doctor A')], { i2: [named('sub-me', 'Doctor B', 'abnormal')] }));
+    expect(within(progress()).getByRole('heading', { name: 'Review progress' })).toBeTruthy();
+    expect(within(progress()).getByRole('list', { name: 'Reviewers of this series' })).toBeTruthy();
+    expect(statuses()).toEqual([
+      ['sub-me', 'notCompleted'],
+      ['sub-a', 'completed'],
+    ]);
+    expect(rowOfReviewer('sub-me').textContent).toBe(
+      'Your review · Doctor BNot completed1 image marked, review not completed'
+    );
+    expect(rowOfReviewer('sub-a').textContent).toBe(
+      `Doctor ACompletedCompleted ${at('2026-10-02T10:00:00.000Z')} · covers the current images`
+    );
+    // A's completion is not B's: B's own Complete review is unchanged.
+    expect(completeButton().textContent).toBe('Complete review');
+    expect(screen.queryByText(/You completed this review/)).toBeNull();
+    expect(summaryText()).toBe('1 current completion · 1 not completed');
+  });
+
+  it('three reviewers: one current, one stale with its uncovered images, one voter without completion', () => {
+    renderSeries(
+      withReviews(
+        [
+          done('sub-a', 'Doctor A'),
+          done('sub-c', 'Doctor C', { current: false, imageSetRevision: 'old', uncoveredImageCount: 2 }),
+        ],
+        { i1: [named('sub-d', 'Doctor D', 'uncertain')], i3: [named('sub-d', 'Doctor D', 'normal')] }
+      )
+    );
+    expect(statuses()).toEqual([
+      ['sub-a', 'completed'],
+      ['sub-c', 'needsRecompletion'],
+      ['sub-d', 'notCompleted'],
+    ]);
+    expect(within(rowOfReviewer('sub-c')).getByText('Needs recompletion')).toBeTruthy();
+    expect(within(rowOfReviewer('sub-c')).getByText(/2 new images not covered$/)).toBeTruthy();
+    expect(within(rowOfReviewer('sub-d')).getByText('2 images marked, review not completed')).toBeTruthy();
+    // The stale completion is not counted as a current one; no roster.
+    expect(summaryText()).toBe('1 current completion · 1 needs recompletion · 1 not completed');
+    expect(within(progress()).getByTestId('review-progress-known').textContent).toBe(
+      '3 known reviewers (voted or completed). Not a list of assigned reviewers.'
+    );
+    expect(progress().textContent).not.toMatch(/of 3|\/ ?3/);
+    // The signed-in doctor has no activity: said, but not counted.
+    expect(within(progress()).getByText('You have not marked or completed this series yet.')).toBeTruthy();
+  });
+
+  it('no reviewer activity yet', () => {
+    renderSeries(withReviews([]));
+    expect(reviewerRows()).toEqual([]);
+    expect(within(progress()).getByTestId('review-progress-empty').textContent).toBe('No reviewer activity yet.');
+    expect(summaryText()).toBeUndefined();
+  });
+
+  it('missing reviewer names fall back to a label, never the reviewer id', () => {
+    renderSeries(withReviews([done('sub-nameless-1', '')], { i3: [named('sub-nameless-2', ' ', 'abnormal')] }));
+    expect(within(progress()).getAllByText('Unnamed reviewer')).toHaveLength(2);
+    expect(progress().textContent).not.toContain('sub-nameless');
+  });
+
+  it('after refetches: recompletion, a vote after completion (no Reopen) and new images', () => {
+    const { rerender } = renderSeries(
+      withReviews(
+        [done('sub-me', 'Doctor B', { current: false, uncoveredImageCount: 1 }), done('sub-a', 'Doctor A')],
+        { i1: [named('sub-a', 'Doctor A', 'abnormal')] }
+      )
+    );
+    expect(statuses()).toEqual([
+      ['sub-me', 'needsRecompletion'],
+      ['sub-a', 'completed'],
+    ]);
+    expect(within(rowOfReviewer('sub-me')).getByText(/1 new image not covered$/)).toBeTruthy();
+    // The new image is not Normal by default from the old completion.
+    expect(within(rowOf('i3')).queryByLabelText(/^Your opinion/)).toBeNull();
+    expect(completeButton().textContent).toBe('Complete review');
+    const doctorA = rowOfReviewer('sub-a').textContent;
+
+    // Recompleted (refetched): current again, with its new date.
+    const recompleted = withReviews(
+      [done('sub-me', 'Doctor B', { completedAt: '2026-10-03T08:00:00.000Z' }), done('sub-a', 'Doctor A')],
+      { i1: [named('sub-a', 'Doctor A', 'abnormal')] }
+    );
+    rerender(<SeriesContent data={recompleted} isLoading={false} isError={false} />);
+    expect(statuses()).toEqual([
+      ['sub-me', 'completed'],
+      ['sub-a', 'completed'],
+    ]);
+    expect(rowOfReviewer('sub-me').textContent).toContain(at('2026-10-03T08:00:00.000Z'));
+    expect(summaryText()).toBe('2 current completions');
+
+    // An own vote after completion: still completed and editable, A untouched.
+    const voted = withReviews(recompleted.review.completions, {
+      i1: [named('sub-a', 'Doctor A', 'abnormal')],
+      i2: [named('sub-me', 'Doctor B', 'abnormal')],
+    });
+    rerender(<SeriesContent data={voted} isLoading={false} isError={false} />);
+    expect(statuses()).toEqual([
+      ['sub-me', 'completed'],
+      ['sub-a', 'completed'],
+    ]);
+    expect(rowOfReviewer('sub-a').textContent).toBe(doctorA);
+    expect(screen.queryByRole('button', { name: /reopen/i })).toBeNull();
+    fireEvent.click(checkboxOf('i1'));
+    expect(screen.getByTestId('bulk-review-actions')).toBeTruthy();
+    // Same Series: the viewer is kept.
+    expect(mockViewerMounts).toBe(1);
+  });
+
+  it("switching Series or patient shows only the new Series' reviewers", () => {
+    const { rerender } = renderSeries(
+      withReviews([done('sub-a', 'Doctor A')], { i2: [named('sub-me', 'Doctor B', 'abnormal')] })
+    );
+    expect(reviewerRows()).toHaveLength(2);
+
+    rerender(<SeriesContent data={responseB()} isLoading={false} isError={false} />);
+    expect(reviewerRows()).toEqual([]);
+    expect(within(progress()).getByTestId('review-progress-empty')).toBeTruthy();
+    expect(progress().textContent).not.toContain('Doctor A');
+
+    const otherPatient: PatientSeriesResponse = {
+      ...responseB(),
+      patient: { id: '22222222-2222-4222-8222-222222222222', slug: 'synthetic-2' },
+      images: [image('c1', { votes: [named('sub-e', 'Doctor E', 'normal')] })],
+    };
+    rerender(<SeriesContent data={otherPatient} isLoading={false} isError={false} />);
+    expect(statuses()).toEqual([['sub-e', 'notCompleted']]);
+  });
+
+  it('leaves the #43 aggregate slice marks and filters in place', () => {
+    const data = withReviews([done('sub-a', 'Doctor A')], { i1: [named('sub-a', 'Doctor A', 'abnormal')] });
+    data.images = data.images.map((item) =>
+      item.id === 'i1'
+        ? {
+            ...item,
+            reviewState: 'ABNORMAL' as SeriesImage['reviewState'],
+            reviewStateSource: 'VOTES' as SeriesImage['reviewStateSource'],
+          }
+        : item
+    );
+    renderSeries(data);
+    expect(within(rowOf('i1')).getByTestId('aggregate-mark').textContent).toBe('ABN');
+    fireEvent.click(within(screen.getByTestId('slice-review-filter')).getByRole('button', { name: /^Abnormal/ }));
+    expect(rows().map((row) => row.getAttribute('data-image-id'))).toEqual(['i1']);
+    expect(statuses()).toEqual([['sub-a', 'completed']]);
   });
 });

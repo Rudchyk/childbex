@@ -18,6 +18,7 @@ import { BulkReviewActions } from './review/BulkReviewActions';
 import { useSliceSelection } from './review/sliceSelection';
 import { completionOf, countOwnVotes, opinionOf } from './review/reviewOpinions';
 import { ReviewSidePanel } from './review/ReviewSidePanel';
+import { ReviewProgress } from './review/ReviewProgress';
 import { SliceReviewFilter } from './review/SliceReviewFilter';
 import {
   countByFilter,
@@ -330,6 +331,9 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
       {!!currentImage && !!currentLabel && (
         <PatientImageReview item={currentImage} targetLabel={currentLabel} />
       )}
+      <Divider />
+      {/* Every known reviewer's own progress, from this Series' data only. */}
+      <ReviewProgress data={data} currentUserId={userId} canReview={canVote} />
     </ReviewSidePanel>
   );
 
