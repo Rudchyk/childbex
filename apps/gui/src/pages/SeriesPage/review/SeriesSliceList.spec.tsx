@@ -3,9 +3,9 @@
  * browser drops the scroll position of a hidden list, so the list reads it
  * again and brings the active slice back into view (no blank rows).
  */
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { PatientImageReviewVoteTypes, ReviewState, ReviewStateSource } from '@libs/schemas';
-import { ROW_HEIGHT, SeriesSliceList, type SliceRow } from './SeriesSliceList';
+import { ROW_HEIGHT, SeriesSliceList, sliceRowLabels, type SliceRow } from './SeriesSliceList';
 
 /** Synthetic slices (no patient data). */
 const ROWS: SliceRow[] = Array.from({ length: 200 }, (_, index) => ({
@@ -351,11 +351,12 @@ describe('aggregate review state', () => {
     expect(within(rowOf('img-0')).queryByLabelText(/^Your opinion/)).toBeNull();
     // The unflagged neighbour looks different (word, not only colour).
     expect(markOf('img-1').textContent).toBe('—');
-    // Screen readers get both states with the row's button.
+    // Screen readers get both states with the row's button (then "#1").
     const button = within(rowOf('img-0')).getByRole('button', { name: 'Show Slice 1 · #1' });
     const description = document.getElementById(button.getAttribute('aria-describedby') ?? '');
     expect(description?.textContent).toBe(
-      'All reviewers: Abnormal — flagged by reviewer vote, not a confirmed diagnosis. Your opinion: not marked.'
+      'All reviewers: Abnormal — flagged by reviewer vote, not a confirmed diagnosis. ' +
+        'Your opinion: not marked. DICOM Instance Number 1.'
     );
   });
 
@@ -428,10 +429,158 @@ describe('aggregate review state', () => {
   it('explains the two marks and shows an empty message without rows', () => {
     renderRows([], { emptyMessage: 'No slices in “Abnormal” among the 3 loaded.' });
     expect(screen.getByTestId('slice-list-legend').textContent).toBe(
-      "Pill: all reviewers' review state (not a diagnosis) · Square: your opinion"
+      "Pill: all reviewers' review state (not a diagnosis) · Square: your opinion · #: DICOM Instance Number"
     );
     expect(screen.getByTestId('slice-list-empty').textContent).toBe(
       'No slices in “Abnormal” among the 3 loaded.'
     );
+  });
+});
+
+/**
+ * "Slice N" is the position in the viewer's stack, "#M" the source DICOM's
+ * Instance Number: the two need not agree (gaps, opposite direction).
+ */
+describe('slice position and DICOM Instance Number', () => {
+  /** Synthetic: spatial order with Instance Numbers decreasing, with gaps. */
+  const INSTANCES = [461, 459, 458, 457, 448];
+  const rows: SliceRow[] = INSTANCES.map((instanceNumber, index) => ({
+    id: `inst-${instanceNumber}`,
+    index,
+    instanceNumber,
+    opinion: null,
+    reviewState: ReviewState.NOT_REVIEWED,
+    reviewStateSource: ReviewStateSource.NONE,
+  }));
+
+  it('labels come from the row index and Instance Number', () => {
+    expect(sliceRowLabels({ index: 2, instanceNumber: 458 })).toEqual({
+      label: 'Slice 3 · #458',
+      instanceTitle: 'DICOM Instance Number 458',
+    });
+    expect(sliceRowLabels({ index: 377, instanceNumber: 0 })).toEqual({
+      label: 'Slice 378 · #0',
+      instanceTitle: 'DICOM Instance Number 0',
+    });
+    expect(sliceRowLabels({ index: 0, instanceNumber: null })).toEqual({
+      label: 'Slice 1',
+      instanceTitle: null,
+    });
+  });
+
+  describe('Instance Number tooltip', () => {
+    const renderOne = (row: Partial<SliceRow> = {}) => {
+      const onNavigate = jest.fn();
+      render(
+        <SeriesSliceList
+          rows={[{ ...rows[2], ...row }]}
+          selected={new Set()}
+          onToggle={jest.fn()}
+          onToggleAll={jest.fn()}
+          onNavigate={onNavigate}
+        />
+      );
+      return { onNavigate };
+    };
+    const descriptionOf = (button: HTMLElement) =>
+      document.getElementById(button.getAttribute('aria-describedby') ?? '')?.textContent;
+
+    it('short text and name; the explanation on hovering the label', async () => {
+      const { onNavigate } = renderOne();
+      const button = screen.getByRole('button', { name: 'Show Slice 3 · #458' });
+      const label = screen.getByTestId('slice-label');
+      expect(label.textContent).toBe('Slice 3 · #458');
+      const describedBy = button.getAttribute('aria-describedby');
+      expect(screen.queryByRole('tooltip')).toBeNull();
+
+      fireEvent.mouseOver(label);
+      expect((await screen.findByRole('tooltip')).textContent).toBe('DICOM Instance Number 458');
+      // The tooltip neither renames the button nor replaces its description.
+      expect(button.getAttribute('aria-label')).toBe('Show Slice 3 · #458');
+      expect(button.getAttribute('aria-describedby')).toBe(describedBy);
+      expect(descriptionOf(button)).toBe(
+        'All reviewers: Not reviewed — no reviewer opinion yet. Your opinion: not marked. DICOM Instance Number 458.'
+      );
+
+      fireEvent.click(button);
+      expect(onNavigate.mock.calls).toEqual([[2]]);
+    });
+
+    it('opens on keyboard focus of the row, closes on Escape and on blur', async () => {
+      renderOne();
+      const button = screen.getByRole('button', { name: 'Show Slice 3 · #458' });
+      // Keyboard focus (focus-visible), as Tab gives it.
+      fireEvent.keyDown(document.body, { key: 'Tab' });
+      act(() => button.focus());
+      expect((await screen.findByRole('tooltip')).textContent).toBe('DICOM Instance Number 458');
+      expect(button.getAttribute('aria-label')).toBe('Show Slice 3 · #458');
+
+      fireEvent.keyDown(document, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+
+      act(() => button.blur());
+      fireEvent.keyDown(document.body, { key: 'Tab' });
+      act(() => button.focus());
+      expect(await screen.findByRole('tooltip')).toBeTruthy();
+      act(() => button.blur());
+      await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+    });
+
+    it('without an Instance Number: no "#", no tooltip, the states still described', async () => {
+      const { onNavigate } = renderOne({ instanceNumber: null });
+      const button = screen.getByRole('button', { name: 'Show Slice 3' });
+      expect(screen.getByTestId('slice-label').textContent).toBe('Slice 3');
+      expect(screen.getByRole('checkbox', { name: 'Select Slice 3' })).toBeTruthy();
+      expect(descriptionOf(button)).toBe('All reviewers: Not reviewed — no reviewer opinion yet. Your opinion: not marked.');
+
+      fireEvent.mouseOver(screen.getByTestId('slice-label'));
+      fireEvent.keyDown(document.body, { key: 'Tab' });
+      act(() => button.focus());
+      await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+      expect(screen.queryByRole('tooltip')).toBeNull();
+
+      fireEvent.click(button);
+      expect(onNavigate.mock.calls).toEqual([[2]]);
+    });
+  });
+
+  it('keeps each row on its own image and viewer index, whatever the Instance Numbers', () => {
+    const onNavigate = jest.fn();
+    const onToggle = jest.fn();
+    // Top = last slice (as SeriesImages passes them).
+    render(
+      <SeriesSliceList
+        rows={[...rows].reverse()}
+        activeId="inst-458"
+        selected={new Set()}
+        onToggle={onToggle}
+        onToggleAll={jest.fn()}
+        onNavigate={onNavigate}
+      />
+    );
+    const listed = screen.getAllByTestId('slice-row');
+    expect(listed.map((row) => row.getAttribute('data-image-id'))).toEqual([
+      'inst-448',
+      'inst-457',
+      'inst-458',
+      'inst-459',
+      'inst-461',
+    ]);
+    expect(listed.map((row) => within(row).getByTestId('slice-label').textContent)).toEqual([
+      'Slice 5 · #448',
+      'Slice 4 · #457',
+      'Slice 3 · #458',
+      'Slice 2 · #459',
+      'Slice 1 · #461',
+    ]);
+
+    // Slice 3 is viewer index 2 (never an index derived from #458).
+    const button = screen.getByRole('button', { name: 'Show Slice 3 · #458' });
+    expect(button.getAttribute('aria-current')).toBe('true');
+    fireEvent.click(button);
+    expect(onNavigate.mock.calls).toEqual([[2]]);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Slice 1 · #461' }));
+    expect(onToggle.mock.calls).toEqual([['inst-461', false]]);
+    expect(onNavigate.mock.calls).toEqual([[2], [0]]);
   });
 });

@@ -683,7 +683,7 @@ describe('Series page', () => {
       act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
       fireEvent.click(completeButton());
       expect(screen.getByText(/1 Abnormal, 0 Not sure, 0 Normal/)).toBeTruthy();
-      expect(screen.getByText(/other 2 image\(s\) will count as Normal/)).toBeTruthy();
+      expect(screen.getByText(/other 2 images will\s+count as Normal/)).toBeTruthy();
       expect(screen.getByText(/can still\s+change any of your decisions later/)).toBeTruthy();
       fireEvent.click(screen.getByText('Agree'));
       expect(mockComplete).toHaveBeenCalledWith({
@@ -729,7 +729,69 @@ describe('Series page', () => {
           completions: [{ ...completion, current: false, uncoveredImageCount: 1 }],
         })
       );
-      expect(screen.getByText(/1 new image\(s\) not reviewed/)).toBeTruthy();
+      expect(screen.getByText(/· 1 new image not reviewed$/)).toBeTruthy();
+    });
+
+    /** Local time: the rendered text is the same in every timezone. */
+    const LOCAL_COMPLETED_AT = new Date(2026, 9, 19, 12, 45, 39).toISOString();
+    const ownCompletion = (overrides: { current: boolean; uncoveredImageCount: number }) =>
+      response({}, {
+        imageSetRevision: overrides.current ? 'rev' : 'rev-2',
+        completions: [
+          {
+            reviewerId: 'sub-me',
+            reviewerName: 'Me',
+            completedAt: LOCAL_COMPLETED_AT,
+            imageSetRevision: 'rev',
+            imageCount: 3,
+            ...overrides,
+          },
+        ],
+      });
+    /** The own completion chip (Review progress shows the date as well). */
+    const chipLabel = () => {
+      const [chip, ...more] = screen
+        .getAllByText(/^(You completed this review|Completed) /)
+        .filter((element) => element.classList.contains('MuiChip-label'));
+      expect(more).toEqual([]);
+      return chip?.textContent;
+    };
+
+    it('shows the completion time with two-digit seconds', () => {
+      renderSeries(ownCompletion({ current: true, uncoveredImageCount: 0 }));
+      expect(chipLabel()).toBe('You completed this review 19/10/2026 12:45:39');
+    });
+
+    it.each([
+      [1, 'Completed 19/10/2026 12:45:39 · 1 new image not reviewed', /^1 image was added .* it is not Normal by default/],
+      [2, 'Completed 19/10/2026 12:45:39 · 2 new images not reviewed', /^2 images were added .* they are not Normal by default/],
+    ])('an outdated completion with %i uncovered image(s) counts them correctly', (count, label, title) => {
+      renderSeries(ownCompletion({ current: false, uncoveredImageCount: count }));
+      expect(chipLabel()).toBe(label);
+      expect(screen.getByLabelText(title)).toBeTruthy();
+    });
+
+    it('an outdated completion without uncovered images says the image set changed, not that images were added', () => {
+      renderSeries(ownCompletion({ current: false, uncoveredImageCount: 0 }));
+      expect(chipLabel()).toBe(
+        'Completed 19/10/2026 12:45:39 · Image set changed since completion · review again'
+      );
+      expect(screen.queryByText(/new image/)).toBeNull();
+      const tooltip = screen.getByLabelText(/^The images of this series changed after your completed review/);
+      expect(tooltip.getAttribute('aria-label')).not.toMatch(/added after/);
+      // Currentness stays the backend's: still not a current completion.
+      expect(completeButton().textContent).toBe('Complete review');
+    });
+
+    it('pluralizes the images that will count as Normal', () => {
+      mockComplete.mockReturnValue({ unwrap: () => new Promise(() => undefined) });
+      const data = response();
+      // Own votes on i2 (abnormal) and i3: one unmarked image left.
+      data.images[2] = { ...data.images[2], votes: [vote('sub-me', 'normal')] };
+      renderSeries(data);
+      act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
+      fireEvent.click(completeButton());
+      expect(screen.getByText(/other 1 image will\s+count as Normal/)).toBeTruthy();
     });
   });
 
@@ -1655,5 +1717,100 @@ describe('reviewer progress (#44)', () => {
     fireEvent.click(within(screen.getByTestId('slice-review-filter')).getByRole('button', { name: /^Abnormal/ }));
     expect(rows().map((row) => row.getAttribute('data-image-id'))).toEqual(['i1']);
     expect(statuses()).toEqual([['sub-a', 'completed']]);
+  });
+});
+
+/**
+ * "Slice N" is the viewer's (dwv's) position in the loaded stack, ordered by
+ * patient position; "#M" is the source DICOM Instance Number. They are not
+ * expected to agree: identity is the image id (via the file URL), never the
+ * Instance Number.
+ */
+describe('slice position versus DICOM Instance Number', () => {
+  /**
+   * Synthetic stack, Instance Numbers decreasing with gaps (no patient
+   * data). API order shuffled on purpose: the list follows the viewer.
+   */
+  const numbered = (): PatientSeriesResponse => ({
+    ...response(),
+    images: [
+      image('n458', { instanceNumber: 458 }),
+      image('n448', { instanceNumber: 448 }),
+      image('n461', { instanceNumber: 461 }),
+      image('n459', { instanceNumber: 459 }),
+      image('n457', { instanceNumber: 457 }),
+    ],
+  });
+  /** dwv's slices in index order (its spatial order), as DicomViewer reports them. */
+  const ITEMS = ['n461', 'n459', 'n458', 'n457', 'n448'].map((id, index) => ({
+    imageUid: `uid-${id}`,
+    source: url(id),
+    index,
+  }));
+  const labels = () => rows().map((row) => within(row).getByTestId('slice-label').textContent);
+
+  it('lists the slices top = last, each row naming its own image', () => {
+    mockViewerItems = ITEMS;
+    renderSeries(numbered());
+    expect(rows().map((row) => row.getAttribute('data-image-id'))).toEqual([
+      'n448',
+      'n457',
+      'n458',
+      'n459',
+      'n461',
+    ]);
+    expect(labels()).toEqual([
+      'Slice 5 · #448',
+      'Slice 4 · #457',
+      'Slice 3 · #458',
+      'Slice 2 · #459',
+      'Slice 1 · #461',
+    ]);
+    expect(screen.getByTestId('slice-list-legend').textContent).toContain('#: DICOM Instance Number');
+  });
+
+  it('Slice 3 · #458 navigates to viewer slice 3 and reviews that image', () => {
+    mockViewerItems = ITEMS;
+    renderSeries(numbered());
+    fireEvent.click(screen.getByRole('button', { name: 'Show Slice 3 · #458' }));
+    expect(mockJumpTo.mock.calls).toEqual([[2]]);
+
+    // The viewer reports the slice it shows: highlighted and reviewed.
+    mockCurrentUid = 'uid-n458';
+    act(() => mockViewerProps?.onCurrentItemChange(url('n458'), { index: 2, loadedCount: 5 }));
+    expect(
+      rows()
+        .filter((row) => row.getAttribute('data-active') === 'true')
+        .map((row) => row.getAttribute('data-image-id'))
+    ).toEqual(['n458']);
+    expect(header()).toBe('Review — Slice 3 / 5 loaded · Instance #458');
+    expect(screen.getByText('review:n458')).toBeTruthy();
+  });
+
+  it('bulk votes go to the selected images by id, with plural-aware wording', async () => {
+    mockViewerItems = ITEMS;
+    mockBulk.mockReturnValue({
+      unwrap: () => Promise.resolve({ requested: 1, created: 1, changed: 0, unchanged: 0 }),
+    });
+    renderSeries(numbered());
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Slice 1 · #461' }));
+    const bulk = screen.getByTestId('bulk-review-actions');
+    expect(bulk.textContent).toContain('Your vote for 1 selected slice:');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Slice 5 · #448' }));
+    expect(bulk.textContent).toContain('Your vote for 2 selected slices:');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Slice 5 · #448' }));
+
+    fireEvent.click(within(bulk).getByRole('button', { name: 'Abnormal' }));
+    expect(mockBulk).toHaveBeenCalledWith({
+      patientId: PATIENT,
+      seriesId: SERIES,
+      imageIds: ['n461'],
+      vote: 'abnormal',
+    });
+    await waitFor(() =>
+      expect(mockNotifySuccess).toHaveBeenCalledWith(
+        'Abnormal saved for 1 slice (1 new, 0 changed, 0 unchanged).'
+      )
+    );
   });
 });

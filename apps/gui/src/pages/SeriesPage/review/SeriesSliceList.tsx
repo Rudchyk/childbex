@@ -236,11 +236,28 @@ const visuallyHidden = {
   whiteSpace: 'nowrap',
 } as const;
 
+/**
+ * A row's two numbers. "Slice N" is the position in the viewer's stack
+ * (dwv orders by ImagePositionPatient along the slice normal, as the API
+ * does); "#M" is the source DICOM's Instance Number (0020,0013), which need
+ * not be consecutive nor increase with N. The label stays short (narrow
+ * panel); `instanceTitle` explains "#M", and is null without one.
+ */
+export const sliceRowLabels = ({ index, instanceNumber }: Pick<SliceRow, 'index' | 'instanceNumber'>) =>
+  instanceNumber === null
+    ? { label: `Slice ${index + 1}`, instanceTitle: null }
+    : {
+        label: `Slice ${index + 1} · #${instanceNumber}`,
+        instanceTitle: `DICOM Instance Number ${instanceNumber}`,
+      };
+
 /** Memoised: a checkbox change re-renders only its own row. */
 const Row = memo<RowProps>(({ row, top, active, selected, onToggle, onNavigate }) => {
-  const label = `Slice ${row.index + 1}${
-    row.instanceNumber === null ? '' : ` · #${row.instanceNumber}`
-  }`;
+  const { label, instanceTitle } = sliceRowLabels(row);
+  // The Instance Number tooltip: hovering the label, or keyboard focus on
+  // the row's button (a tooltip on the whole button would open together
+  // with the marks' own tooltips). Escape, blur and leaving close it.
+  const [instanceTipOpen, setInstanceTipOpen] = useState(false);
   const onCheckboxClick = (event: MouseEvent) => {
     // One handler for the checkbox (mouse, and Space on the focused box):
     // select, then ask to show this slice once. Not the row's handler.
@@ -249,6 +266,16 @@ const Row = memo<RowProps>(({ row, top, active, selected, onToggle, onNavigate }
     onNavigate(row.index);
   };
   const descriptionId = useId();
+  const labelText = (
+    <Typography
+      variant="body2"
+      noWrap
+      data-testid="slice-label"
+      sx={{ fontWeight: active ? 700 : 400, textAlign: 'left' }}
+    >
+      {label}
+    </Typography>
+  );
   return (
     <Stack
       direction="row"
@@ -282,23 +309,32 @@ const Row = memo<RowProps>(({ row, top, active, selected, onToggle, onNavigate }
         onClick={() => onNavigate(row.index)}
         aria-current={active ? 'true' : undefined}
         aria-label={`Show ${label}`}
-        // Both states, read after the name (the marks are inside the label).
+        // Both states, read after the name (the marks are inside the label),
+        // then what "#M" is (the tooltip is not read with the button).
         aria-describedby={descriptionId}
+        onFocusVisible={() => setInstanceTipOpen(true)}
+        onBlur={() => setInstanceTipOpen(false)}
         sx={{ flex: 1, minWidth: 0, height: '100%', justifyContent: 'space-between', pr: 1 }}
       >
         <Box component="span" id={descriptionId} sx={visuallyHidden}>
           {aggregateDescription(row.reviewState, row.reviewStateSource)}.{' '}
-          {opinionTitle(row.opinion)}.
+          {opinionTitle(row.opinion)}.{instanceTitle && ` ${instanceTitle}.`}
         </Box>
         <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
           <AggregateMark state={row.reviewState} source={row.reviewStateSource} />
-          <Typography
-            variant="body2"
-            noWrap
-            sx={{ fontWeight: active ? 700 : 400, textAlign: 'left' }}
-          >
-            {label}
-          </Typography>
+          {instanceTitle ? (
+            <Tooltip
+              title={instanceTitle}
+              describeChild
+              open={instanceTipOpen}
+              onOpen={() => setInstanceTipOpen(true)}
+              onClose={() => setInstanceTipOpen(false)}
+            >
+              {labelText}
+            </Tooltip>
+          ) : (
+            labelText
+          )}
         </Stack>
         <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
           {active && (
@@ -414,6 +450,7 @@ export const SeriesSliceList: FC<SeriesSliceListProps> = ({
         sx={{ px: 1, py: 0.25, borderBottom: '1px solid', borderColor: 'divider' }}
       >
         Pill: all reviewers&apos; review state (not a diagnosis) · Square: your opinion
+        · #: DICOM Instance Number
       </Typography>
       {!rows.length && !!emptyMessage && (
         <Typography variant="body2" color="text.secondary" p={1} data-testid="slice-list-empty">

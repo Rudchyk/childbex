@@ -1,5 +1,6 @@
 import { FC } from 'react';
 import { Button, Stack, Typography } from '@mui/material';
+import pluralize from 'pluralize';
 import { PatientImageReviewVoteTypes } from '@libs/schemas';
 import { useNotifications } from '../../../modules/notifications';
 import { useBulkReviewVoteMutation } from '../../../store/apis';
@@ -45,7 +46,7 @@ export const BulkReviewActions: FC<BulkReviewActionsProps> = ({
         vote,
       }).unwrap();
       notifySuccess(
-        `${opinionLabels[vote]} saved for ${result.requested} slice(s)` +
+        `${opinionLabels[vote]} saved for ${result.requested} ${pluralize('slice', result.requested)}` +
           ` (${result.created} new, ${result.changed} changed, ${result.unchanged} unchanged).`
       );
       onSaved();
@@ -61,7 +62,8 @@ export const BulkReviewActions: FC<BulkReviewActionsProps> = ({
       data-testid="bulk-review-actions"
     >
       <Typography variant="caption">
-        Your vote for {selectedIds.length} selected slice(s):
+        Your vote for {selectedIds.length} selected{' '}
+        {pluralize('slice', selectedIds.length)}:
       </Typography>
       <Stack direction="row" spacing={0.5}>
         {bulkVoteOrder.map((vote) => (
