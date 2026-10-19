@@ -25,7 +25,6 @@ import { useEffect } from 'react';
 import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
-import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { GetPatientsResponse, UpdatePatientRequestBody } from '@libs/schemas';
 import { useNotifications } from '../../modules/notifications';
 import {
@@ -50,6 +49,7 @@ import {
   isPatientNavigable,
   shouldOpenPatientOnCellClick,
 } from './patientRowNavigation';
+import { PatientRowNumber } from './PatientRowNumber';
 
 type Patient = GetPatientsResponse[0];
 /***
@@ -94,31 +94,21 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       notifyInfo(`${text} was copied`);
     }
   };
+  // The keyboard/assistive way to open a patient (a row click opens it too).
+  const rowNumberColumn: GridColDef<Patient> = {
+    field: 'rowNumber',
+    headerName: '№',
+    width: 60,
+    sortable: false,
+    filterable: false,
+    disableColumnMenu: true,
+    disableExport: true,
+    renderCell: ({ id, row, tabIndex }: GridCellParams<Patient>) => (
+      <PatientRowNumber id={id} patient={row} tabIndex={tabIndex} />
+    ),
+  };
   const columns: GridColDef<Patient>[] = [
-    {
-      // The keyboard/assistive way to open a patient (a row click opens it too).
-      field: 'open',
-      headerName: 'Open',
-      width: 70,
-      sortable: false,
-      filterable: false,
-      disableColumnMenu: true,
-      disableExport: true,
-      renderCell: ({ row, tabIndex }: GridCellParams<Patient>) =>
-        isPatientNavigable(row) && (
-          <Stack justifyContent="center" alignItems="center" height="100%">
-            <IconButton
-              size="small"
-              component={RouteLink}
-              to={getPatientPath(row.slug)}
-              tabIndex={tabIndex}
-              aria-label={`Open patient ${row.name}`}
-            >
-              <ArrowForwardIcon />
-            </IconButton>
-          </Stack>
-        ),
-    },
+    rowNumberColumn,
     {
       field: 'id',
       headerName: 'ID',
@@ -224,6 +214,7 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
     },
   ];
   const mobileColumns: GridColDef<Patient>[] = [
+    rowNumberColumn,
     {
       field: 'name',
       headerName: 'Name',

@@ -7,6 +7,7 @@
  */
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -419,7 +420,100 @@ describe('Patients grid controls do not navigate', () => {
   });
 });
 
-describe('Patients open link', () => {
+/** Displayed rows in order, as "number name" (only rendered rows). */
+const displayed = () =>
+  [...document.querySelectorAll('[role="row"][data-id]')].map(
+    (row) =>
+      `${row.querySelector('[data-field="rowNumber"]')?.textContent} ${
+        row.querySelector('[data-field="name"]')?.textContent
+      }`
+  );
+
+describe('Patients row numbers', () => {
+  const A = patient(1, { name: 'Alpha' });
+  const B = patient(2, { name: 'Bravo' });
+  const C = patient(3, { name: 'Charlie' });
+
+  it('is the first column, desktop and mobile', () => {
+    renderPatients({ rows: [A, B, C] });
+    const headers = () =>
+      screen.getAllByRole('columnheader').map((h) => h.textContent);
+    expect(headers()[0]).toBe('№');
+    cleanup();
+    renderPatients({ rows: [A, B, C], mobile: true });
+    expect(headers()).toEqual(['№', 'Name', 'Studies', 'Actions']);
+  });
+
+  it('numbers the displayed order from 1, following sorting', () => {
+    renderPatients({ rows: [B, C, A] });
+    expect(displayed()).toEqual(['1 Bravo', '2 Charlie', '3 Alpha']);
+
+    const createdAt = () =>
+      screen.getByRole('columnheader', { name: /Created At/ });
+    fireEvent.click(createdAt());
+    expect(displayed()).toEqual(['1 Alpha', '2 Bravo', '3 Charlie']);
+    fireEvent.click(createdAt());
+    expect(displayed()).toEqual(['1 Charlie', '2 Bravo', '3 Alpha']);
+  });
+
+  it('renumbers after search/filtering and back after clearing it', async () => {
+    renderPatients({ rows: [A, B, C] });
+    search('synthetic-3');
+    await waitFor(() => expect(displayed()).toEqual(['1 Charlie']));
+    expect(
+      within(cell(C, 'rowNumber')).getByRole('link').getAttribute('aria-label')
+    ).toBe('Open patient Charlie, row 1');
+
+    fireEvent.change(screen.getByPlaceholderText('Search...'), {
+      target: { value: '' },
+    });
+    await waitFor(() =>
+      expect(displayed()).toEqual(['1 Alpha', '2 Bravo', '3 Charlie'])
+    );
+  });
+
+  it('continues across pages', async () => {
+    // 105 synthetic rows; the grid's default page size is 100.
+    const bulk = Array.from({ length: 105 }, (_, i) =>
+      patient(1, {
+        id: `bulk-${i + 1}`,
+        name: `Bulk ${i + 1}`,
+        slug: `bulk-${i + 1}`,
+      })
+    );
+    renderPatients({ rows: bulk });
+    expect(displayed()[0]).toBe('1 Bulk 1');
+    fireEvent.click(screen.getByRole('button', { name: 'Go to next page' }));
+    await waitFor(() =>
+      expect(displayed()).toEqual([
+        '101 Bulk 101',
+        '102 Bulk 102',
+        '103 Bulk 103',
+        '104 Bulk 104',
+        '105 Bulk 105',
+      ])
+    );
+    expect(
+      within(cell(bulk[100], 'rowNumber'))
+        .getByRole('link')
+        .getAttribute('href')
+    ).toBe('/patients/bulk-101');
+  });
+
+  it('a trashed patient gets a plain number, live patients a link', () => {
+    renderPatients({ rows: [LIVE, TRASHED], admin: true });
+    expect(displayed()).toEqual([
+      '1 Synthetic Patient 1',
+      '2 Synthetic Patient 3',
+    ]);
+    expect(within(cell(TRASHED, 'rowNumber')).queryByRole('link')).toBeNull();
+    expect(
+      within(cell(LIVE, 'rowNumber')).getByRole('link').getAttribute('href')
+    ).toBe('/patients/synthetic-1');
+  });
+});
+
+describe('Patients number link', () => {
   // What remains for the browser after React handled the click.
   let defaultPrevented: boolean[];
   const recordDefault = (event: MouseEvent) => {
@@ -433,16 +527,21 @@ describe('Patients open link', () => {
   afterEach(() => window.removeEventListener('click', recordDefault));
 
   const openLink = (row: Patient) =>
-    within(cell(row, 'open')).getByRole('link', {
-      name: `Open patient ${row.name}`,
+    within(cell(row, 'rowNumber')).getByRole('link', {
+      name: new RegExp(`^Open patient ${row.name}, row \\d+$`),
     });
 
-  it('is a same-tab link with a meaningful accessible name', () => {
+  it('is a same-tab link showing the number, with a meaningful name', () => {
     renderPatients();
-    const link = openLink(LIVE);
-    expect(link.getAttribute('href')).toBe('/patients/synthetic-1');
+    const link = openLink(OTHER);
+    expect(link.textContent).toBe('2');
+    expect(link.getAttribute('aria-label')).toBe(
+      'Open patient Synthetic Patient 2, row 2'
+    );
+    expect(link.getAttribute('href')).toBe('/patients/synthetic-2');
     expect(link.hasAttribute('target')).toBe(false);
     expect(document.querySelector('a[target="_blank"]')).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'Open' })).toBeNull();
   });
 
   it('a primary click navigates exactly once (no extra row navigation)', async () => {
@@ -451,6 +550,28 @@ describe('Patients open link', () => {
     await screen.findByText('Patient details synthetic-1');
     expect(navigations).toEqual(['PUSH /patients/synthetic-1']);
     expect(defaultPrevented).toEqual([true]);
+  });
+
+  it('the number cell around the link navigates like the rest of the row', async () => {
+    const { navigations } = renderPatients();
+    fireEvent.click(cell(OTHER, 'rowNumber'));
+    await screen.findByText('Patient details synthetic-2');
+    expect(navigations).toEqual(['PUSH /patients/synthetic-2']);
+  });
+
+  it('Back and Forward after opening a patient by its number', async () => {
+    const { router, navigations } = renderPatients();
+    fireEvent.click(openLink(OTHER));
+    await screen.findByText('Patient details synthetic-2');
+    await act(() => router.back());
+    expect(openLink(OTHER).textContent).toBe('2');
+    await act(() => router.forward());
+    await screen.findByText('Patient details synthetic-2');
+    expect(navigations).toEqual([
+      'PUSH /patients/synthetic-2',
+      'POP /patients',
+      'POP /patients/synthetic-2',
+    ]);
   });
 
   it.each([
@@ -469,7 +590,7 @@ describe('Patients open link', () => {
     const { navigations } = renderPatients();
     // The grid stays a single tab stop: unfocused cells' links are -1.
     expect(openLink(LIVE).tabIndex).toBe(-1);
-    const header = screen.getByRole('columnheader', { name: 'Open' });
+    const header = screen.getByRole('columnheader', { name: '№' });
     act(() => header.focus());
     // Arrow keys move the grid focus; the focused cell delegates to its link.
     fireEvent.keyDown(header, { key: 'ArrowDown' });
@@ -492,9 +613,9 @@ describe('Patients trashed rows', () => {
       rows: [LIVE, TRASHED],
       admin: true,
     });
-    expect(within(cell(TRASHED, 'open')).queryByRole('link')).toBeNull();
+    expect(within(cell(TRASHED, 'rowNumber')).queryByRole('link')).toBeNull();
     for (const field of [
-      'open',
+      'rowNumber',
       'name',
       'creatorName',
       'studyCount',
@@ -548,7 +669,7 @@ describe('Patients trashed rows', () => {
 
     act(() => setRows([{ ...TRASHED, deletedAt: null }]));
     expect(
-      within(cell(TRASHED, 'open')).getByRole('link').getAttribute('href')
+      within(cell(TRASHED, 'rowNumber')).getByRole('link').getAttribute('href')
     ).toBe('/patients/synthetic-3');
     fireEvent.click(cell(TRASHED, 'creatorName'));
     await screen.findByText('Patient details synthetic-3');
@@ -567,6 +688,22 @@ describe('Patients row navigation (mobile)', () => {
     expect(link.hasAttribute('target')).toBe(false);
     expect(within(cell(TRASHED, 'name')).queryByRole('link')).toBeNull();
     expect(cell(TRASHED, 'name').textContent).toBe('Synthetic Patient 3');
+    expect(displayed()).toEqual([
+      '1 Synthetic Patient 1',
+      '2 Synthetic Patient 3',
+    ]);
+    expect(within(cell(TRASHED, 'rowNumber')).queryByRole('link')).toBeNull();
+  });
+
+  it('the number link navigates once, with no extra row navigation', async () => {
+    const { navigations } = renderPatients({ mobile: true });
+    fireEvent.click(
+      within(cell(LIVE, 'rowNumber')).getByRole('link', {
+        name: 'Open patient Synthetic Patient 1, row 1',
+      })
+    );
+    await screen.findByText('Patient details synthetic-1');
+    expect(navigations).toEqual(['PUSH /patients/synthetic-1']);
   });
 
   it('the name link navigates once, with no extra row navigation', async () => {
