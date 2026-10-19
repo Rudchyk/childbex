@@ -358,7 +358,7 @@ describe('Series page', () => {
       expect(
         within(rowOf('i1')).getByLabelText('Your opinion: Normal (implicit, from your completed review)')
       ).toBeTruthy();
-      expect(within(rowOf('i1')).getByLabelText('Conflict')).toBeTruthy();
+      expect(within(rowOf('i1')).getByLabelText(/^All reviewers: Conflicted/)).toBeTruthy();
       expect(within(rowOf('i3')).queryByLabelText(/Your opinion/)).toBeNull();
     });
 
@@ -528,7 +528,7 @@ describe('Series page', () => {
       const row = rowOf('i1');
       expect(row.getAttribute('data-active')).toBe('true');
       expect(row.getAttribute('aria-selected')).toBe('true');
-      expect(within(row).getByLabelText('Conflict')).toBeTruthy();
+      expect(within(row).getByLabelText(/^All reviewers: Conflicted/)).toBeTruthy();
       expect(
         within(row).getByLabelText('Your opinion: Normal (implicit, from your completed review)')
       ).toBeTruthy();
@@ -1241,5 +1241,233 @@ describe('Series page', () => {
     expect(mockViewerProps).toBeUndefined();
     expect(screen.queryByRole('button', { name: /complete review/i })).toBeNull();
     expect(screen.getByText(/cannot be reviewed as a whole/)).toBeTruthy();
+  });
+});
+
+/**
+ * Issue #43: the slice list shows every slice's aggregate review state (all
+ * reviewers, canonical backend state) apart from the current doctor's own
+ * opinion, with filters and counts over the Series' images by image id.
+ * The current doctor is `sub-me`; `sub-a` is another doctor.
+ */
+describe('aggregate review state in the slice list', () => {
+  const state = (value: string) => value as SeriesImage['reviewState'];
+  const source = (value: string) => value as SeriesImage['reviewStateSource'];
+  const reviewed = (id: string, overrides: Partial<SeriesImage>) =>
+    image(id, { instanceNumber: Number(id.slice(1)), ...overrides });
+  /** API order = viewer order: a1 is viewer slice 0 … a7 viewer slice 6. */
+  const reviewedResponse = (): PatientSeriesResponse => ({
+    ...response(),
+    images: [
+      // Doctor A voted Abnormal; the current doctor has no opinion.
+      reviewed('a1', { reviewState: state('ABNORMAL'), reviewStateSource: source('VOTES'),
+        votes: [vote('sub-a', 'abnormal')], isAbnormal: true, abnormalVotes: 1, votesCount: 1 }),
+      // Doctor A Abnormal, the current doctor explicitly Normal.
+      reviewed('a2', { reviewState: state('CONFLICTED'), reviewStateSource: source('VOTES'),
+        votes: [vote('sub-a', 'abnormal'), vote('sub-me', 'normal')] }),
+      reviewed('a3', { reviewState: state('UNCERTAIN'), reviewStateSource: source('VOTES'),
+        votes: [vote('sub-a', 'uncertain')] }),
+      // The current doctor's implicit Normal (completed review).
+      reviewed('a4', { reviewState: state('NORMAL'), reviewStateSource: source('FINISH_REVIEW'),
+        implicitNormals: [{ reviewerId: 'sub-me', reviewerName: 'Me', completedAt: '2026-10-01T00:00:00.000Z' }] }),
+      reviewed('a5', {}),
+      reviewed('a6', { reviewState: state('ABNORMAL'), reviewStateSource: source('RESOLUTION'),
+        adminResolutionId: 'admin', adminResolutionName: 'Admin' }),
+      reviewed('a7', { reviewState: state('ABNORMAL'), reviewStateSource: source('VOTES'),
+        votes: [vote('sub-a', 'abnormal')] }),
+    ],
+  });
+  const markOf = (id: string) => within(rowOf(id)).getByTestId('aggregate-mark');
+  const listedIds = () => screen.queryAllByTestId('slice-row').map((row) => row.getAttribute('data-image-id'));
+  const filterBar = () => screen.getByTestId('slice-review-filter');
+  const filterChip = (name: RegExp) => within(filterBar()).getByRole('button', { name });
+  const chipLabels = () => within(filterBar()).getAllByRole('button').map((chip) => chip.textContent);
+  const notLoaded = () => screen.queryByTestId('slice-filter-not-loaded')?.textContent;
+
+  it("Doctor B sees Doctor A's Abnormal without an own vote, apart from own opinions", () => {
+    renderSeries(reviewedResponse());
+    expect(markOf('a1').textContent).toBe('ABN');
+    expect(within(rowOf('a1')).queryByLabelText(/^Your opinion/)).toBeNull();
+
+    expect(markOf('a2').textContent).toBe('CONF');
+    expect(within(rowOf('a2')).getByLabelText('Your opinion: Normal')).toBeTruthy();
+
+    expect(markOf('a3').textContent).toBe('UNSURE');
+    expect(markOf('a4').textContent).toBe('NORM');
+    expect(
+      within(rowOf('a4')).getByLabelText('Your opinion: Normal (implicit, from your completed review)')
+    ).toBeTruthy();
+    expect(markOf('a5').textContent).toBe('—');
+    expect(markOf('a6').getAttribute('data-resolved')).toBe('true');
+    expect(markOf('a6').getAttribute('aria-label')).toBe('All reviewers: Abnormal — set by an admin resolution');
+  });
+
+  it('counts per filter and lists only the matching slices, by image id', () => {
+    renderSeries(reviewedResponse());
+    expect(chipLabels()).toEqual(['All 7', 'Abnormal 3', 'Conflicted 1', 'Not sure 1']);
+    expect(filterChip(/^All/).getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(filterChip(/^Abnormal/));
+    expect(filterChip(/^Abnormal/).getAttribute('aria-pressed')).toBe('true');
+    expect(listedIds()).toEqual(['a7', 'a6', 'a1']);
+    // A filtered row still navigates to its own viewer slice.
+    fireEvent.click(within(rowOf('a6')).getByRole('button', { name: /^Show Slice 6/ }));
+    expect(mockJumpTo.mock.calls).toEqual([[5]]);
+
+    fireEvent.click(filterChip(/^Conflicted/));
+    expect(listedIds()).toEqual(['a2']);
+    fireEvent.click(filterChip(/^Not sure/));
+    expect(listedIds()).toEqual(['a3']);
+    fireEvent.click(filterChip(/^All/));
+    expect(listedIds()).toEqual(['a7', 'a6', 'a5', 'a4', 'a3', 'a2', 'a1']);
+  });
+
+  it('a filter clears the selection; bulk votes cover only the shown, selected slices', async () => {
+    mockBulk.mockReturnValue({
+      unwrap: () => Promise.resolve({ requested: 3, created: 3, changed: 0, unchanged: 0 }),
+    });
+    renderSeries(reviewedResponse());
+    fireEvent.click(checkboxOf('a5'));
+    expect(screen.getByTestId('selection-count').textContent).toBe('1 of 7 selected');
+
+    fireEvent.click(filterChip(/^Abnormal/));
+    expect(screen.getByTestId('selection-count').textContent).toBe('3 slices');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all slices' }));
+    expect(screen.getByTestId('selection-count').textContent).toBe('3 of 3 selected');
+    fireEvent.click(within(screen.getByTestId('bulk-review-actions')).getByRole('button', { name: 'Abnormal' }));
+    expect(mockBulk).toHaveBeenCalledWith({
+      patientId: PATIENT,
+      seriesId: SERIES,
+      imageIds: ['a7', 'a6', 'a1'],
+      vote: 'abnormal',
+    });
+    await waitFor(() => expect(screen.getByTestId('selection-count').textContent).toBe('3 slices'));
+  });
+
+  it('says when no loaded slice matches a filter', () => {
+    renderSeries(response()); // i1 conflicted, nothing Not sure
+    fireEvent.click(filterChip(/^Not sure/));
+    expect(listedIds()).toEqual([]);
+    expect(screen.getByTestId('slice-list-empty').textContent).toBe(
+      'No slices in “Not sure” among the 3 loaded.'
+    );
+  });
+
+  it('counts slices not loaded yet, lists and navigates only loaded ones', () => {
+    // The viewer has loaded a2 and a1 only (its own order).
+    mockViewerItems = [
+      { imageUid: 'uid-x', source: url('a2'), index: 0 },
+      { imageUid: 'uid-y', source: url('a1'), index: 1 },
+    ];
+    renderSeries(reviewedResponse());
+    expect(chipLabels()).toEqual(['All 7', 'Abnormal 3', 'Conflicted 1', 'Not sure 1']);
+    expect(notLoaded()).toBe('2 of 7 slices loaded in the viewer; the others are listed once loaded.');
+
+    fireEvent.click(filterChip(/^Abnormal/));
+    expect(listedIds()).toEqual(['a1']);
+    expect(notLoaded()).toBe(
+      '1 of 3 Abnormal slices loaded in the viewer; the others are listed once loaded.'
+    );
+    // a1 is slice 1 of the loaded volume (not its API position).
+    fireEvent.click(checkboxOf('a1'));
+    expect(mockJumpTo.mock.calls).toEqual([[1]]);
+
+    fireEvent.click(filterChip(/^Conflicted/));
+    expect(listedIds()).toEqual(['a2']);
+    expect(notLoaded()).toBeUndefined();
+  });
+
+  it('before any slice is loaded, shows the counts and no slice to open', () => {
+    mockViewerItems = [];
+    renderSeries(reviewedResponse());
+    expect(chipLabels()).toEqual(['All 7', 'Abnormal 3', 'Conflicted 1', 'Not sure 1']);
+    expect(screen.getByText('No slices loaded yet.')).toBeTruthy();
+    expect(listedIds()).toEqual([]);
+    expect(notLoaded()).toBe('0 of 7 slices loaded in the viewer; the others are listed once loaded.');
+  });
+
+  it('updates marks and counts after votes, bulk votes and Complete review, keeping the viewer', () => {
+    mockCurrentUid = 'uid-4'; // viewer slice 4 = a5
+    const { rerender } = renderSeries(reviewedResponse());
+    act(() => mockViewerProps?.onCurrentItemChange(url('a5'), { index: 4, loadedCount: 7 }));
+    fireEvent.click(filterChip(/^Abnormal/));
+    expect(listedIds()).toEqual(['a7', 'a6', 'a1']);
+
+    // The own vote on a5 and another one on a1 were saved: refetched.
+    const afterVote = reviewedResponse();
+    afterVote.images[4] = { ...afterVote.images[4], reviewState: state('ABNORMAL'),
+      reviewStateSource: source('VOTES'), votes: [vote('sub-me', 'abnormal')] };
+    afterVote.images[0] = { ...afterVote.images[0], reviewState: state('CONFLICTED'),
+      votes: [vote('sub-a', 'abnormal'), vote('sub-me', 'normal')] };
+    rerender(<SeriesContent data={afterVote} isLoading={false} isError={false} />);
+    expect(chipLabels()).toEqual(['All 7', 'Abnormal 3', 'Conflicted 2', 'Not sure 1']);
+    expect(listedIds()).toEqual(['a7', 'a6', 'a5']);
+    expect(markOf('a5').textContent).toBe('ABN');
+    expect(within(rowOf('a5')).getByLabelText('Your opinion: Abnormal')).toBeTruthy();
+    expect(rowOf('a5').getAttribute('data-active')).toBe('true');
+
+    // A bulk vote turned a6 and a7 into conflicts; a Complete review gave
+    // a3 an implicit Normal (conflict with the Not sure vote).
+    const afterBulk = {
+      ...afterVote,
+      images: afterVote.images.map((item) =>
+        ['a6', 'a7'].includes(item.id)
+          ? { ...item, reviewState: state('CONFLICTED'), reviewStateSource: source('VOTES') }
+          : item.id === 'a3'
+            ? {
+                ...item,
+                reviewState: state('CONFLICTED'),
+                implicitNormals: [
+                  { reviewerId: 'sub-me', reviewerName: 'Me', completedAt: '2026-10-02T00:00:00.000Z' },
+                ],
+              }
+            : item
+      ),
+    };
+    rerender(<SeriesContent data={afterBulk} isLoading={false} isError={false} />);
+    expect(chipLabels()).toEqual(['All 7', 'Abnormal 1', 'Conflicted 5', 'Not sure 0']);
+    expect(listedIds()).toEqual(['a5']);
+    fireEvent.click(filterChip(/^Conflicted/));
+    expect(listedIds()).toEqual(['a7', 'a6', 'a3', 'a2', 'a1']);
+
+    // Same Series: never reloaded, the slice on screen is kept.
+    expect(mockViewerMounts).toBe(1);
+    expect(header()).toBe('Review — Slice 5 / 7 loaded · Instance #5');
+  });
+
+  it("switching Series shows only the new Series' states, with the filter reset", () => {
+    const { rerender } = renderSeries(reviewedResponse());
+    fireEvent.click(filterChip(/^Abnormal/));
+    expect(listedIds()).toEqual(['a7', 'a6', 'a1']);
+
+    rerender(<SeriesContent data={responseB()} isLoading={false} isError={false} />);
+    expect(filterChip(/^All/).getAttribute('aria-pressed')).toBe('true');
+    expect(chipLabels()).toEqual(['All 3', 'Abnormal 0', 'Conflicted 0', 'Not sure 0']);
+    expect(listedIds()).toEqual(['b3', 'b2', 'b1']);
+    expect(screen.getAllByTestId('aggregate-mark').map((mark) => mark.textContent)).toEqual(['—', '—', '—']);
+  });
+
+  it('a Series of 361 slices: counts and filtered rows map to the right images', () => {
+    const many: PatientSeriesResponse = {
+      ...response(),
+      images: Array.from({ length: 361 }, (_, index) =>
+        image(`s${index}`, {
+          instanceNumber: index + 1,
+          ...(index % 50 === 0
+            ? { reviewState: state('ABNORMAL'), reviewStateSource: source('VOTES'), votes: [vote('sub-a', 'abnormal')] }
+            : {}),
+        })
+      ),
+    };
+    renderSeries(many);
+    expect(chipLabels()).toEqual(['All 361', 'Abnormal 8', 'Conflicted 0', 'Not sure 0']);
+    // Virtualised: only some of the 361 rows are mounted.
+    expect(rows().length).toBeLessThan(60);
+
+    fireEvent.click(filterChip(/^Abnormal/));
+    expect(listedIds()).toEqual(['s350', 's300', 's250', 's200', 's150', 's100', 's50', 's0']);
+    expect(rows().every((row) => row.getAttribute('data-review-state') === 'ABNORMAL')).toBe(true);
+    fireEvent.click(within(rowOf('s250')).getByRole('button', { name: 'Show Slice 251 · #251' }));
+    expect(mockJumpTo.mock.calls).toEqual([[250]]);
   });
 });

@@ -4,7 +4,7 @@
  * again and brings the active slice back into view (no blank rows).
  */
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { PatientImageReviewVoteTypes, ReviewState } from '@libs/schemas';
+import { PatientImageReviewVoteTypes, ReviewState, ReviewStateSource } from '@libs/schemas';
 import { ROW_HEIGHT, SeriesSliceList, type SliceRow } from './SeriesSliceList';
 
 /** Synthetic slices (no patient data). */
@@ -14,6 +14,7 @@ const ROWS: SliceRow[] = Array.from({ length: 200 }, (_, index) => ({
   instanceNumber: index + 1,
   opinion: null,
   reviewState: ReviewState.NOT_REVIEWED,
+  reviewStateSource: ReviewStateSource.NONE,
 }));
 
 let resize: () => void = () => undefined;
@@ -176,7 +177,7 @@ describe('active slice, selection and navigation', () => {
       { ...ROWS[1], opinion: { vote: PatientImageReviewVoteTypes.UNCERTAIN, source: 'explicit' } },
     ];
     setup({ activeId: 'img-0', selected: new Set(['img-0']) }, rows);
-    expect(within(rowOf('img-0')).getByLabelText('Conflict')).toBeTruthy();
+    expect(within(rowOf('img-0')).getByLabelText(/^All reviewers: Conflicted/)).toBeTruthy();
     expect(within(rowOf('img-0')).getByLabelText('Your opinion: Abnormal')).toBeTruthy();
     expect(within(rowOf('img-1')).getByLabelText('Your opinion: Not sure')).toBeTruthy();
   });
@@ -276,5 +277,161 @@ describe('active slice, selection and navigation', () => {
     resize();
     expect(rowOf('img-120').getAttribute('data-active')).toBe('true');
     expect(within(rowOf('img-120')).getByTestId('active-slice-marker')).toBeTruthy();
+  });
+});
+
+/**
+ * Issue #43: every row shows the aggregate state of all reviewers (the
+ * canonical backend state), apart from and regardless of the doctor's own
+ * opinion, without colour alone and with its meaning spelled out.
+ */
+describe('aggregate review state', () => {
+  const rowOf = (id: string) =>
+    screen.getAllByTestId('slice-row').find((row) => row.getAttribute('data-image-id') === id) as HTMLElement;
+  const markOf = (id: string) => within(rowOf(id)).getByTestId('aggregate-mark');
+  const renderRows = (rows: SliceRow[], props: Partial<Parameters<typeof SeriesSliceList>[0]> = {}) =>
+    render(
+      <SeriesSliceList
+        rows={rows}
+        selected={new Set()}
+        onToggle={jest.fn()}
+        onToggleAll={jest.fn()}
+        onNavigate={jest.fn()}
+        {...props}
+      />
+    );
+  const explicit = (vote: PatientImageReviewVoteTypes) => ({ vote, source: 'explicit' as const });
+  const implicitNormal = {
+    vote: PatientImageReviewVoteTypes.NORMAL as const,
+    source: 'implicit' as const,
+    completedAt: '2026-10-01T00:00:00.000Z',
+  };
+
+  const states: [ReviewState, ReviewStateSource, string][] = [
+    [ReviewState.ABNORMAL, ReviewStateSource.VOTES, 'ABN'],
+    [ReviewState.CONFLICTED, ReviewStateSource.VOTES, 'CONF'],
+    [ReviewState.UNCERTAIN, ReviewStateSource.VOTES, 'UNSURE'],
+    [ReviewState.NORMAL, ReviewStateSource.VOTES, 'NORM'],
+    [ReviewState.NORMAL, ReviewStateSource.FINISH_REVIEW, 'NORM'],
+    [ReviewState.NOT_REVIEWED, ReviewStateSource.NONE, '—'],
+  ];
+  const opinions = [
+    ['no own opinion', null],
+    ['an explicit own Normal', explicit(PatientImageReviewVoteTypes.NORMAL)],
+    ['an implicit own Normal', implicitNormal],
+    ['an own Abnormal', explicit(PatientImageReviewVoteTypes.ABNORMAL)],
+    ['an own Not sure', explicit(PatientImageReviewVoteTypes.UNCERTAIN)],
+  ] as const;
+
+  describe.each(opinions)('with %s', (_, opinion) => {
+    it.each(states)('shows the aggregate %s (%s) as "%s"', (state, source, text) => {
+      renderRows([{ ...ROWS[0], opinion, reviewState: state, reviewStateSource: source }]);
+      const mark = markOf('img-0');
+      expect(mark.getAttribute('data-review-state')).toBe(state);
+      expect(mark.textContent).toBe(text);
+      expect(mark.getAttribute('aria-label')).toMatch(/^All reviewers: /);
+      // The own opinion is a separate, separately labelled mark.
+      if (opinion) {
+        expect(within(rowOf('img-0')).getByLabelText(/^Your opinion: /)).not.toBe(mark);
+      } else {
+        expect(within(rowOf('img-0')).queryByLabelText(/^Your opinion: /)).toBeNull();
+      }
+    });
+  });
+
+  it("another doctor's Abnormal is shown on a slice the current doctor has not marked", () => {
+    renderRows([
+      { ...ROWS[0], reviewState: ReviewState.ABNORMAL, reviewStateSource: ReviewStateSource.VOTES },
+      ROWS[1],
+    ]);
+    expect(markOf('img-0').textContent).toBe('ABN');
+    expect(markOf('img-0').getAttribute('aria-label')).toBe(
+      'All reviewers: Abnormal — flagged by reviewer vote, not a confirmed diagnosis'
+    );
+    expect(within(rowOf('img-0')).queryByLabelText(/^Your opinion/)).toBeNull();
+    // The unflagged neighbour looks different (word, not only colour).
+    expect(markOf('img-1').textContent).toBe('—');
+    // Screen readers get both states with the row's button.
+    const button = within(rowOf('img-0')).getByRole('button', { name: 'Show Slice 1 · #1' });
+    const description = document.getElementById(button.getAttribute('aria-describedby') ?? '');
+    expect(description?.textContent).toBe(
+      'All reviewers: Abnormal — flagged by reviewer vote, not a confirmed diagnosis. Your opinion: not marked.'
+    );
+  });
+
+  it('an admin resolution is marked as resolved, unlike the same state from votes', () => {
+    renderRows([
+      { ...ROWS[0], reviewState: ReviewState.ABNORMAL, reviewStateSource: ReviewStateSource.RESOLUTION },
+      { ...ROWS[1], reviewState: ReviewState.ABNORMAL, reviewStateSource: ReviewStateSource.VOTES },
+    ]);
+    expect(markOf('img-0').getAttribute('data-resolved')).toBe('true');
+    expect(markOf('img-0').getAttribute('aria-label')).toBe(
+      'All reviewers: Abnormal — set by an admin resolution'
+    );
+    expect(markOf('img-1').getAttribute('data-resolved')).toBe('false');
+  });
+
+  it('active, selected, own opinion and aggregate state combine on one row', () => {
+    renderRows(
+      [
+        {
+          ...ROWS[0],
+          opinion: implicitNormal,
+          reviewState: ReviewState.CONFLICTED,
+          reviewStateSource: ReviewStateSource.VOTES,
+        },
+        { ...ROWS[1], reviewState: ReviewState.ABNORMAL, reviewStateSource: ReviewStateSource.VOTES },
+      ],
+      { activeId: 'img-0', selected: new Set(['img-0', 'img-1']) }
+    );
+    const row = rowOf('img-0');
+    expect(row.getAttribute('data-active')).toBe('true');
+    expect(row.getAttribute('aria-selected')).toBe('true');
+    expect(within(row).getByTestId('active-slice-marker')).toBeTruthy();
+    expect((within(row).getByRole('checkbox') as HTMLInputElement).checked).toBe(true);
+    expect(markOf('img-0').textContent).toBe('CONF');
+    expect(
+      within(row).getByLabelText('Your opinion: Normal (implicit, from your completed review)')
+    ).toBeTruthy();
+    // Selected only: the aggregate mark is there, the active marker is not.
+    expect(markOf('img-1').textContent).toBe('ABN');
+    expect(within(rowOf('img-1')).queryByTestId('active-slice-marker')).toBeNull();
+    // The state mark is not a checkbox: one checkbox per row.
+    expect(within(row).getAllByRole('checkbox')).toHaveLength(1);
+  });
+
+  it('with 361 slices in reverse order, each mounted row carries its own image state', () => {
+    const many: SliceRow[] = Array.from({ length: 361 }, (_, i) => {
+      const index = 360 - i;
+      return {
+        ...ROWS[0],
+        id: `big-${index}`,
+        index,
+        instanceNumber: index + 1,
+        reviewState: index % 7 === 0 ? ReviewState.ABNORMAL : ReviewState.NOT_REVIEWED,
+        reviewStateSource: index % 7 === 0 ? ReviewStateSource.VOTES : ReviewStateSource.NONE,
+      };
+    });
+    renderRows(many, { activeId: 'big-140' });
+    resize();
+    const mounted = screen.getAllByTestId('slice-row');
+    expect(mounted.length).toBeLessThan(60);
+    for (const row of mounted) {
+      const index = Number(row.getAttribute('data-image-id')?.replace('big-', ''));
+      expect(row.getAttribute('data-review-state')).toBe(
+        index % 7 === 0 ? ReviewState.ABNORMAL : ReviewState.NOT_REVIEWED
+      );
+    }
+    expect(markOf('big-140').textContent).toBe('ABN');
+  });
+
+  it('explains the two marks and shows an empty message without rows', () => {
+    renderRows([], { emptyMessage: 'No slices in “Abnormal” among the 3 loaded.' });
+    expect(screen.getByTestId('slice-list-legend').textContent).toBe(
+      "Pill: all reviewers' review state (not a diagnosis) · Square: your opinion"
+    );
+    expect(screen.getByTestId('slice-list-empty').textContent).toBe(
+      'No slices in “Abnormal” among the 3 loaded.'
+    );
   });
 });

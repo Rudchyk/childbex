@@ -18,6 +18,13 @@ import { BulkReviewActions } from './review/BulkReviewActions';
 import { useSliceSelection } from './review/sliceSelection';
 import { completionOf, countOwnVotes, opinionOf } from './review/reviewOpinions';
 import { ReviewSidePanel } from './review/ReviewSidePanel';
+import { SliceReviewFilter } from './review/SliceReviewFilter';
+import {
+  countByFilter,
+  matchesFilter,
+  sliceFilters,
+  type SliceFilter,
+} from './review/aggregateReview';
 
 interface SeriesImagesProps {
   data: PatientSeriesResponse;
@@ -82,18 +89,50 @@ const SliceListPanel: FC<SliceListPanelProps> = ({
                   instanceNumber: image.instanceNumber,
                   opinion: opinionOf(image, reviewerId),
                   reviewState: image.reviewState,
+                  reviewStateSource: image.reviewStateSource,
                 },
               ]
             : [];
         }),
     [items, imagesBySource, reviewerId]
   );
-  const ids = useMemo(() => rows.map(({ id }) => id), [rows]);
+  // Filtered by the aggregate state of all reviewers. Counts are of every
+  // presented image of the Series (canonical data), the list only of the
+  // slices the viewer loaded: a slice not loaded is counted, never listed.
+  const [filter, setFilter] = useState<SliceFilter>('all');
+  const seriesCounts = useMemo(
+    () => countByFilter(Object.values(imagesBySource)),
+    [imagesBySource]
+  );
+  const loadedCounts = useMemo(() => countByFilter(rows), [rows]);
+  const visibleRows = useMemo(
+    () => rows.filter(({ reviewState }) => matchesFilter(reviewState, filter)),
+    [rows, filter]
+  );
+  // Selection (and bulk votes) only ever cover the slices shown.
+  const ids = useMemo(() => visibleRows.map(({ id }) => id), [visibleRows]);
   const selection = useSliceSelection(ids);
+  const { clear } = selection;
+  const changeFilter = useCallback(
+    (value: SliceFilter) => {
+      setFilter(value);
+      clear();
+    },
+    [clear]
+  );
   const activeId = useMemo(() => {
     const source = items.find(({ imageUid }) => imageUid === currentImageId)?.source;
     return source ? imagesBySource[source]?.id : undefined;
   }, [items, currentImageId, imagesBySource]);
+  const filterBar = (
+    <SliceReviewFilter
+      value={filter}
+      onChange={changeFilter}
+      seriesCounts={seriesCounts}
+      loadedCounts={loadedCounts}
+    />
+  );
+  const filterLabel = sliceFilters.find(({ value }) => value === filter)?.label;
 
   return (
     <ReviewSidePanel
@@ -110,7 +149,9 @@ const SliceListPanel: FC<SliceListPanelProps> = ({
     >
       {rows.length ? (
         <SeriesSliceList
-          rows={rows}
+          rows={visibleRows}
+          toolbar={filterBar}
+          emptyMessage={`No slices in “${filterLabel}” among the ${rows.length} loaded.`}
           activeId={activeId}
           selected={selection.selected}
           onToggle={selection.toggle}
@@ -128,9 +169,12 @@ const SliceListPanel: FC<SliceListPanelProps> = ({
           }
         />
       ) : (
-        <Typography variant="body2" color="text.secondary" p={1}>
-          No slices loaded yet.
-        </Typography>
+        <>
+          {filterBar}
+          <Typography variant="body2" color="text.secondary" p={1}>
+            No slices loaded yet.
+          </Typography>
+        </>
       )}
     </ReviewSidePanel>
   );
