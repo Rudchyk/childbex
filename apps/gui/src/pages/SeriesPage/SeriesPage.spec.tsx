@@ -1,8 +1,10 @@
 /**
  * The Series page: the viewer gets only the non-broken images, through the
  * authenticated API, in API order; the slice list selects (checkboxes, by
- * image id, never navigating) independently of the active slice; bulk
- * votes go to the Series endpoint in one request; Complete review is
+ * image id; a checkbox click also asks the viewer for that slice)
+ * independently of the active slice, which is only ever the slice the
+ * viewer reports on screen; bulk votes go to the Series endpoint in one
+ * request and never navigate; Complete review is
  * possible only for a single simple stack once every presented image was
  * loaded. Unsupported series are not displayed at all.
  */
@@ -360,16 +362,76 @@ describe('Series page', () => {
       expect(within(rowOf('i3')).queryByLabelText(/Your opinion/)).toBeNull();
     });
 
-    it('a checkbox selects without navigating; a row navigates without selecting', () => {
+    // Issue #38 supersedes #13's "a checkbox never navigates": a checkbox
+    // click selects and asks the viewer for that slice; a row still only
+    // navigates; selected and active stay separate states.
+    it('a checkbox selects and asks once for its slice; a row navigates without selecting', () => {
       renderSeries(response());
       fireEvent.click(checkboxOf('i1'));
-      expect(mockJumpTo).not.toHaveBeenCalled();
       expect(rowOf('i1').getAttribute('aria-selected')).toBe('true');
+      expect(mockJumpTo).toHaveBeenCalledTimes(1);
+      expect(mockJumpTo).toHaveBeenCalledWith(1); // i1 is viewer slice 1
 
+      mockJumpTo.mockClear();
       fireEvent.click(screen.getByRole('button', { name: /Show Slice 3/ }));
+      expect(mockJumpTo).toHaveBeenCalledTimes(1);
       expect(mockJumpTo).toHaveBeenCalledWith(2);
       expect(rowOf('i3').getAttribute('aria-selected')).toBe('false');
       expect(screen.getByTestId('selection-count').textContent).toBe('1 of 3 selected');
+    });
+
+    it('unchecking a slice still asks once for it and keeps the other selections and votes', () => {
+      renderSeries(response());
+      fireEvent.click(checkboxOf('i2'));
+      fireEvent.click(checkboxOf('i3'));
+      mockJumpTo.mockClear();
+
+      fireEvent.click(checkboxOf('i3')); // deselect
+      expect(rowOf('i3').getAttribute('aria-selected')).toBe('false');
+      expect(rowOf('i2').getAttribute('aria-selected')).toBe('true');
+      expect(mockJumpTo).toHaveBeenCalledTimes(1);
+      expect(mockJumpTo).toHaveBeenCalledWith(2);
+      // Navigation and selection never vote.
+      expect(mockAddVote).not.toHaveBeenCalled();
+      expect(mockBulk).not.toHaveBeenCalled();
+      expect(within(rowOf('i2')).getByLabelText('Your opinion: Abnormal')).toBeTruthy();
+    });
+
+    it('a shift-click range navigates once, to the clicked slice only (select and deselect)', () => {
+      renderSeries(response());
+      fireEvent.click(checkboxOf('i3')); // anchor (viewer slice 2)
+      mockJumpTo.mockClear();
+      fireEvent.click(checkboxOf('i2'), { shiftKey: true }); // viewer slice 0
+      expect(rows().map((row) => row.getAttribute('aria-selected'))).toEqual(['true', 'true', 'true']);
+      expect(mockJumpTo.mock.calls).toEqual([[0]]);
+
+      // Deselecting a range: the same semantics, one jump to the target.
+      fireEvent.click(checkboxOf('i3')); // deselect, anchor
+      mockJumpTo.mockClear();
+      fireEvent.click(checkboxOf('i1'), { shiftKey: true }); // viewer slice 1
+      expect(rows().map((row) => row.getAttribute('aria-selected'))).toEqual(['false', 'false', 'true']);
+      expect(mockJumpTo.mock.calls).toEqual([[1]]);
+    });
+
+    it('Select all changes the selection without navigating', () => {
+      renderSeries(response());
+      const all = screen.getByRole('checkbox', { name: 'Select all slices' });
+      fireEvent.click(all);
+      expect(screen.getByTestId('selection-count').textContent).toBe('3 of 3 selected');
+      fireEvent.click(all);
+      expect(screen.getByTestId('selection-count').textContent).toBe('3 slices');
+      expect(mockJumpTo).not.toHaveBeenCalled();
+    });
+
+    it('a checkbox works from the keyboard (Space clicks the focused box)', () => {
+      renderSeries(response());
+      const box = checkboxOf('i3');
+      box.focus();
+      expect(document.activeElement).toBe(box);
+      // What the browser does on Space: a click on the focused checkbox.
+      act(() => box.click());
+      expect(rowOf('i3').getAttribute('aria-selected')).toBe('true');
+      expect(mockJumpTo.mock.calls).toEqual([[2]]);
     });
 
     it('supports multiple selection, deselection, shift-ranges and select all', () => {
@@ -405,6 +467,134 @@ describe('Series page', () => {
     });
   });
 
+  describe('active slice', () => {
+    /** dwv shows viewer slice `index` (slice i = list[i] = PRESENTED[i]). */
+    const viewerShows = (index: number) =>
+      act(() => {
+        mockCurrentUid = `uid-${index}`;
+        mockViewerProps?.onCurrentItemChange(url(PRESENTED[index]), { index, loadedCount: 3 });
+      });
+    const activeIds = () =>
+      rows()
+        .filter((row) => row.getAttribute('data-active') === 'true')
+        .map((row) => row.getAttribute('data-image-id'));
+    const currentButtons = () =>
+      screen.queryAllByRole('button', { name: /^Show Slice/ }).filter(
+        (button) => button.getAttribute('aria-current') === 'true'
+      );
+
+    it('follows the slice dwv reports (wheel, keyboard), never changing the selection', () => {
+      renderSeries(response());
+      fireEvent.click(checkboxOf('i3'));
+      viewerShows(0);
+      expect(activeIds()).toEqual(['i2']);
+      viewerShows(1);
+      expect(activeIds()).toEqual(['i1']);
+      expect(within(rowOf('i1')).getByTestId('active-slice-marker')).toBeTruthy();
+      expect(within(rowOf('i2')).queryByTestId('active-slice-marker')).toBeNull();
+      expect(currentButtons().map((button) => button.getAttribute('aria-label'))).toEqual([
+        'Show Slice 2 · #1',
+      ]);
+      expect(screen.getByTestId('selection-count').textContent).toBe('1 of 3 selected');
+    });
+
+    it('moves to a checked slice only once dwv shows it', () => {
+      renderSeries(response());
+      viewerShows(0);
+      fireEvent.click(checkboxOf('i3'));
+      expect(mockJumpTo.mock.calls).toEqual([[2]]);
+      // Asked for, not shown yet: the highlight stays on the slice on screen.
+      expect(activeIds()).toEqual(['i2']);
+
+      viewerShows(2);
+      expect(activeIds()).toEqual(['i3']);
+      // Active and selected at once.
+      expect(rowOf('i3').getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('when dwv shows another slice than asked for, only that one is active', () => {
+      renderSeries(response());
+      viewerShows(1);
+      fireEvent.click(checkboxOf('i3')); // asks for slice 2
+      viewerShows(0); // dwv reports slice 0 instead
+      expect(activeIds()).toEqual(['i2']);
+      expect(currentButtons()).toHaveLength(1);
+    });
+
+    it('keeps the opinion and conflict marks on an active, selected slice', () => {
+      renderSeries(response());
+      fireEvent.click(checkboxOf('i1'));
+      viewerShows(1);
+      const row = rowOf('i1');
+      expect(row.getAttribute('data-active')).toBe('true');
+      expect(row.getAttribute('aria-selected')).toBe('true');
+      expect(within(row).getByLabelText('Conflict')).toBeTruthy();
+      expect(
+        within(row).getByLabelText('Your opinion: Normal (implicit, from your completed review)')
+      ).toBeTruthy();
+      expect(within(rowOf('i2')).getByLabelText('Your opinion: Abnormal')).toBeTruthy();
+    });
+
+    it('highlights nothing while the slice on screen is unknown or not a listed slice', () => {
+      // Nothing reported yet.
+      renderSeries(response());
+      expect(activeIds()).toEqual([]);
+      expect(currentButtons()).toEqual([]);
+    });
+
+    it('highlights nothing for an image the viewer has not mapped to a source', () => {
+      // The slice on screen has no known file (not one of this Series).
+      mockViewerItems = [
+        { imageUid: 'uid-0', source: url('i2'), index: 0 },
+        { imageUid: 'uid-1', source: url('i1'), index: 1 },
+        { imageUid: 'uid-x', source: '/api/v1/patients/x/images/other/file', index: 2 },
+      ];
+      mockCurrentUid = 'uid-x';
+      const { rerender } = renderSeries(response());
+      expect(rows().map((row) => row.getAttribute('data-image-id'))).toEqual(['i1', 'i2']);
+      expect(activeIds()).toEqual([]);
+
+      // A UID the viewer never listed (e.g. not loaded).
+      mockCurrentUid = 'uid-missing';
+      rerender(<SeriesContent data={response()} isLoading={false} isError={false} />);
+      fireEvent.click(checkboxOf('i1'));
+      expect(mockJumpTo.mock.calls).toEqual([[1]]);
+      expect(activeIds()).toEqual([]);
+      expect(currentButtons()).toEqual([]);
+    });
+
+    it('while loading there is no list to click; a partial load navigates by dwv index', () => {
+      mockViewerItems = [];
+      const { rerender } = renderSeries(response());
+      expect(screen.getByText('No slices loaded yet.')).toBeTruthy();
+      expect(screen.queryAllByRole('checkbox', { name: /^Select Slice/ })).toEqual([]);
+
+      // Two of three loaded, in another order than the API's.
+      mockViewerItems = [
+        { imageUid: 'uid-a', source: url('i3'), index: 0 },
+        { imageUid: 'uid-b', source: url('i2'), index: 1 },
+      ];
+      rerender(<SeriesContent data={response()} isLoading={false} isError={false} />);
+      fireEvent.click(checkboxOf('i3'));
+      expect(mockJumpTo.mock.calls).toEqual([[0]]);
+      expect(activeIds()).toEqual([]);
+      expect(completeButton().disabled).toBe(true);
+    });
+
+    it('another Series starts without the previous active slice', () => {
+      const { rerender } = renderSeries(response());
+      viewerShows(1);
+      expect(activeIds()).toEqual(['i1']);
+
+      // The new viewer has not reported a slice yet.
+      mockCurrentUid = undefined;
+      rerender(<SeriesContent data={responseB()} isLoading={false} isError={false} />);
+      expect(rows().map((row) => row.getAttribute('data-image-id'))).toEqual(['b3', 'b2', 'b1']);
+      expect(activeIds()).toEqual([]);
+      expect(currentButtons()).toEqual([]);
+    });
+  });
+
   describe('bulk votes', () => {
     it.each([
       ['Normal', 'normal'],
@@ -418,6 +608,9 @@ describe('Series page', () => {
       expect(screen.queryByTestId('bulk-review-actions')).toBeNull();
       fireEvent.click(checkboxOf('i3'));
       fireEvent.click(checkboxOf('i1'));
+      // Each checkbox asked for its slice; the bulk vote asks for none.
+      expect(mockJumpTo.mock.calls).toEqual([[2], [1]]);
+      mockJumpTo.mockClear();
       fireEvent.click(within(screen.getByTestId('bulk-review-actions')).getByRole('button', { name: label }));
 
       expect(mockBulk).toHaveBeenCalledTimes(1);
@@ -430,6 +623,16 @@ describe('Series page', () => {
       await waitFor(() => expect(screen.getByTestId('selection-count').textContent).toBe('3 slices'));
       expect(mockNotifySuccess).toHaveBeenCalled();
       expect(mockJumpTo).not.toHaveBeenCalled(); // the viewer position is kept
+    });
+
+    it('a failed bulk vote does not navigate either', async () => {
+      mockBulk.mockReturnValue({ unwrap: () => Promise.reject({ status: 500 }) });
+      renderSeries(response());
+      fireEvent.click(checkboxOf('i2'));
+      mockJumpTo.mockClear();
+      fireEvent.click(screen.getByRole('button', { name: 'Normal' }));
+      await waitFor(() => expect(mockNotifyError).toHaveBeenCalled());
+      expect(mockJumpTo).not.toHaveBeenCalled();
     });
 
     it('a failed bulk vote is reported and keeps the selection for a retry', async () => {
@@ -486,6 +689,19 @@ describe('Series page', () => {
         seriesId: SERIES,
         presentedImageIds: ['i2', 'i1', 'i3'],
       });
+    });
+
+    it('is neither enabled by a selection nor navigates', () => {
+      mockComplete.mockReturnValue({ unwrap: () => new Promise(() => undefined) });
+      renderSeries(response());
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all slices' }));
+      expect(completeButton().disabled).toBe(true);
+
+      act(() => mockViewerProps?.onLoadResult(loadedAll(PRESENTED)));
+      fireEvent.click(completeButton());
+      fireEvent.click(screen.getByText('Agree'));
+      expect(mockComplete).toHaveBeenCalledTimes(1);
+      expect(mockJumpTo).not.toHaveBeenCalled();
     });
 
     it('shows a completed review without locking anything, and an outdated one', () => {
@@ -762,6 +978,9 @@ describe('Series page', () => {
       renderSeries(response());
       fireEvent.click(checkboxOf('i3'));
       fireEvent.click(checkboxOf('i2'));
+      // Requests only: the viewer still shows slice 1.
+      expect(mockJumpTo.mock.calls).toEqual([[2], [0]]);
+      mockJumpTo.mockClear();
       const list = screen.getByRole('list', { name: 'Series slices' });
 
       fireEvent.click(sliceToggle());
@@ -773,6 +992,8 @@ describe('Series page', () => {
       expect(screen.getByTestId('selection-count').textContent).toBe('2 of 3 selected');
       expect(rows().map((row) => row.getAttribute('aria-selected'))).toEqual(['true', 'false', 'true']);
       expect(screen.getByRole('button', { name: /Show Slice 2/ }).getAttribute('aria-current')).toBe('true');
+      expect(rows().map((row) => row.getAttribute('data-active'))).toEqual(['false', 'true', 'false']);
+      expect(within(rowOf('i1')).getByTestId('active-slice-marker')).toBeTruthy();
       expect(screen.getByTestId('bulk-review-actions')).toBeTruthy();
       expect(mockJumpTo).not.toHaveBeenCalled();
       expect(mockViewerMounts).toBe(1);
@@ -974,6 +1195,9 @@ describe('Series page', () => {
           target: { value: 'draft' },
         });
         fireEvent.click(checkboxOf('i1'));
+        // The checkbox asked for slice 1; the viewer did not show it.
+        expect(mockJumpTo.mock.calls).toEqual([[1]]);
+        mockJumpTo.mockClear();
         fireEvent.click(sliceToggle());
         const form = screen.getByRole('textbox', { name: 'Comment' });
         // Collapsed: hidden from the accessibility tree, still mounted.
