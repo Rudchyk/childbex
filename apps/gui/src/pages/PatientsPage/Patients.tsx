@@ -25,7 +25,7 @@ import { useEffect } from 'react';
 import { format } from 'date-fns';
 import IconButton from '@mui/material/IconButton';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { GetPatientsResponse, UpdatePatientRequestBody } from '@libs/schemas';
 import { useNotifications } from '../../modules/notifications';
 import {
@@ -38,12 +38,18 @@ import {
 import { WithLoader } from '../../hoc';
 import { DeletePatient } from './DeletePatient';
 import { useUpdatePatientMutation } from '../../store/apis';
-import { generatePath, Link as RouteLink } from 'react-router-dom';
-import { guiRoutes, TrashedPatientsActionTypes } from '@libs/constants';
+import { Link as RouteLink, useNavigate } from 'react-router-dom';
+import { TrashedPatientsActionTypes } from '@libs/constants';
 import { useAuth } from '../../auth/useAuth';
 import { TrashedPatientsAction } from './TrashedPatientsAction';
 import { PatientCountChip } from './PatientCountChip';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
+import {
+  getPatientPath,
+  isPatientCellNavigable,
+  isPatientNavigable,
+  shouldOpenPatientOnCellClick,
+} from './patientRowNavigation';
 
 type Patient = GetPatientsResponse[0];
 /***
@@ -56,6 +62,7 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
   const theme = useTheme();
   const matches = useMediaQuery(theme.breakpoints.down('sm'));
   const [updatePatient, updatePatientState] = useUpdatePatientMutation();
+  const navigate = useNavigate();
   const handleRowUpdate = async (
     updatedRow: Patient,
     originalRow: Patient,
@@ -89,6 +96,30 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
   };
   const columns: GridColDef<Patient>[] = [
     {
+      // The keyboard/assistive way to open a patient (a row click opens it too).
+      field: 'open',
+      headerName: 'Open',
+      width: 70,
+      sortable: false,
+      filterable: false,
+      disableColumnMenu: true,
+      disableExport: true,
+      renderCell: ({ row, tabIndex }: GridCellParams<Patient>) =>
+        isPatientNavigable(row) && (
+          <Stack justifyContent="center" alignItems="center" height="100%">
+            <IconButton
+              size="small"
+              component={RouteLink}
+              to={getPatientPath(row.slug)}
+              tabIndex={tabIndex}
+              aria-label={`Open patient ${row.name}`}
+            >
+              <ArrowForwardIcon />
+            </IconButton>
+          </Stack>
+        ),
+    },
+    {
       field: 'id',
       headerName: 'ID',
       width: 50,
@@ -113,10 +144,7 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       headerName: 'Slug',
       flex: 1,
       editable: true,
-      renderCell: ({
-        value,
-        row,
-      }: GridCellParams<Patient, Patient['slug']>) => (
+      renderCell: ({ value }: GridCellParams<Patient, Patient['slug']>) => (
         <Stack
           direction="row"
           justifyContent="flex-start"
@@ -129,16 +157,6 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
               {value}
             </Typography>
           </Tooltip>
-          <IconButton
-            size="small"
-            component={RouteLink}
-            target="_blank"
-            to={generatePath(guiRoutes.patient, {
-              slug: value,
-            })}
-          >
-            <OpenInNewIcon />
-          </IconButton>
         </Stack>
       ),
     },
@@ -213,6 +231,7 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
       renderCell: ({
         value,
         row,
+        tabIndex,
       }: GridCellParams<Patient, Patient['name']>) => (
         <Stack
           direction="row"
@@ -222,17 +241,22 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
           height="100%"
         >
           <Tooltip title={value}>
-            <Typography
-              component={RouteLink}
-              to={generatePath(guiRoutes.patient, {
-                slug: row.slug,
-              })}
-              variant="body2"
-              noWrap
-              sx={{ maxWidth: 200, textDecoration: 'none' }}
-            >
-              {value}
-            </Typography>
+            {isPatientNavigable(row) ? (
+              <Typography
+                component={RouteLink}
+                to={getPatientPath(row.slug)}
+                tabIndex={tabIndex}
+                variant="body2"
+                noWrap
+                sx={{ maxWidth: 200, textDecoration: 'none' }}
+              >
+                {value}
+              </Typography>
+            ) : (
+              <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                {value}
+              </Typography>
+            )}
           </Tooltip>
         </Stack>
       ),
@@ -325,11 +349,22 @@ export const Patients = WithLoader<GetPatientsResponse>(({ data }) => {
           processRowUpdate={handleRowUpdate}
           disableRowSelectionOnClick
           rows={data}
+          onCellClick={(params, event) => {
+            if (shouldOpenPatientOnCellClick(params, event)) {
+              navigate(getPatientPath(params.row.slug));
+            }
+          }}
+          getCellClassName={(params) =>
+            isPatientCellNavigable(params) ? 'patient-cell-navigable' : ''
+          }
           sx={{
             '.MuiDataGrid-row': {
               '&.trashed': {
                 background: (theme) => lighten(theme.palette.error.light, 0.8),
               },
+            },
+            '.patient-cell-navigable': {
+              cursor: 'pointer',
             },
           }}
           isCellEditable={(props) => {
