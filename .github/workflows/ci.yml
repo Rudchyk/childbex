@@ -89,3 +89,10 @@ jobs:
           bash -n ops/deploy/childbex-app-deploy
           bash -n ops/deploy/childbex-ml-deploy
           bash -n ops/install/install-production-deploy.sh
+          bash -n ops/install/install-keycloak-release-monitor.sh
+          bash -n ops/install/install-keycloak-release-rules.sh
+          python3 -B ops/keycloak/release-check.py --self-test
+          # Explicit User=root/Group=root prevented runuser from switching UID
+          # under systemd sandboxing on ChildBEx; prevent this regression.
+          ! grep -Eq '^(User|Group)=root
+ ops/keycloak/childbex-keycloak-release-check.service
