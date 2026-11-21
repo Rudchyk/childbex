@@ -293,8 +293,10 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     );
     layerGroup.draw();
   };
+  /** One local Series (standalone mode); Clean shows the import again. */
   const onLoadFiles = (files: File[]) => {
     if (appRef.current) {
+      setIsShowDropbox(false);
       appRef.current.loadFiles(files);
     }
   };
@@ -658,7 +660,11 @@ export const DicomViewer: FC<DicomViewerProps> = ({
                 transformOrigin: '0 0',
               }}
             />
-            <DicomViewerDropbox isShow={isShowDropbox} onLoadFiles={onLoadFiles} />
+            {/* Local files are only offered by the standalone viewer. */}
+            <DicomViewerDropbox
+              isShow={isShowDropbox && !!isClean}
+              onLoadFiles={onLoadFiles}
+            />
           </Box>
         </Stack>
         {!!renderSidebar && (

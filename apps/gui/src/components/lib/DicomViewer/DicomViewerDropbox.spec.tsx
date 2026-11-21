@@ -1,0 +1,212 @@
+/**
+ * The standalone viewer's local import: files, folders and ZIP archives
+ * are read in the browser, a single Series opens directly, several are
+ * offered one at a time, and cancel/retry/reset work while reading.
+ */
+import { TextDecoder } from 'util';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { DicomViewerDropbox } from './DicomViewerDropbox';
+import { fakeDataTransfer } from './localImport/__fixtures__/fakeEntries';
+import {
+  buildZip,
+  fileOf,
+  folderFileOf,
+  syntheticDicom,
+} from './localImport/__fixtures__/syntheticDicom';
+
+Object.assign(globalThis, { TextDecoder });
+
+const slice = (series: string, n: number) =>
+  syntheticDicom({
+    studyUid: '2.25.7',
+    seriesUid: `2.25.7.${series}`,
+    sopUid: `2.25.7.${series}.${n}`,
+    seriesNumber: Number(series),
+    seriesDescription: `Synthetic ${series}`,
+    instanceNumber: n,
+  });
+
+const filesInput = () => screen.getByTestId('local-import-files-input');
+const folderInput = () => screen.getByTestId('local-import-folder-input');
+const choose = (input: HTMLElement, files: File[]) =>
+  fireEvent.change(input, { target: { files } });
+
+const loadedNames = (onLoadFiles: jest.Mock, call = 0) =>
+  (onLoadFiles.mock.calls[call][0] as File[]).map((f) => f.name);
+
+let fetchSpy: jest.Mock;
+const originalFetch = globalThis.fetch;
+
+beforeEach(() => {
+  fetchSpy = jest.fn();
+  globalThis.fetch = fetchSpy as unknown as typeof fetch;
+  // jsdom has no folder picker; Chrome, Edge, Firefox and Safari have one.
+  Object.defineProperty(HTMLInputElement.prototype, 'webkitdirectory', {
+    value: false,
+    writable: true,
+    configurable: true,
+  });
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  delete (HTMLInputElement.prototype as { webkitdirectory?: boolean }).webkitdirectory;
+});
+
+describe('DicomViewerDropbox', () => {
+  it('renders nothing while hidden', () => {
+    const { container } = render(<DicomViewerDropbox isShow={false} onLoadFiles={jest.fn()} />);
+    expect(container.innerHTML).toBe('');
+  });
+
+  it('offers files, a folder (webkitdirectory) and drag and drop, without uploading', () => {
+    render(<DicomViewerDropbox isShow onLoadFiles={jest.fn()} />);
+    expect(screen.getByText(/Drag and drop files, folders or a ZIP archive/)).toBeTruthy();
+    expect(screen.getByText('Choose files')).toBeTruthy();
+    expect(screen.getByText('Choose folder')).toBeTruthy();
+    expect(folderInput().hasAttribute('webkitdirectory')).toBe(true);
+    expect(filesInput().hasAttribute('multiple')).toBe(true);
+    expect(screen.getByText(/nothing is uploaded or saved/)).toBeTruthy();
+  });
+
+  it('explains the alternatives where folders cannot be chosen', () => {
+    delete (HTMLInputElement.prototype as { webkitdirectory?: boolean }).webkitdirectory;
+    render(<DicomViewerDropbox isShow onLoadFiles={jest.fn()} />);
+    expect(screen.queryByText('Choose folder')).toBeNull();
+    expect(screen.getByText(/cannot choose folders/)).toBeTruthy();
+  });
+
+  it('opens a single Series directly (existing multi-file selection)', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+
+    choose(filesInput(), [fileOf(slice('1', 2), 'b.dcm'), fileOf(slice('1', 1), 'a.dcm')]);
+
+    await waitFor(() => expect(onLoadFiles).toHaveBeenCalledTimes(1));
+    // In Instance Number order.
+    expect(loadedNames(onLoadFiles)).toEqual(['a.dcm', 'b.dcm']);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('lets one of several Series be chosen, never all of them together', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+
+    choose(folderInput(), [
+      folderFileOf(slice('1', 1), 'Study/S1/IM1'),
+      folderFileOf(slice('2', 1), 'Study/S2/IM1'),
+      folderFileOf(slice('2', 2), 'Study/S2/IM2'),
+    ]);
+
+    const rows = await screen.findAllByTestId('local-import-series');
+    expect(rows).toHaveLength(2);
+    expect(onLoadFiles).not.toHaveBeenCalled();
+    expect(screen.getByText(/never combined into one stack/)).toBeTruthy();
+
+    fireEvent.click(within(rows[1]).getByRole('button', { name: /Open Series 2/ }));
+
+    expect(onLoadFiles).toHaveBeenCalledTimes(1);
+    expect(loadedNames(onLoadFiles)).toEqual(['IM1', 'IM2']);
+    expect(within(rows[1]).getByText('Last opened')).toBeTruthy();
+  });
+
+  it('imports a dropped folder tree and a dropped ZIP archive', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+
+    fireEvent.drop(screen.getByTestId('dicom-viewer-dropbox'), {
+      dataTransfer: fakeDataTransfer([
+        { name: 'Study', node: { S1: { IM1: fileOf(slice('1', 1), 'IM1') } } },
+        {
+          name: 'more.zip',
+          node: fileOf(buildZip([{ name: 'a/b/IM2', data: slice('2', 1) }]), 'more.zip'),
+        },
+      ]),
+    });
+
+    expect(await screen.findAllByTestId('local-import-series')).toHaveLength(2);
+    expect(screen.getByText(/3 files checked: 2 DICOM images in 2 Series/)).toBeTruthy();
+  });
+
+  it('shows skipped files instead of a silent success', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+
+    choose(filesInput(), [
+      fileOf(slice('1', 1), 'IM1'),
+      fileOf(Uint8Array.from('notes', (c) => c.charCodeAt(0)), 'README.txt'),
+    ]);
+
+    expect(await screen.findByText('1 file skipped')).toBeTruthy();
+    expect(screen.getByText(/Not DICOM: 1/)).toBeTruthy();
+    // Something was skipped: the user opens the Series knowingly.
+    expect(onLoadFiles).not.toHaveBeenCalled();
+    expect(screen.getAllByTestId('local-import-series')).toHaveLength(1);
+  });
+
+  it('says so when no displayable DICOM was found', async () => {
+    render(<DicomViewerDropbox isShow onLoadFiles={jest.fn()} />);
+    choose(filesInput(), [fileOf(Uint8Array.from('x', (c) => c.charCodeAt(0)), 'x.txt')]);
+    expect(await screen.findByText(/No DICOM images that can be displayed/)).toBeTruthy();
+  });
+
+  it('reports an archive that cannot be opened', async () => {
+    render(<DicomViewerDropbox isShow onLoadFiles={jest.fn()} />);
+    choose(filesInput(), [
+      fileOf(buildZip([{ name: 'IM1', data: slice('1', 1), flags: 1 }]), 'locked.zip'),
+    ]);
+    expect(await screen.findByText('locked.zip could not be opened')).toBeTruthy();
+    expect(screen.getByText(/encrypted/)).toBeTruthy();
+  });
+
+  it('explains a limit and allows Retry and Start over', async () => {
+    render(
+      <DicomViewerDropbox isShow onLoadFiles={jest.fn()} limits={{ maxFiles: 1 }} />
+    );
+    choose(filesInput(), [fileOf(slice('1', 1), 'a'), fileOf(slice('1', 2), 'b')]);
+
+    expect(await screen.findByText(/More than 1 files were found/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText(/More than 1 files were found/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Start over' }));
+    expect(screen.getByText('Choose files')).toBeTruthy();
+  });
+
+  it('cancels a running import and retries it', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+    const tree = { S1: { IM1: fileOf(slice('1', 1), 'IM1'), IM2: fileOf(slice('1', 2), 'IM2') } };
+
+    fireEvent.drop(screen.getByTestId('dicom-viewer-dropbox'), {
+      dataTransfer: fakeDataTransfer([{ name: 'Study', node: tree }]),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByText('Import cancelled.')).toBeTruthy();
+    // The cancelled run never delivers its result.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(onLoadFiles).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(onLoadFiles).toHaveBeenCalledTimes(1));
+    expect(loadedNames(onLoadFiles)).toEqual(['IM1', 'IM2']);
+  });
+
+  it('stops reading when the viewer is closed', async () => {
+    const onLoadFiles = jest.fn();
+    const consoleError = jest.spyOn(console, 'error');
+    const { unmount } = render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+    fireEvent.drop(screen.getByTestId('dicom-viewer-dropbox'), {
+      dataTransfer: fakeDataTransfer([
+        { name: 'Study', node: { IM1: fileOf(slice('1', 1), 'IM1') } },
+      ]),
+    });
+
+    unmount();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+
+    expect(onLoadFiles).not.toHaveBeenCalled();
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+});

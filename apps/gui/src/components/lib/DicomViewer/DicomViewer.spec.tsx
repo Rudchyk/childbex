@@ -101,7 +101,15 @@ jest.mock('./DicomViewerSidebar', () => ({
   DicomViewerSidebar: () => <div data-testid="default-sidebar" />,
 }));
 jest.mock('./DicomViewerFooter', () => ({ DicomViewerFooter: () => null }));
-jest.mock('./DicomViewerDropbox', () => ({ DicomViewerDropbox: () => null }));
+/** The local import's props (last render). */
+let mockDropboxProps: { isShow: boolean; onLoadFiles: (files: File[]) => void } | null =
+  null;
+jest.mock('./DicomViewerDropbox', () => ({
+  DicomViewerDropbox: (props: NonNullable<typeof mockDropboxProps>) => {
+    mockDropboxProps = props;
+    return null;
+  },
+}));
 
 const urls = [
   '/api/v1/patients/p1/images/i1/file',
@@ -137,6 +145,7 @@ beforeEach(() => {
   ];
   mockActiveViewLayer = undefined;
   mockToolsProps = null;
+  mockDropboxProps = null;
   setPixelRatio(1);
 });
 
@@ -463,6 +472,34 @@ describe('DicomViewer', () => {
 
     expect(getRequestHeaders).not.toHaveBeenCalled();
     expect(mockLoadURLs).not.toHaveBeenCalled();
+  });
+
+  describe('local import (standalone viewer only)', () => {
+    it('is offered by the standalone viewer and hands one Series to dwv', async () => {
+      render(<DicomViewer isClean />);
+      await act(async () => undefined);
+      expect(mockDropboxProps?.isShow).toBe(true);
+
+      const files = [new File([new Uint8Array(4)], 'IM1')];
+      act(() => mockDropboxProps?.onLoadFiles(files));
+
+      const app = (jest.requireMock('dwv').App as jest.Mock).mock.results[0].value;
+      expect(app.loadFiles).toHaveBeenCalledWith(files);
+      // Hidden while dwv loads (Clean shows it again).
+      expect(mockDropboxProps?.isShow).toBe(false);
+    });
+
+    it('is never offered by the Series review viewer', async () => {
+      render(<DicomViewer list={urls} />);
+      await act(async () => undefined);
+      expect(mockDropboxProps?.isShow).toBe(false);
+    });
+
+    it('is not offered outside the standalone viewer, even without a list', async () => {
+      render(<DicomViewer />);
+      await act(async () => undefined);
+      expect(mockDropboxProps?.isShow).toBe(false);
+    });
   });
 
   describe('measurements', () => {
