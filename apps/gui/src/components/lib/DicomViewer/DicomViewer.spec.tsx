@@ -50,6 +50,8 @@ let mockToolsProps: {
   calibration?: { kind: string };
   isDataLoaded: boolean;
   isLoadSuccessful: boolean;
+  onClean?: () => void;
+  canClean?: boolean;
 } | null = null;
 
 jest.mock('dwv', () => ({
@@ -499,6 +501,140 @@ describe('DicomViewer', () => {
       render(<DicomViewer />);
       await act(async () => undefined);
       expect(mockDropboxProps?.isShow).toBe(false);
+    });
+
+    describe('failed and partial loads', () => {
+      const appOf = () => (jest.requireMock('dwv').App as jest.Mock).mock.results[0].value;
+      const filesOf = (count: number) =>
+        Array.from({ length: count }, (_, i) => new File([new Uint8Array(4)], `IM${i + 1}`));
+      /** Standalone viewer with one local stack handed to dwv. */
+      const openStack = async (count = 3, dataid = '1') => {
+        render(<DicomViewer isClean />);
+        await act(async () => undefined);
+        act(() => {
+          mockDropboxProps?.onLoadFiles(filesOf(count));
+          mockListeners.loadstart({ dataid });
+        });
+      };
+
+      it('returns to the imported Series list when no image could be shown', async () => {
+        await openStack();
+        mockImage = undefined;
+        act(() => {
+          mockListeners.loaderror({ dataid: '1', error: new Error('decode') });
+          mockListeners.loadend({ dataid: '1' });
+        });
+
+        expect(screen.getByText(/DICOM image stack could not be displayed/)).toBeTruthy();
+        expect(mockDropboxProps?.isShow).toBe(true);
+        expect(mockToolsProps?.isLoadSuccessful).toBe(false);
+      });
+
+      it.each(['loaderror', 'loadabort'])(
+        'enables Clean after %s even without a loaded stack, and Clean shows the list',
+        async (eventName) => {
+          await openStack();
+          expect(mockToolsProps?.canClean).toBe(false);
+
+          act(() => mockListeners[eventName]({ dataid: '1', error: new Error('x') }));
+          expect(mockToolsProps?.canClean).toBe(true);
+          expect(mockDropboxProps?.isShow).toBe(false);
+
+          act(() => mockToolsProps?.onClean?.());
+          expect(mockAbortAllLoads).toHaveBeenCalled();
+          expect(mockReset).toHaveBeenCalled();
+          expect(mockDropboxProps?.isShow).toBe(true);
+          expect(mockToolsProps?.canClean).toBe(false);
+        }
+      );
+
+      it('says how many files were not loaded instead of implying a complete Series', async () => {
+        await openStack(3);
+        mockImage = mockImageWithSlices(2);
+        act(() => {
+          mockListeners.loaderror({ dataid: '1', error: new Error('different orientation') });
+          mockListeners.loadend({ dataid: '1' });
+          mockListeners.load({ dataid: '1' });
+        });
+
+        expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
+          /1 of 3 files could not be added, so this is not the complete Series \(2 images shown\)/
+        );
+        expect(mockToolsProps?.isLoadSuccessful).toBe(false);
+        expect(mockToolsProps?.canClean).toBe(true);
+      });
+
+      it('reports a complete stack without a warning', async () => {
+        await openStack(2);
+        mockImage = mockImageWithSlices(2);
+        act(() => {
+          mockListeners.loadend({ dataid: '1' });
+          mockListeners.load({ dataid: '1' });
+        });
+        expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
+        expect(mockToolsProps?.isLoadSuccessful).toBe(true);
+      });
+
+      it('removes the previous stack first and ignores its late events', async () => {
+        await openStack(3, '1');
+        const app = appOf();
+        mockReset.mockClear();
+        mockAbortAllLoads.mockClear();
+
+        act(() => {
+          mockDropboxProps?.onLoadFiles(filesOf(2));
+          mockListeners.loadstart({ dataid: '2' });
+        });
+        expect(mockAbortAllLoads).toHaveBeenCalledTimes(1);
+        expect(mockReset).toHaveBeenCalledTimes(1);
+        expect(app.loadFiles).toHaveBeenCalledTimes(2);
+
+        // The replaced load reports late: never mixed into the new one.
+        mockImage = undefined;
+        act(() => {
+          mockListeners.loaderror({ dataid: '1', error: new Error('aborted') });
+          mockListeners.loadabort({ dataid: '1' });
+          mockListeners.loadend({ dataid: '1' });
+        });
+        expect(screen.queryByText(/could not be displayed/)).toBeNull();
+        expect(mockToolsProps?.canClean).toBe(false);
+        expect(mockDropboxProps?.isShow).toBe(false);
+
+        mockImage = mockImageWithSlices(2);
+        act(() => {
+          mockListeners.loadend({ dataid: '2' });
+          mockListeners.load({ dataid: '2' });
+        });
+        expect(mockToolsProps?.isLoadSuccessful).toBe(true);
+        expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
+      });
+
+      it('ignores events the aborted load emits synchronously while being removed', async () => {
+        await openStack(3, '1');
+        mockAbortAllLoads.mockImplementationOnce(() => {
+          mockListeners.loadabort({ dataid: '1' });
+          mockListeners.loadend({ dataid: '1' });
+        });
+        mockImage = undefined;
+        act(() => mockToolsProps?.onClean?.());
+
+        expect(screen.queryByText(/could not be displayed/)).toBeNull();
+        expect(mockDropboxProps?.isShow).toBe(true);
+        expect(mockToolsProps?.canClean).toBe(false);
+      });
+
+      it('shows the list again when dwv refuses the files', async () => {
+        render(<DicomViewer isClean />);
+        await act(async () => undefined);
+        appOf().loadFiles.mockImplementationOnce(() => {
+          throw new Error('No loader found');
+        });
+
+        act(() => mockDropboxProps?.onLoadFiles(filesOf(1)));
+
+        expect(screen.getByText(/could not be displayed. Choose another Series/)).toBeTruthy();
+        expect(mockDropboxProps?.isShow).toBe(true);
+      });
     });
   });
 

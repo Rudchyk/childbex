@@ -11,6 +11,7 @@ import {
   formatBytes,
   readBlobBytes,
   throwIfCancelled,
+  yieldToBrowser,
 } from './localImport.files';
 import { LocalImportError, type LocalImportLimits, type SkipReason } from './localImport.types';
 
@@ -20,6 +21,9 @@ const SIG_EOCD = 0x06054b50;
 const SIG_EOCD64_LOCATOR = 0x07064b50;
 const SIG_EOCD64 = 0x06064b50;
 const EOCD_SIZE = 22;
+const EOCD64_LOCATOR_SIZE = 20;
+const EOCD64_SIZE = 56;
+const ZIP64_SATURATED = 0xffffffff;
 const MAX_COMMENT = 0xffff;
 const CENTRAL_SIZE = 46;
 const LOCAL_SIZE = 30;
@@ -41,6 +45,10 @@ const READ_CHUNK = 1024 * 1024;
  * one step never produces more than ~16 MiB before the size check runs.
  */
 const INFLATE_CHUNK = 16 * 1024;
+/** Inflated bytes collected before they are moved into a Blob part. */
+const FLUSH_BYTES = 4 * 1024 * 1024;
+/** Inflated bytes between two pauses (Cancel, rendering). */
+const PAUSE_BYTES = 8 * 1024 * 1024;
 
 export interface ZipEntry {
   /** Normalised path inside the archive (`/` separated). */
@@ -184,13 +192,32 @@ export const readZipDirectory = async (
 
   if (entryCount === 0xffff || directorySize === 0xffffffff || directoryOffset === 0xffffffff) {
     // ZIP64: the real values are in the ZIP64 end of central directory.
-    const locator = await readRange(archive, eocd.offset - 20, eocd.offset);
-    const lv = view(locator);
+    const locatorOffset = eocd.offset - EOCD64_LOCATOR_SIZE;
+    if (locatorOffset < 0) throw corrupt('missing ZIP64 locator');
+    const lv = view(await readRange(archive, locatorOffset, eocd.offset));
     if (lv.getUint32(0, true) !== SIG_EOCD64_LOCATOR) throw corrupt('missing ZIP64 locator');
+    if (lv.getUint32(4, true) !== 0 || lv.getUint32(16, true) > 1) {
+      throw new LocalImportError(
+        'UNSUPPORTED_ARCHIVE',
+        'Split (multi-part) ZIP archives are not supported.'
+      );
+    }
     const recordOffset = getUint64(lv, 8);
-    const record = await readRange(archive, recordOffset, recordOffset + 56);
-    const rv = view(record);
-    if (rv.getUint32(0, true) !== SIG_EOCD64) throw corrupt('missing ZIP64 record');
+    if (recordOffset + EOCD64_SIZE > locatorOffset) throw corrupt('invalid ZIP64 record offset');
+    const rv = view(await readRange(archive, recordOffset, recordOffset + EOCD64_SIZE));
+    if (rv.getUint32(0, true) !== SIG_EOCD64 || getUint64(rv, 4) < EOCD64_SIZE - 12) {
+      throw corrupt('missing ZIP64 record');
+    }
+    if (
+      rv.getUint32(16, true) !== 0 ||
+      rv.getUint32(20, true) !== 0 ||
+      getUint64(rv, 24) !== getUint64(rv, 32)
+    ) {
+      throw new LocalImportError(
+        'UNSUPPORTED_ARCHIVE',
+        'Split (multi-part) ZIP archives are not supported.'
+      );
+    }
     entryCount = getUint64(rv, 32);
     directorySize = getUint64(rv, 40);
     directoryOffset = getUint64(rv, 48);
@@ -245,17 +272,26 @@ export const readZipDirectory = async (
       if (extra + 4 + size > extraStart + extraLength) throw corrupt('invalid extra field');
       if (id === 0x0001) {
         let field = extra + 4;
+        const fieldEnd = extra + 4 + size;
         const take = () => {
-          if (field + 8 > extra + 4 + size) throw corrupt('invalid ZIP64 field');
+          if (field + 8 > fieldEnd) throw corrupt('invalid ZIP64 field');
           const value = getUint64(dv, field);
           field += 8;
           return value;
         };
-        if (uncompressedSize === 0xffffffff) uncompressedSize = take();
-        if (compressedSize === 0xffffffff) compressedSize = take();
-        if (localHeaderOffset === 0xffffffff) localHeaderOffset = take();
+        if (uncompressedSize === ZIP64_SATURATED) uncompressedSize = take();
+        if (compressedSize === ZIP64_SATURATED) compressedSize = take();
+        if (localHeaderOffset === ZIP64_SATURATED) localHeaderOffset = take();
       }
       extra += 4 + size;
+    }
+    // A saturated field without its ZIP64 value: sizes/offset are unknown.
+    if (
+      uncompressedSize === ZIP64_SATURATED ||
+      compressedSize === ZIP64_SATURATED ||
+      localHeaderOffset === ZIP64_SATURATED
+    ) {
+      throw corrupt('missing ZIP64 field');
     }
 
     if (flags & (FLAG_ENCRYPTED | FLAG_STRONG_ENCRYPTION)) {
@@ -361,7 +397,18 @@ export const extractZipEntry = async (
 
   let crc = 0;
   let produced = 0;
-  const chunks: Uint8Array[] = [];
+  let producedAtPause = 0;
+  // Inflated output is moved into Blob parts as it grows, so the entry is
+  // never held twice (as chunks and as the final Blob).
+  const parts: Blob[] = [];
+  let chunks: Uint8Array[] = [];
+  let chunkBytes = 0;
+  const flush = () => {
+    if (!chunks.length) return;
+    parts.push(new Blob(chunks as BlobPart[]));
+    chunks = [];
+    chunkBytes = 0;
+  };
   const inflate =
     entry.method === METHOD_DEFLATE
       ? new Inflate((data) => {
@@ -377,6 +424,7 @@ export const extractZipEntry = async (
           }
           crc = crc32(crc, data);
           chunks.push(data);
+          chunkBytes += data.length;
         })
       : undefined;
 
@@ -390,6 +438,13 @@ export const extractZipEntry = async (
         for (let i = 0; i < slice.length; i += INFLATE_CHUNK) {
           const isLast = end === dataEnd && i + INFLATE_CHUNK >= slice.length;
           inflate.push(slice.subarray(i, i + INFLATE_CHUNK), isLast);
+          if (chunkBytes >= FLUSH_BYTES) flush();
+          // Highly compressed data: pause so the page and Cancel respond.
+          if (produced - producedAtPause >= PAUSE_BYTES) {
+            producedAtPause = produced;
+            await yieldToBrowser();
+            throwIfCancelled(signal);
+          }
         }
       } else {
         produced += slice.length;
@@ -408,7 +463,8 @@ export const extractZipEntry = async (
   }
   if (!inflate) return archive.slice(dataStart, dataEnd);
   budget.remainingBytes -= produced;
-  return new Blob(chunks as BlobPart[]);
+  flush();
+  return new Blob(parts);
 };
 
 /** One entry is damaged (inflate error, size or CRC-32 mismatch). */

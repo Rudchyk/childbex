@@ -183,6 +183,17 @@ const VIEWPORT_HEIGHT ='max(500px, calc(100vh - 280px))';
  * TODO: create grouping by seriesDescription for files
  */
 
+/** `activeDataIdRef` while the previous load is removed (no dwv data id). */
+const REPLACED_LOAD = 'replaced';
+const LOCAL_LOAD_FAILED =
+  'The images could not be displayed. Choose another Series or other files.';
+
+/** An event of a load that was replaced or cleaned in the meantime. */
+const isStaleLoadEvent = (activeDataId: string | undefined, event: unknown) => {
+  const dataId = (event as { dataid?: unknown } | null)?.dataid;
+  return activeDataId !== undefined && dataId !== undefined && `${dataId}` !== activeDataId;
+};
+
 export const DicomViewer: FC<DicomViewerProps> = ({
   list = [],
   getRequestHeaders,
@@ -229,6 +240,15 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   >({});
   const [calibration, setCalibration] = useState<LengthCalibration>();
   const [currentImageId, setCurrentImageId] = useState<string | undefined>();
+  /** The local stack being shown (standalone mode): files handed to dwv. */
+  const [localLoad, setLocalLoad] = useState<{ fileCount: number } | null>(null);
+  /**
+   * dwv data id of the current load (from `loadstart`); events of another
+   * load are stale. dwv never reuses data ids.
+   */
+  const activeDataIdRef = useRef<string | undefined>(undefined);
+  const isCleanRef = useRef(isClean);
+  isCleanRef.current = isClean;
   /** Custom panels next to the viewport (without any: full width). */
   const panelsBeside =
     (!!renderSidebar || !!leadingPanel) && sidebarPlacement === 'beside';
@@ -293,20 +313,20 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     );
     layerGroup.draw();
   };
-  /** One local Series (standalone mode); Clean shows the import again. */
-  const onLoadFiles = (files: File[]) => {
-    if (appRef.current) {
-      setIsShowDropbox(false);
-      appRef.current.loadFiles(files);
-    }
-  };
-  const onClean = () => {
+  /**
+   * Removes the loaded (or still loading) data. Events of an aborted load
+   * that arrive later are ignored (`isStaleLoadEvent`).
+   */
+  const resetViewer = () => {
+    // Set first: aborting emits events of the old load synchronously too.
+    activeDataIdRef.current = REPLACED_LOAD;
+    appRef.current?.abortAllLoads();
     appRef.current?.reset();
+    setLocalLoad(null);
     setItems([]);
     setSliceCount(0);
     setLoadProgress(0);
     setIsLoadSuccessful(false);
-    setIsShowDropbox(true);
     setCurrentImageId(undefined);
     setCurrentMetaData({});
     setCalibration(undefined);
@@ -318,6 +338,28 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     setLoadedSlicesMapping({});
     setLoadedItemsMapping({});
     setLoadErrorEvents([]);
+  };
+  const onClean = () => {
+    resetViewer();
+    setIsShowDropbox(true);
+  };
+  /**
+   * One local stack (standalone mode). The previous one is removed first,
+   * so two loads never mix; Clean, or a failed load, shows the import again.
+   */
+  const onLoadFiles = (files: File[]) => {
+    const app = appRef.current;
+    if (!app) return;
+    resetViewer();
+    setIsShowDropbox(false);
+    setLocalLoad({ fileCount: files.length });
+    try {
+      app.loadFiles(files);
+    } catch {
+      // e.g. no dwv loader for the files: nothing will be loaded.
+      setLoadStateError(LOCAL_LOAD_FAILED);
+      setIsShowDropbox(true);
+    }
   };
   // Stable: memoised slice rows receive it. Only a request: nothing loaded
   // yet (no view layer) or an index out of the volume changes nothing, and
@@ -385,9 +427,14 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     if (konva) konva.pixelRatio = 1;
     scaleDrawStyles(app.getStyle() as DwvStyle | undefined);
 
+    app.addEventListener('loadstart', (event: { dataid?: unknown }) => {
+      if (event?.dataid !== undefined) activeDataIdRef.current = `${event.dataid}`;
+    });
     app.addEventListener('loadend', (event: DicomLoadEndEvent) => {
-      // An in-flight load can finish while this viewer is being removed.
+      // An in-flight load can finish while this viewer is being removed,
+      // or after it was replaced by another Series.
       if (!isMountedRef.current) return;
+      if (isStaleLoadEvent(activeDataIdRef.current, event)) return;
 
       const image = app.getData(event.dataid)?.image;
       const viewLayer = app.getViewLayersByDataId(event.dataid)?.[0];
@@ -405,6 +452,8 @@ export const DicomViewer: FC<DicomViewerProps> = ({
         setSliceCount(0);
         setLoadedSlicesMapping({});
         setCurrentImageId(undefined);
+        // Standalone: back to the imported Series list (Clean needs data).
+        if (isCleanRef.current) setIsShowDropbox(true);
         return;
       }
 
@@ -449,8 +498,9 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     app.addEventListener('loadprogress', (event: DicomLoadProgressEvent) => {
       if (isMountedRef.current) setLoadProgress(event.loaded);
     });
-    app.addEventListener('load', () => {
-      if (isMountedRef.current) setIsLoadSuccessful(true);
+    app.addEventListener('load', (event: unknown) => {
+      if (!isMountedRef.current || isStaleLoadEvent(activeDataIdRef.current, event)) return;
+      setIsLoadSuccessful(true);
     });
     app.addEventListener(
       'positionchange',
@@ -463,7 +513,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       }
     );
     app.addEventListener('loaditem', (event: DicomLoadItemEvent) => {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || isStaleLoadEvent(activeDataIdRef.current, event)) return;
       let name = '';
       if (typeof event.source === 'string') {
         name = event.source;
@@ -478,11 +528,11 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       }
     });
     app.addEventListener('loaderror', (event: DicomLoadErrorEvent) => {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || isStaleLoadEvent(activeDataIdRef.current, event)) return;
       setLoadErrorEvents((state) => [...state, event]);
     });
     app.addEventListener('loadabort', (event: DicomLoadErrorEvent) => {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current || isStaleLoadEvent(activeDataIdRef.current, event)) return;
       setLoadErrorEvents((state) => [...state, event]);
     });
     app.addEventListener('keydown', (event: KeyboardEvent) => {
@@ -589,6 +639,15 @@ export const DicomViewer: FC<DicomViewerProps> = ({
         <LinearProgress variant="determinate" value={loadProgress} />
       )}
       {loadStateError && <Alert severity="error">{loadStateError}</Alert>}
+      {localLoad && isDataLoaded && loadErrorEvents.length > 0 && (
+        <Alert severity="warning" data-testid="local-load-incomplete">
+          <strong>Incomplete stack:</strong>{' '}
+          {loadErrorEvents.length.toLocaleString('en-US')} of{' '}
+          {localLoad.fileCount.toLocaleString('en-US')} files could not be added, so this is
+          not the complete Series ({sliceCount.toLocaleString('en-US')} images shown). Use
+          Clean to choose another Series.
+        </Alert>
+      )}
       {/*
         Custom panels sit on both sides of the toolbar and viewport (or below
         them) and are always rendered: they keep their state when the
@@ -633,6 +692,8 @@ export const DicomViewer: FC<DicomViewerProps> = ({
             }
             loadErrorEvents={loadErrorEvents}
             onClean={isClean ? onClean : undefined}
+            // Also after a failed or stuck load: back to the import.
+            canClean={isDataLoaded || !!loadStateError || loadErrorEvents.length > 0}
           />
           {toolbar}
           <Box

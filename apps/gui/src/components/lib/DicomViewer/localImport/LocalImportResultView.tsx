@@ -17,8 +17,10 @@ import { formatBytes } from './localImport.files';
 import {
   QUIET_SKIP_REASONS,
   skipReasonLabels,
+  stackWarningLabels,
   type LocalDicomSeries,
   type LocalImportResult,
+  type LocalMediaFile,
   type SkipReason,
 } from './localImport.types';
 
@@ -36,19 +38,39 @@ const formatStudyDate = (value?: string) =>
 
 const shortUid = (uid: string) => (uid.length > 24 ? `…${uid.slice(-20)}` : uid);
 
-/** The Series that would be opened without asking (nothing to review). */
-export const seriesToOpenDirectly = (result: LocalImportResult) =>
-  result.series.length === 1 &&
-  !result.failedArchives.length &&
-  result.skipped.every((s) => QUIET_SKIP_REASONS.includes(s.reason))
-    ? result.series[0]
-    : undefined;
+export type LocalOpenTarget =
+  | { kind: 'series'; series: LocalDicomSeries }
+  | { kind: 'media'; media: LocalMediaFile };
+
+/** Key of an opened Series or file (`openedKey`). */
+export const openTargetKey = (target: LocalOpenTarget) =>
+  target.kind === 'series' ? target.series.key : `media:${target.media.path}`;
+
+/**
+ * What opens without asking: a single complete stack (or a single picture
+ * or video) with nothing to review. Parts of a Series, stacks that may load
+ * incompletely, failed archives and skipped files are always shown first.
+ */
+export const targetToOpenDirectly = (result: LocalImportResult): LocalOpenTarget | undefined => {
+  const nothingToReview =
+    !result.failedArchives.length &&
+    result.skipped.every((s) => QUIET_SKIP_REASONS.includes(s.reason));
+  if (!nothingToReview) return undefined;
+  const [series] = result.series;
+  if (result.series.length === 1 && !result.mediaFiles.length) {
+    return !series.part && !series.warnings.length ? { kind: 'series', series } : undefined;
+  }
+  if (!result.series.length && result.mediaFiles.length === 1) {
+    return { kind: 'media', media: result.mediaFiles[0] };
+  }
+  return undefined;
+};
 
 interface LocalImportResultViewProps {
   result: LocalImportResult;
-  /** The Series last opened in the viewer. */
+  /** The Series or file last opened in the viewer (`openTargetKey`). */
   openedKey?: string;
-  onOpen: (series: LocalDicomSeries) => void;
+  onOpen: (target: LocalOpenTarget) => void;
   onReset: () => void;
 }
 
@@ -58,6 +80,15 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
   onOpen,
   onReset,
 }) => {
+  const seriesCount = useMemo(
+    () => new Set(result.series.map((s) => `${s.studyInstanceUid}|${s.seriesInstanceUid}`)).size,
+    [result.series]
+  );
+  const partDifferences = useMemo(
+    () => [...new Set(result.series.flatMap((s) => s.part?.differences ?? []))],
+    [result.series]
+  );
+  const hasStackWarnings = result.series.some((s) => s.warnings.length);
   const skippedByReason = useMemo(() => {
     const groups = new Map<SkipReason, string[]>();
     for (const { path, reason } of result.skipped) {
@@ -83,11 +114,13 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
     <Stack spacing={2} sx={{ width: '100%' }} data-testid="local-import-result">
       <Typography variant="body2" role="status">
         {plural(result.fileCount, 'file')} checked: {plural(result.instanceCount, 'DICOM image')} in{' '}
-        {plural(result.series.length, 'Series', 'Series')} ({plural(studies.length, 'Study', 'Studies')}),{' '}
+        {plural(seriesCount, 'Series', 'Series')} ({plural(studies.length, 'Study', 'Studies')}),{' '}
+        {!!result.mediaFiles.length &&
+          `${plural(result.mediaFiles.length, 'other picture or video', 'other pictures or videos')}, `}
         {result.skipped.length.toLocaleString('en-US')} skipped.
       </Typography>
 
-      {!result.series.length && (
+      {!result.series.length && !result.mediaFiles.length && (
         <Alert severity="error">
           No DICOM images that can be displayed were found. Choose a folder or ZIP archive that
           contains DICOM image files.
@@ -135,6 +168,22 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
         </Alert>
       )}
 
+      {!!partDifferences.length && (
+        <Alert severity="warning" data-testid="local-import-parts">
+          <AlertTitle>Some Series are offered in parts</AlertTitle>
+          The viewer cannot show all images of these Series in one stack (they differ in{' '}
+          {partDifferences.join(', ')}). Open each part separately; each part is only part of
+          its Series. The DICOM UIDs are unchanged.
+        </Alert>
+      )}
+
+      {hasStackWarnings && (
+        <Alert severity="warning">
+          {stackWarningLabels['repeated-positions']} Such stacks do not open automatically;
+          the viewer reports how many images it could load.
+        </Alert>
+      )}
+
       {studies.map((seriesOfStudy) => {
         const study = seriesOfStudy[0];
         return (
@@ -168,17 +217,31 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
                       <TableCell>{series.modality ?? '—'}</TableCell>
                       <TableCell>
                         {series.seriesDescription ?? 'No description'}
-                        {series.hasMixedImageSizes && (
+                        {series.part && (
                           <Chip
                             size="small"
                             color="warning"
-                            label="Mixed image sizes"
-                            title="Images of different sizes cannot all be shown in one stack"
+                            label={`Part ${series.part.index} of ${series.part.count}`}
+                            title={`Differs in: ${series.part.differences.join(', ')}`}
+                            sx={{ ml: 1 }}
+                          />
+                        )}
+                        {!!series.warnings.length && (
+                          <Chip
+                            size="small"
+                            color="warning"
+                            label="May load incompletely"
+                            title={series.warnings.map((w) => stackWarningLabels[w]).join(' ')}
                             sx={{ ml: 1 }}
                           />
                         )}
                         {series.key === openedKey && (
                           <Chip size="small" label="Last opened" sx={{ ml: 1 }} />
+                        )}
+                        {!!series.part?.values.length && (
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            {series.part.values.join(' · ')}
+                          </Typography>
                         )}
                       </TableCell>
                       <TableCell align="right">
@@ -189,8 +252,13 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
                         <Button
                           size="small"
                           variant="contained"
-                          onClick={() => onOpen(series)}
-                          aria-label={`Open Series ${series.seriesNumber ?? ''} ${series.seriesDescription ?? ''}`.trim()}
+                          onClick={() => onOpen({ kind: 'series', series })}
+                          aria-label={[
+                            `Open Series ${series.seriesNumber ?? ''} ${series.seriesDescription ?? ''}`.trim(),
+                            series.part && `part ${series.part.index} of ${series.part.count}`,
+                          ]
+                            .filter(Boolean)
+                            .join(', ')}
                         >
                           Open
                         </Button>
@@ -202,6 +270,41 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
           </Box>
         );
       })}
+
+      {!!result.mediaFiles.length && (
+        <Box data-testid="local-import-media">
+          <Typography variant="subtitle2">Other pictures and videos</Typography>
+          <Typography variant="caption" color="text.secondary">
+            Not DICOM: shown as plain pictures, without measurements in millimetres.
+          </Typography>
+          <Table size="small" sx={{ mt: 1 }}>
+            <TableBody>
+              {result.mediaFiles.map((media) => (
+                <TableRow key={media.path}>
+                  <TableCell sx={{ wordBreak: 'break-all' }}>
+                    {media.path}
+                    {`media:${media.path}` === openedKey && (
+                      <Chip size="small" label="Last opened" sx={{ ml: 1 }} />
+                    )}
+                  </TableCell>
+                  <TableCell>{media.kind === 'image' ? 'Picture' : 'Video'}</TableCell>
+                  <TableCell align="right">{formatBytes(media.file.size)}</TableCell>
+                  <TableCell align="right">
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={() => onOpen({ kind: 'media', media })}
+                      aria-label={`Open ${media.path}`}
+                    >
+                      Open
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Box>
+      )}
 
       <Box>
         <Button variant="outlined" onClick={onReset}>

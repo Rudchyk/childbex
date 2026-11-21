@@ -88,6 +88,17 @@ const summary = (result: LocalImportResult) => ({
   skipped: result.skipped.map((s) => s.reason).sort(),
 });
 
+/** Offsets of the local file headers (`PK\3\4`) of a synthetic ZIP. */
+const localHeaderOffsets = (bytes: Uint8Array) => {
+  const offsets: number[] = [];
+  for (let i = 0; i + 4 <= bytes.length; i++) {
+    if (bytes[i] === 0x50 && bytes[i + 1] === 0x4b && bytes[i + 2] === 3 && bytes[i + 3] === 4) {
+      offsets.push(i);
+    }
+  }
+  return offsets;
+};
+
 const run = (selection: InputSelection, options?: Parameters<typeof importLocalDicom>[1]) =>
   importLocalDicom(selection, options);
 
@@ -210,21 +221,146 @@ describe('importLocalDicom', () => {
     expect(result.series[0].instances[0].info.rows).toBe(4);
   });
 
-  it('reads the whole file when the header is longer than the first bytes read', async () => {
+  it('reads more of the file when the header is longer than the first bytes read', async () => {
     const result = await run(
       pickFiles({ big: slice(`${STUDY_1}.1`, 1, { privatePaddingBytes: 300 * 1024 }) })
     );
     expect(result.instanceCount).toBe(1);
   });
 
-  it('marks Series whose images differ in size (dwv cannot stack them)', async () => {
+  it('reads headers in bounded steps and gives up on a header that does not end', async () => {
     const result = await run(
-      pickFolder({
-        'S/1': slice(`${STUDY_1}.1`, 1),
-        'S/2': slice(`${STUDY_1}.1`, 2, { rows: 8, columns: 8 }),
+      pickFiles({
+        // Pixel Data after 3 MiB: found by the third read (16 MiB cap).
+        long: slice(`${STUDY_1}.1`, 1, { privatePaddingBytes: 3 * 1024 * 1024 }),
+        // Pixel Data after 17 MiB: beyond the cap, not read further.
+        endless: slice(`${STUDY_1}.1`, 2, { privatePaddingBytes: 17 * 1024 * 1024 }),
       })
     );
-    expect(result.series[0].hasMixedImageSizes).toBe(true);
+    expect(result.instanceCount).toBe(1);
+    expect(summary(result).skipped).toEqual(['header-too-large']);
+  });
+
+  it('never reads more than the header cap of a large file', async () => {
+    const bytes = slice(`${STUDY_1}.1`, 1, { privatePaddingBytes: 20 * 1024 * 1024 });
+    const file = fileOf(bytes, 'IM1');
+    const read = jest.spyOn(Blob.prototype, 'slice');
+    try {
+      await run(selectionFromFileList([file]));
+      const ends = read.mock.calls.map(([, end]) => end ?? Infinity);
+      expect(Math.max(...ends)).toBeLessThanOrEqual(16 * 1024 * 1024);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  describe('stacks dwv can load completely', () => {
+    const SERIES = `${STUDY_1}.1`;
+    const parts = (result: LocalImportResult) =>
+      result.series.map((s) => ({
+        part: s.part && `${s.part.index}/${s.part.count}`,
+        instances: s.instances.map((i) => i.info.instanceNumber),
+        values: s.part?.values,
+      }));
+
+    it('keeps a consistent Series in one stack that opens directly', async () => {
+      const result = await run(
+        pickFolder({ 'S/1': slice(SERIES, 1), 'S/2': slice(SERIES, 2), 'S/3': slice(SERIES, 3) })
+      );
+      expect(result.series).toHaveLength(1);
+      expect(result.series[0].part).toBeUndefined();
+      expect(result.series[0].warnings).toEqual([]);
+    });
+
+    it.each([
+      ['image size', { rows: 8, columns: 8 }, 'Image size: 8 × 8'],
+      ['Image Type (localizer)', { imageType: 'ORIGINAL\\PRIMARY\\LOCALIZER' }, 'Image Type: ORIGINAL\\PRIMARY\\LOCALIZER'],
+      ['Modality', { modality: 'MR' }, 'Modality: MR'],
+      ['SOP Class', { sopClassUid: '1.2.840.10008.5.1.4.1.1.4' }, 'SOP Class UID: 1.2.840.10008.5.1.4.1.1.4'],
+      ['Transfer Syntax', { transferSyntaxUid: '1.2.840.10008.1.2.4.70' }, 'Transfer Syntax UID: 1.2.840.10008.1.2.4.70'],
+      ['Photometric Interpretation', { photometricInterpretation: 'MONOCHROME1' }, 'Photometric Interpretation: MONOCHROME1'],
+      ['Bits Stored', { bitsStored: 16 }, 'Bits Stored: 16'],
+      ['orientation (sagittal)', { orientation: '0\\1\\0\\0\\0\\-1' }, 'Orientation: 0\\1\\0\\0\\0\\-1'],
+    ] as const)('splits a Series by %s into labelled parts', async (_label, odd, value) => {
+      const result = await run(
+        pickFolder({
+          'S/1': slice(SERIES, 1),
+          'S/2': slice(SERIES, 2, odd),
+          'S/3': slice(SERIES, 3),
+        })
+      );
+      expect(parts(result).map(({ part, instances }) => ({ part, instances }))).toEqual([
+        { part: '1/2', instances: [1, 3] },
+        { part: '2/2', instances: [2] },
+      ]);
+      expect(result.series[1].part?.values).toContain(value);
+      // Same DICOM UIDs: parts of one Series, never another Series.
+      expect(new Set(result.series.map((s) => s.seriesInstanceUid))).toEqual(new Set([SERIES]));
+      expect(new Set(result.series.map((s) => s.key)).size).toBe(2);
+    });
+
+    it('keeps orientations within dwv tolerance in one stack', async () => {
+      const result = await run(
+        pickFolder({
+          'S/1': slice(SERIES, 1),
+          'S/2': slice(SERIES, 2, { orientation: '1\\0.00001\\0\\0\\1\\0' }),
+        })
+      );
+      expect(result.series).toHaveLength(1);
+    });
+
+    it('offers each multi-frame image on its own (dwv appends single slices only)', async () => {
+      const result = await run(
+        pickFolder({
+          'US/1': slice(SERIES, 1, { modality: 'US', numberOfFrames: 3 }),
+          'US/2': slice(SERIES, 2, { modality: 'US', numberOfFrames: 5 }),
+        })
+      );
+      expect(parts(result)).toEqual([
+        { part: '1/2', instances: [1], values: ['3 frames (instance 1)'] },
+        { part: '2/2', instances: [2], values: ['5 frames (instance 2)'] },
+      ]);
+    });
+
+    it('splits by other compared header details without showing them', async () => {
+      const result = await run(
+        pickFolder({
+          'S/1': slice(SERIES, 1, { patientName: 'SYNTHETIC^ONE' }),
+          'S/2': slice(SERIES, 2, { patientName: 'SYNTHETIC^TWO' }),
+        })
+      );
+      expect(result.series).toHaveLength(2);
+      expect(result.series[0].part?.differences).toEqual(['Patient, study or device details']);
+      expect(JSON.stringify(result.series)).not.toMatch(/SYNTHETIC\^(ONE|TWO)/);
+    });
+
+    it('warns when several images share one position (only some may load)', async () => {
+      const result = await run(
+        pickFolder({
+          'DWI/1': slice(SERIES, 1, { position: '0\\0\\0' }),
+          'DWI/2': slice(SERIES, 2, { position: '0\\0\\0' }),
+        })
+      );
+      expect(result.series).toHaveLength(1);
+      expect(result.series[0].warnings).toEqual(['repeated-positions']);
+    });
+  });
+
+  it('keeps pictures and videos for dwv\'s own loaders (as before), not DICOM', async () => {
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0])], 'photo.png', {
+      type: 'image/png',
+    });
+    const video = new File([new Uint8Array(16)], 'clip.mp4', { type: 'video/mp4' });
+    const json = new File(['{}'], 'state.json', { type: 'application/json' });
+    const result = await run(
+      selectionFromFileList([png, video, json, fileOf(slice(`${STUDY_1}.1`, 1), 'IM1')])
+    );
+    expect(result.mediaFiles.map((m) => [m.path, m.kind, m.file])).toEqual([
+      ['photo.png', 'image', png],
+      ['clip.mp4', 'video', video],
+    ]);
+    expect(result.instanceCount).toBe(1);
+    expect(summary(result).skipped).toEqual(['not-dicom']);
   });
 
   it('gives dwv names its DICOM loader accepts, without touching the bytes', async () => {
@@ -271,6 +407,75 @@ describe('importLocalDicom', () => {
       );
       expect(result.series).toEqual([]);
       expect(result.failedArchives[0].message).toMatch(/ZIP bomb/);
+    });
+
+    describe('all or nothing per archive', () => {
+      const valid = (n: number) => ({ name: `S/IM${n}`, data: slice(`${STUDY_1}.1`, n) });
+      /** Valid entries, then one that expands beyond its declared size. */
+      const unsafeAfterValid = () =>
+        buildZip([
+          valid(1),
+          valid(2),
+          valid(3),
+          { name: 'S/zeros', data: new Uint8Array(2 * 1024 * 1024), declaredSize: 100 },
+        ]);
+
+      it('keeps nothing of an archive that turns out unsafe after valid entries', async () => {
+        const onProgress = jest.fn();
+        const result = await run(pickFiles({ 'study.zip': unsafeAfterValid() }), { onProgress });
+
+        expect(result.failedArchives.map((a) => a.path)).toEqual(['study.zip']);
+        expect(result.failedArchives[0].message).toMatch(/ZIP bomb/);
+        // No selectable (partial) Series from the rejected archive.
+        expect(result.series).toEqual([]);
+        expect(result.instanceCount).toBe(0);
+        expect(result.skipped).toEqual([]);
+        expect(onProgress).toHaveBeenLastCalledWith(
+          expect.objectContaining({ instancesFound: 0, skippedCount: 0 })
+        );
+      });
+
+      it('keeps nothing of an archive damaged after partially successful extraction', async () => {
+        const bytes = buildZip([valid(1), valid(2), valid(3)]);
+        // Break the third entry's local header signature (found after two
+        // entries were extracted and accepted).
+        const third = localHeaderOffsets(bytes)[2];
+        new DataView(bytes.buffer).setUint32(third, 0, true);
+
+        const result = await run(pickFiles({ 'study.zip': bytes }));
+        expect(result.failedArchives[0].message).toMatch(/damaged/);
+        expect(result.series).toEqual([]);
+      });
+
+      it('keeps other sources intact and imports a rolled-back UID from another archive', async () => {
+        const result = await run(
+          pickFiles({
+            'a-folder-file': slice(`${STUDY_2}.1`, 1),
+            'b-bad.zip': unsafeAfterValid(),
+            'c-good.zip': buildZip([valid(1), valid(2)]),
+          })
+        );
+        expect(result.failedArchives.map((a) => a.path)).toEqual(['b-bad.zip']);
+        expect(summary(result).series).toEqual([
+          { study: STUDY_1, series: `${STUDY_1}.1`, instances: [`${STUDY_1}.1.1`, `${STUDY_1}.1.2`] },
+          { study: STUDY_2, series: `${STUDY_2}.1`, instances: [`${STUDY_2}.1.1`] },
+        ]);
+        // Not reported as duplicates of the rejected archive's copies.
+        expect(result.skipped).toEqual([]);
+        expect(result.series[0].instances.every((i) => i.path.startsWith('c-good.zip/'))).toBe(true);
+      });
+
+      it('keeps instances found before a failed archive, deduplicated as usual', async () => {
+        const result = await run(
+          pickFiles({
+            'a.zip': buildZip([valid(1)]),
+            'b.zip': buildZip([valid(1), { name: 'x', data: syntheticDicom(), flags: 1 }]),
+          })
+        );
+        expect(result.instanceCount).toBe(1);
+        expect(result.series[0].instances[0].path).toBe('a.zip/S/IM1');
+        expect(result.failedArchives.map((a) => a.path)).toEqual(['b.zip']);
+      });
     });
 
     it('stops the import when archives expand beyond the memory limit', async () => {

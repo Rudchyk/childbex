@@ -204,6 +204,131 @@ describe('readZipDirectory / extractZipEntry', () => {
     await expectError(readZipDirectory(archive, limits, controller.signal), 'CANCELLED');
   });
 
+  it('keeps large extracted entries intact (output moved into Blob parts)', async () => {
+    // 10 MiB of patterned bytes: several 4 MiB parts, compressible.
+    const data = new Uint8Array(10 * 1024 * 1024);
+    for (let i = 0; i < data.length; i++) data[i] = (i * 31) % 251;
+    const archive = zipFile(buildZip([{ name: 'big', data }]));
+    const [entry] = await readZipDirectory(archive, limits);
+    const extracted = await readBlobBytes(await extract(archive, entry));
+    expect(extracted.length).toBe(data.length);
+    expect(crc32(0, extracted)).toBe(crc32(0, data));
+  });
+
+  it('pauses during long decompression so Cancel takes effect', async () => {
+    const files = jest.requireActual('./localImport.files') as typeof import('./localImport.files');
+    const controller = new AbortController();
+    const pause = jest.spyOn(files, 'yieldToBrowser').mockImplementation(async () => {
+      controller.abort();
+    });
+    try {
+      // 40 MiB of zeros: one compressed read, many megabytes of output.
+      const zeros = new Uint8Array(40 * 1024 * 1024);
+      const archive = zipFile(buildZip([{ name: 'zeros', data: zeros }]));
+      const [entry] = await readZipDirectory(archive, limits);
+      await expectError(
+        extractZipEntry(archive, entry, {
+          budget: { remainingBytes: Infinity },
+          signal: controller.signal,
+        }),
+        'CANCELLED'
+      );
+      expect(pause).toHaveBeenCalledTimes(1);
+    } finally {
+      pause.mockRestore();
+    }
+  });
+
+  describe('ZIP64', () => {
+    const slice1 = syntheticDicom({ sopUid: '2.25.64.1', instanceNumber: 1 });
+    const slice2 = syntheticDicom({ sopUid: '2.25.64.2', instanceNumber: 2 });
+
+    it('reads the ZIP64 end of central directory', async () => {
+      const archive = zipFile(
+        buildZip(
+          [
+            { name: 'S/IM1', data: slice1 },
+            { name: 'S/IM2', data: slice2, method: 0 },
+          ],
+          { zip64End: true }
+        )
+      );
+      const entries = await readZipDirectory(archive, limits);
+      expect(entries.map((e) => e.path)).toEqual(['S/IM1', 'S/IM2']);
+      expect(await readBlobBytes(await extract(archive, entries[0]))).toEqual(slice1);
+      expect(await readBlobBytes(await extract(archive, entries[1]))).toEqual(slice2);
+    });
+
+    it.each([
+      [['uncompressed'] as const],
+      [['compressed'] as const],
+      [['offset'] as const],
+      [['uncompressed', 'offset'] as const],
+      [['uncompressed', 'compressed', 'offset'] as const],
+    ])('reads entries whose %j fields are in a ZIP64 extra field', async (fields) => {
+      const archive = zipFile(
+        buildZip(
+          [
+            { name: 'IM1', data: slice1 },
+            { name: 'IM2', data: slice2, zip64: { fields: [...fields] } },
+          ],
+          { zip64End: true }
+        )
+      );
+      const entries = await readZipDirectory(archive, limits);
+      expect(entries[1].uncompressedSize).toBe(slice2.length);
+      expect(await readBlobBytes(await extract(archive, entries[1]))).toEqual(slice2);
+    });
+
+    it.each([
+      [
+        'a truncated ZIP64 extra field',
+        { fields: ['uncompressed', 'compressed'], extraBytes: 12 },
+        /invalid ZIP64 field/,
+      ],
+      ['a saturated field without ZIP64 extra field', { fields: ['compressed'], omitExtra: true }, /missing ZIP64 field/],
+      ['a ZIP64 size beyond 2^53', { fields: ['uncompressed'], override: { uncompressed: 2 ** 60 } }, /out of range/],
+      [
+        'a ZIP64 offset beyond the archive',
+        { fields: ['offset'], override: { offset: 2 ** 40 } },
+        /overlapping or misplaced|outside the file/,
+      ],
+    ] as const)('rejects an entry with %s', async (_label, zip64, message) => {
+      const build = () =>
+        buildZip([{ name: 'IM1', data: slice1, zip64: { ...zip64, fields: [...zip64.fields] } }]);
+      const error = await readZipDirectory(zipFile(build()), limits).then(
+        () => undefined,
+        (e: unknown) => e as LocalImportError
+      );
+      expect(error).toBeInstanceOf(LocalImportError);
+      expect(['CORRUPT_ARCHIVE', 'UNSAFE_ARCHIVE']).toContain(error?.code);
+      expect(error?.message).toMatch(message);
+    });
+
+    it('rejects a lying ZIP64 entry size while extracting', async () => {
+      const zeros = new Uint8Array(2 * 1024 * 1024);
+      const archive = zipFile(
+        buildZip([
+          { name: 'bomb', data: zeros, zip64: { fields: ['uncompressed'], override: { uncompressed: 1000 } } },
+        ])
+      );
+      const [entry] = await readZipDirectory(archive, limits);
+      await expectError(extract(archive, entry), 'UNSAFE_ARCHIVE', /declared size/);
+    });
+
+    it.each([
+      ['a missing ZIP64 locator', { omitLocator: true }, 'CORRUPT_ARCHIVE', /locator/],
+      ['a record offset beyond the archive', { recordOffset: 2 ** 40 }, 'CORRUPT_ARCHIVE', /record offset/],
+      ['a record offset that is not a record', { recordOffset: 0 }, 'CORRUPT_ARCHIVE', /ZIP64 record/],
+      ['a central directory size beyond the record', { directorySize: 2 ** 40 }, 'CORRUPT_ARCHIVE', /central directory/],
+      ['a central directory offset beyond the record', { directoryOffset: 2 ** 40 }, 'CORRUPT_ARCHIVE', /central directory/],
+      ['several disks (split archive)', { totalDisks: 2 }, 'UNSUPPORTED_ARCHIVE', /Split/],
+    ] as const)('rejects an archive with %s', async (_label, zip64End, code, message) => {
+      const archive = zipFile(buildZip([{ name: 'IM1', data: slice1 }], { zip64End }));
+      await expectError(readZipDirectory(archive, limits), code, message);
+    });
+  });
+
   it('computes standard CRC-32 values', () => {
     expect(crc32(0, Uint8Array.from('123456789', (c) => c.charCodeAt(0)))).toBe(0xcbf43926);
   });

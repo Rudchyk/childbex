@@ -40,6 +40,8 @@ interface DicomViewerToolsProps {
   /** Calibration of lengths of the displayed image. */
   calibration?: LengthCalibration;
   onClean?: () => void;
+  /** Whether Clean is enabled (default: when data is loaded). */
+  canClean?: boolean;
 }
 
 const toolTitles: Record<string, string> = {
@@ -63,6 +65,7 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
   calibration,
   loadErrorEvents,
   onClean,
+  canClean = isDataLoaded,
 }) => {
   const handleToolChange = (
     event: React.MouseEvent<HTMLElement>,
@@ -171,7 +174,7 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
           size="small"
           value="clean"
           title="Clean"
-          disabled={!isDataLoaded}
+          disabled={!canClean}
           onChange={onClean}
         >
           <HighlightOffIcon />

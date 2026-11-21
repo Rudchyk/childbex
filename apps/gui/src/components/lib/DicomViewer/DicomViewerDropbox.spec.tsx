@@ -12,11 +12,12 @@ import {
   fileOf,
   folderFileOf,
   syntheticDicom,
+  type SyntheticDicomOptions,
 } from './localImport/__fixtures__/syntheticDicom';
 
 Object.assign(globalThis, { TextDecoder });
 
-const slice = (series: string, n: number) =>
+const slice = (series: string, n: number, extra: SyntheticDicomOptions = {}) =>
   syntheticDicom({
     studyUid: '2.25.7',
     seriesUid: `2.25.7.${series}`,
@@ -24,6 +25,7 @@ const slice = (series: string, n: number) =>
     seriesNumber: Number(series),
     seriesDescription: `Synthetic ${series}`,
     instanceNumber: n,
+    ...extra,
   });
 
 const filesInput = () => screen.getByTestId('local-import-files-input');
@@ -157,6 +159,89 @@ describe('DicomViewerDropbox', () => {
     ]);
     expect(await screen.findByText('locked.zip could not be opened')).toBeTruthy();
     expect(screen.getByText(/encrypted/)).toBeTruthy();
+  });
+
+  it('offers a Series dwv cannot stack in labelled parts, never opening it directly', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+
+    choose(folderInput(), [
+      folderFileOf(slice('1', 1, { imageType: 'ORIGINAL\\PRIMARY\\LOCALIZER' }), 'CT/scout'),
+      folderFileOf(slice('1', 2), 'CT/IM2'),
+      folderFileOf(slice('1', 3), 'CT/IM3'),
+    ]);
+
+    const rows = await screen.findAllByTestId('local-import-series');
+    expect(rows).toHaveLength(2);
+    expect(onLoadFiles).not.toHaveBeenCalled();
+    expect(screen.getByText(/3 DICOM images in 1 Series/)).toBeTruthy();
+    expect(screen.getByTestId('local-import-parts').textContent).toMatch(/Image Type/);
+    expect(within(rows[0]).getByText('Part 1 of 2')).toBeTruthy();
+    expect(within(rows[0]).getByText(/LOCALIZER/)).toBeTruthy();
+
+    fireEvent.click(within(rows[1]).getByRole('button', { name: /part 2 of 2/ }));
+    expect(loadedNames(onLoadFiles)).toEqual(['IM2', 'IM3']);
+  });
+
+  it('does not open a stack directly when only some images may load', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+    choose(filesInput(), [
+      fileOf(slice('1', 1, { position: '0\\0\\0' }), 'b0'),
+      fileOf(slice('1', 2, { position: '0\\0\\0' }), 'b1000'),
+    ]);
+
+    const [row] = await screen.findAllByTestId('local-import-series');
+    expect(within(row).getByText('May load incompletely')).toBeTruthy();
+    expect(onLoadFiles).not.toHaveBeenCalled();
+  });
+
+  it('never offers a partial Series from an archive rejected part-way', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+    choose(filesInput(), [
+      fileOf(
+        buildZip([
+          { name: 'S/IM1', data: slice('1', 1) },
+          { name: 'S/IM2', data: slice('1', 2) },
+          { name: 'S/zeros', data: new Uint8Array(2 * 1024 * 1024), declaredSize: 100 },
+        ]),
+        'study.zip'
+      ),
+    ]);
+
+    expect(await screen.findByText('study.zip could not be opened')).toBeTruthy();
+    expect(screen.queryAllByTestId('local-import-series')).toHaveLength(0);
+    expect(screen.getByText(/No DICOM images that can be displayed/)).toBeTruthy();
+    expect(onLoadFiles).not.toHaveBeenCalled();
+  });
+
+  it('still opens a picture as before (dwv image loader), unchanged', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+    const photo = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'photo.png', {
+      type: 'image/png',
+    });
+
+    choose(filesInput(), [photo]);
+
+    await waitFor(() => expect(onLoadFiles).toHaveBeenCalledTimes(1));
+    expect(onLoadFiles.mock.calls[0][0]).toEqual([photo]);
+    expect((onLoadFiles.mock.calls[0][0] as File[])[0]).toBe(photo);
+  });
+
+  it('lists pictures next to DICOM Series and opens them one at a time', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+    const photo = new File([new Uint8Array(4)], 'photo.jpg', { type: 'image/jpeg' });
+
+    choose(filesInput(), [photo, fileOf(slice('1', 1), 'IM1')]);
+
+    const media = await screen.findByTestId('local-import-media');
+    expect(onLoadFiles).not.toHaveBeenCalled();
+    fireEvent.click(within(media).getByRole('button', { name: 'Open photo.jpg' }));
+    expect((onLoadFiles.mock.calls[0][0] as File[])[0]).toBe(photo);
+    expect(within(media).getByText('Last opened')).toBeTruthy();
   });
 
   it('explains a limit and allows Retry and Start over', async () => {

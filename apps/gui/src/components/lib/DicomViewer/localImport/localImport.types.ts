@@ -41,7 +41,8 @@ export const defaultLocalImportLimits: Readonly<LocalImportLimits> =
     maxFileBytes: 512 * MiB,
     maxArchiveBytes: 2 * GiB,
     maxArchiveEntries: 20_000,
-    maxExtractedBytes: 1 * GiB,
+    // dwv's decoded Series and its own file reads come on top of this.
+    maxExtractedBytes: 512 * MiB,
     maxCompressionRatio: 100,
     ratioCheckMinBytes: 64 * MiB,
   });
@@ -99,7 +100,9 @@ export type SkipReason =
   /** A second archive entry with the same path. */
   | 'duplicate-path'
   /** Archive entry failing its CRC or size check. */
-  | 'corrupt-entry';
+  | 'corrupt-entry'
+  /** The DICOM header does not end within the bytes checked. */
+  | 'header-too-large';
 
 export const skipReasonLabels: Record<SkipReason, string> = {
   'system-file': 'System or metadata files',
@@ -115,6 +118,7 @@ export const skipReasonLabels: Record<SkipReason, string> = {
   'unsupported-entry': 'Links or unsupported archive entries',
   'duplicate-path': 'Duplicate paths inside an archive',
   'corrupt-entry': 'Damaged archive entries',
+  'header-too-large': 'DICOM headers too large to check',
 };
 
 /** Reasons that are expected noise, not worth a warning. */
@@ -148,6 +152,20 @@ export interface DicomInstanceInfo {
   rows: number;
   columns: number;
   numberOfFrames: number;
+  /**
+   * Attributes dwv requires to be equal for all slices of one stack
+   * (technical values only, safe to show), e.g. `Image Type`.
+   */
+  stackAttributes: Record<string, string>;
+  /**
+   * Fingerprint of the other attributes dwv compares (patient, study and
+   * device details). Opaque: never shown, only compared.
+   */
+  headerFingerprint: string;
+  /** Image Orientation (Patient), 6 values, when present. */
+  orientation?: number[];
+  /** Image Position (Patient), normalised, when present. */
+  position?: string;
 }
 
 export interface LocalDicomInstance {
@@ -171,8 +189,40 @@ export interface LocalDicomSeries {
   /** Sorted by Instance Number, then path. */
   instances: LocalDicomInstance[];
   totalBytes: number;
-  /** Images of different sizes: dwv cannot stack all of them. */
-  hasMixedImageSizes: boolean;
+  /**
+   * Set when one Series has images dwv cannot show in one stack (different
+   * size, Image Type, orientation, multi-frame…): each compatible group is
+   * offered as a part. The DICOM UIDs are unchanged.
+   */
+  part?: LocalSeriesPart;
+  /** Why this stack may still load only partially (no automatic opening). */
+  warnings: StackWarning[];
+}
+
+export interface LocalSeriesPart {
+  /** 1-based. */
+  index: number;
+  count: number;
+  /** What differs between the parts, e.g. `Image Type`, `Orientation`. */
+  differences: string[];
+  /** This part's values of those attributes, e.g. `Image Type: …\LOCALIZER`. */
+  values: string[];
+}
+
+export type StackWarning =
+  /** Several images share one position (e.g. phases or b-values). */
+  'repeated-positions';
+
+export const stackWarningLabels: Record<StackWarning, string> = {
+  'repeated-positions':
+    'Several images share the same position: the viewer may show only some of them.',
+};
+
+/** Non-DICOM pictures and videos, opened by dwv's image/video loaders. */
+export interface LocalMediaFile {
+  path: string;
+  file: File;
+  kind: 'image' | 'video';
 }
 
 export interface LocalImportResult {
@@ -182,6 +232,8 @@ export interface LocalImportResult {
   instanceCount: number;
   skipped: SkippedFile[];
   failedArchives: FailedArchive[];
+  /** Plain images and videos (chosen or dropped files, not ZIP entries). */
+  mediaFiles: LocalMediaFile[];
   /**
    * The browser could not enumerate dropped folders (no entries API): a
    * dropped folder may appear as an unreadable file.

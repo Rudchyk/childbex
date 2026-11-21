@@ -1,4 +1,4 @@
-import { ChangeEvent, DragEvent, FC, useCallback, useEffect, useState } from 'react';
+import { ChangeEvent, DragEvent, FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, LinearProgress, Stack, Typography } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
@@ -10,12 +10,13 @@ import {
 import { useLocalDicomImport } from './localImport/useLocalDicomImport';
 import {
   LocalImportResultView,
-  seriesToOpenDirectly,
+  openTargetKey,
+  targetToOpenDirectly,
+  type LocalOpenTarget,
 } from './localImport/LocalImportResultView';
 import { formatBytes } from './localImport/localImport.files';
 import {
   defaultLocalImportLimits,
-  type LocalDicomSeries,
   type LocalImportLimits,
 } from './localImport/localImport.types';
 
@@ -51,20 +52,27 @@ export const DicomViewerDropbox: FC<DicomViewerDropboxProps> = ({
   const isRunning = state.status === 'running';
   const effectiveLimits = { ...defaultLocalImportLimits, ...limits };
 
-  const openSeries = useCallback(
-    (series: LocalDicomSeries) => {
-      setOpenedKey(series.key);
-      onLoadFiles(series.instances.map((instance) => instance.file));
+  /** One stack of one Series (or one picture or video) at a time. */
+  const open = useCallback(
+    (target: LocalOpenTarget) => {
+      setOpenedKey(openTargetKey(target));
+      onLoadFiles(
+        target.kind === 'series'
+          ? target.series.instances.map((instance) => instance.file)
+          : [target.media.file]
+      );
     },
     [onLoadFiles]
   );
 
-  // A single Series with nothing worth reviewing opens right away.
+  // A single complete stack with nothing worth reviewing opens right away,
+  // once per import result (not again when `onLoadFiles` changes).
   const result = state.status === 'done' ? state.result : undefined;
+  const openRef = useRef(open);
+  openRef.current = open;
   useEffect(() => {
-    const series = result && seriesToOpenDirectly(result);
-    if (series) openSeries(series);
-    // Only once per import result (not when `onLoadFiles` changes).
+    const target = result && targetToOpenDirectly(result);
+    if (target) openRef.current(target);
   }, [result]);
 
   const onReset = useCallback(() => {
@@ -235,7 +243,7 @@ export const DicomViewerDropbox: FC<DicomViewerDropboxProps> = ({
         <LocalImportResultView
           result={state.result}
           openedKey={openedKey}
-          onOpen={openSeries}
+          onOpen={open}
           onReset={onReset}
         />
       )}

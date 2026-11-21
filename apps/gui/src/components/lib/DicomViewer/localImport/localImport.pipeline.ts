@@ -28,6 +28,7 @@ import {
   type LocalDicomSeries,
   type LocalImportLimits,
   type LocalImportProgress,
+  type LocalMediaFile,
   type LocalImportResult,
   type SkippedFile,
   type SkipReason,
@@ -71,19 +72,132 @@ const compareText = (a = '', b = '') =>
 const compareNumber = (a?: number, b?: number) =>
   a === b ? 0 : a === undefined ? 1 : b === undefined ? -1 : a - b;
 
+/** dwv's tolerance when it compares slice orientations. */
+const ORIENTATION_TOLERANCE = 1e-4;
+/** dwv's orientation for images without Image Orientation (Patient). */
+const DEFAULT_ORIENTATION = [1, 0, 0, 0, 1, 0];
+const DIFFERENCE_ORIENTATION = 'Orientation';
+const DIFFERENCE_MULTI_FRAME = 'Multi-frame image';
+const DIFFERENCE_HEADER = 'Patient, study or device details';
+
+const isSimilarOrientation = (a: number[], b: number[]) =>
+  a.every((value, i) => Math.abs(value - b[i]) < ORIENTATION_TOLERANCE);
+
+/** Images dwv 0.35 can append to one stack (`Image.appendSlice`). */
+interface Stack {
+  key: string;
+  attributes: Record<string, string>;
+  fingerprint: string;
+  orientation: number[];
+  multiFrame: boolean;
+  instances: LocalDicomInstance[];
+}
+
 /**
- * Groups instances by Study and Series Instance UID, never by folder: a
- * folder may hold several Series, a Series may span folders.
+ * Splits one Series into stacks dwv can load completely: equal attributes
+ * that dwv compares, a similar orientation, and each multi-frame image on
+ * its own (dwv appends single slices only).
  */
-export const groupSeries = (instances: readonly LocalDicomInstance[]): LocalDicomSeries[] => {
-  const byKey = new Map<string, LocalDicomSeries>();
+const splitIntoStacks = (instances: readonly LocalDicomInstance[]): Stack[] => {
+  const stacks: Stack[] = [];
   for (const instance of instances) {
     const { info } = instance;
-    const key = `${info.studyInstanceUid}|${info.seriesInstanceUid}`;
-    let series = byKey.get(key);
-    if (!series) {
-      series = {
+    const key = `${JSON.stringify(info.stackAttributes)}|${info.headerFingerprint}`;
+    const orientation = info.orientation ?? DEFAULT_ORIENTATION;
+    const multiFrame = info.numberOfFrames > 1;
+    let stack = multiFrame
+      ? undefined
+      : stacks.find(
+          (s) =>
+            !s.multiFrame && s.key === key && isSimilarOrientation(s.orientation, orientation)
+        );
+    if (!stack) {
+      stack = {
         key,
+        attributes: info.stackAttributes,
+        fingerprint: info.headerFingerprint,
+        orientation,
+        multiFrame,
+        instances: [],
+      };
+      stacks.push(stack);
+    }
+    stack.instances.push(instance);
+  }
+  return stacks;
+};
+
+/** What differs between the stacks of one Series (names, then values). */
+const describeParts = (stacks: readonly Stack[]) => {
+  const differences: string[] = [];
+  const names = new Set(stacks.flatMap((s) => Object.keys(s.attributes)));
+  for (const name of names) {
+    if (new Set(stacks.map((s) => s.attributes[name])).size > 1) differences.push(name);
+  }
+  if (stacks.some((s) => !isSimilarOrientation(s.orientation, stacks[0].orientation))) {
+    differences.push(DIFFERENCE_ORIENTATION);
+  }
+  if (stacks.some((s) => s.multiFrame)) differences.push(DIFFERENCE_MULTI_FRAME);
+  // Never shown as values: patient and study details stay out of the list.
+  if (new Set(stacks.map((s) => s.fingerprint)).size > 1) differences.push(DIFFERENCE_HEADER);
+
+  const valuesOf = (stack: Stack) =>
+    differences.flatMap((name) => {
+      if (name === DIFFERENCE_HEADER) return [];
+      if (name === DIFFERENCE_ORIENTATION) {
+        return [`${name}: ${stack.orientation.map((v) => +v.toFixed(3)).join('\\')}`];
+      }
+      if (name === DIFFERENCE_MULTI_FRAME) {
+        const { info } = stack.instances[0];
+        return [
+          stack.multiFrame
+            ? `${info.numberOfFrames} frames (instance ${info.instanceNumber ?? '—'})`
+            : 'Single-frame images',
+        ];
+      }
+      return [`${name}: ${stack.attributes[name] ?? '—'}`];
+    });
+  return { differences, valuesOf };
+};
+
+/** Several images at one position: dwv rejects all but one of them. */
+const hasRepeatedPositions = (stack: Stack) => {
+  const positions = new Set<string>();
+  for (const { info } of stack.instances) {
+    if (info.position === undefined) continue;
+    if (positions.has(info.position)) return true;
+    positions.add(info.position);
+  }
+  return false;
+};
+
+/**
+ * Groups instances by Study and Series Instance UID, never by folder: a
+ * folder may hold several Series, a Series may span folders. A Series dwv
+ * cannot show as one stack is offered in labelled parts (same UIDs).
+ */
+export const groupSeries = (instances: readonly LocalDicomInstance[]): LocalDicomSeries[] => {
+  const bySeries = new Map<string, LocalDicomInstance[]>();
+  for (const instance of instances) {
+    const key = `${instance.info.studyInstanceUid}|${instance.info.seriesInstanceUid}`;
+    const list = bySeries.get(key) ?? [];
+    list.push(instance);
+    bySeries.set(key, list);
+  }
+
+  const result: LocalDicomSeries[] = [];
+  for (const [seriesKey, seriesInstances] of bySeries) {
+    seriesInstances.sort(
+      (a, b) =>
+        compareNumber(a.info.instanceNumber, b.info.instanceNumber) ||
+        compareText(a.path, b.path)
+    );
+    const stacks = splitIntoStacks(seriesInstances);
+    const parts = stacks.length > 1 ? describeParts(stacks) : undefined;
+    stacks.forEach((stack, index) => {
+      const { info } = stack.instances[0];
+      result.push({
+        key: parts ? `${seriesKey}|${index + 1}` : seriesKey,
         studyInstanceUid: info.studyInstanceUid,
         seriesInstanceUid: info.seriesInstanceUid,
         modality: info.modality,
@@ -91,32 +205,33 @@ export const groupSeries = (instances: readonly LocalDicomInstance[]): LocalDico
         studyDescription: info.studyDescription,
         seriesNumber: info.seriesNumber,
         seriesDescription: info.seriesDescription,
-        instances: [],
-        totalBytes: 0,
-        hasMixedImageSizes: false,
-      };
-      byKey.set(key, series);
-    }
-    series.instances.push(instance);
-    series.totalBytes += instance.file.size;
-  }
-  const result = [...byKey.values()];
-  for (const series of result) {
-    series.instances.sort(
-      (a, b) =>
-        compareNumber(a.info.instanceNumber, b.info.instanceNumber) ||
-        compareText(a.path, b.path)
-    );
-    const sizes = new Set(series.instances.map((i) => `${i.info.rows}x${i.info.columns}`));
-    series.hasMixedImageSizes = sizes.size > 1;
+        instances: stack.instances,
+        totalBytes: stack.instances.reduce((total, i) => total + i.file.size, 0),
+        part: parts && {
+          index: index + 1,
+          count: stacks.length,
+          differences: parts.differences,
+          values: parts.valuesOf(stack),
+        },
+        warnings: hasRepeatedPositions(stack) ? ['repeated-positions'] : [],
+      });
+    });
   }
   return result.sort(
     (a, b) =>
       compareText(a.studyDate, b.studyDate) ||
       compareText(a.studyInstanceUid, b.studyInstanceUid) ||
       compareNumber(a.seriesNumber, b.seriesNumber) ||
-      compareText(a.seriesInstanceUid, b.seriesInstanceUid)
+      compareText(a.seriesInstanceUid, b.seriesInstanceUid) ||
+      compareNumber(a.part?.index, b.part?.index)
   );
+};
+
+/** dwv's image and video loaders accept files by their MIME type. */
+const mediaKindOf = (file: File): LocalMediaFile['kind'] | undefined => {
+  if (/^image\//.test(file.type)) return 'image';
+  if (/^video\//.test(file.type)) return 'video';
+  return undefined;
 };
 
 /**
@@ -142,9 +257,12 @@ export const importLocalDicom = async (
   const instances: LocalDicomInstance[] = [];
   const skipped: SkippedFile[] = [];
   const failedArchives: FailedArchive[] = [];
+  const mediaFiles: LocalMediaFile[] = [];
   const sopInstanceUids = new Set<string>();
   const usedPaths = new Set<string>();
   const budget: ExtractBudget = { remainingBytes: limits.maxExtractedBytes };
+  /** UIDs and paths added by the archive being read (undone if it fails). */
+  let archiveAdded: { uids: string[]; paths: string[] } | undefined;
 
   const countFile = async () => {
     progress.filesFound++;
@@ -167,6 +285,7 @@ export const importLocalDicom = async (
     let unique = path;
     for (let n = 2; usedPaths.has(unique); n++) unique = `${path} (${n})`;
     usedPaths.add(unique);
+    archiveAdded?.paths.push(unique);
     return unique;
   };
 
@@ -183,6 +302,7 @@ export const importLocalDicom = async (
       return false;
     }
     sopInstanceUids.add(probe.info.sopInstanceUid);
+    archiveAdded?.uids.push(probe.info.sopInstanceUid);
     instances.push({ path, file: toDwvFile(blob, name), info: probe.info });
     progress.instancesFound++;
     progress.filesChecked++;
@@ -226,6 +346,7 @@ export const importLocalDicom = async (
       }
       let blob: Blob;
       const budgetBefore = budget.remainingBytes;
+      const doneBefore = compressedDone;
       try {
         blob = await extractZipEntry(archive, entry, {
           budget,
@@ -233,7 +354,7 @@ export const importLocalDicom = async (
           onProgress: (read) => {
             progress.archive = {
               path: archivePath,
-              percent: Math.min(100, Math.round(((compressedDone + read) / totalCompressed) * 100)),
+              percent: Math.min(100, Math.round(((doneBefore + read) / totalCompressed) * 100)),
             };
             report();
           },
@@ -258,7 +379,19 @@ export const importLocalDicom = async (
     }
   };
 
+  /**
+   * One archive is all or nothing: when it turns out to be unsafe, damaged
+   * or unsupported part-way, nothing found in it is kept (no partial Series
+   * from a rejected archive). Other files and archives are not affected.
+   */
   const importArchive = async (path: string, archive: File) => {
+    const before = {
+      instances: instances.length,
+      skipped: skipped.length,
+      budget: budget.remainingBytes,
+      progress: { ...progress },
+    };
+    archiveAdded = { uids: [], paths: [] };
     try {
       progress.archive = { path, percent: 0 };
       report();
@@ -266,8 +399,15 @@ export const importLocalDicom = async (
       await importArchiveEntries(path, archive, entries);
     } catch (error) {
       if (!isArchiveLevelError(error)) throw error;
+      instances.length = before.instances;
+      skipped.length = before.skipped;
+      for (const uid of archiveAdded.uids) sopInstanceUids.delete(uid);
+      for (const added of archiveAdded.paths) usedPaths.delete(added);
+      budget.remainingBytes = before.budget;
+      Object.assign(progress, before.progress);
       failedArchives.push({ path, message: error.message });
     } finally {
+      archiveAdded = undefined;
       progress.archive = undefined;
       report();
     }
@@ -305,7 +445,15 @@ export const importLocalDicom = async (
     } else if (file.size > limits.maxFileBytes) {
       skip(path, 'too-large');
     } else if (kind === 'other') {
-      skip(path, 'not-dicom');
+      // Pictures and videos keep opening as before (dwv's own loaders).
+      const mediaKind = mediaKindOf(file);
+      if (mediaKind) {
+        mediaFiles.push({ path, file, kind: mediaKind });
+        progress.filesChecked++;
+        report();
+      } else {
+        skip(path, 'not-dicom');
+      }
     } else {
       await checkCandidate(path, file, file.name);
     }
@@ -318,6 +466,7 @@ export const importLocalDicom = async (
     instanceCount: instances.length,
     skipped,
     failedArchives,
+    mediaFiles,
     usedDropFallback: selection.usedDropFallback,
   };
 };
