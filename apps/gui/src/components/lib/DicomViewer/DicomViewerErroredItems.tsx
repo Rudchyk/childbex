@@ -39,7 +39,7 @@ export const DicomViewerErroredItems: FC<DicomViewerErroredItemsProps> = ({
     },
     {
       field: 'source',
-      headerName: 'Source',
+      headerName: 'Input',
       width: 250,
     },
     {

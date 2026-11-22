@@ -87,10 +87,19 @@ pending frame is cancelled on Clean, a replacement and unmount (it holds no
 dwv data and finds nothing to publish).
 
 dwv's error messages can carry DICOM values (an `appendSlice` mismatch
-names both values, e.g. of PatientName or PatientID; a failed request its
-URL). They are reduced once, in `DicomViewer.loadErrors.ts`, to a category
-and a fixed text (attribute names and HTTP status codes only); raw messages
-are neither shown, kept nor logged.
+names both values, e.g. of PatientName or PatientID; loaders name the file
+or the full URL), and a file name or URL can itself identify the patient or
+carry a token. Errors are reduced once, in `DicomViewer.loadErrors.ts`, to a
+category and a fixed text from an allowlist of dwv's own messages
+(attribute names and HTTP status codes only); any other message is
+withheld. The failed input is named by its position in the load ("Input 3
+of 40"), never by file name or URL. Raw messages are neither shown, kept nor
+logged.
+
+Events of a cleaned or replaced load are ignored, including the read
+progress of files dwv keeps reading after an early `loadend`; between Clean
+(or a replacement) and the next load, slice position changes are ignored
+too (they carry no data id).
 
 In the Series review, any load error still prevents Complete Review; when
 every image is shown and only metadata errors were reported, the reason

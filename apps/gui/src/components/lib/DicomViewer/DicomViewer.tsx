@@ -684,8 +684,12 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     app.addEventListener('dataadd', onDataChange);
     app.addEventListener('dataupdate', onDataChange);
 
+    // dwv keeps reading the files it no longer tracks after an early
+    // loadend (they cannot be aborted): their progress, with the old data
+    // id, can come after Clean or a replacement.
     app.addEventListener('loadprogress', (event: DicomLoadProgressEvent) => {
-      if (isMountedRef.current) setLoadProgress(event.loaded);
+      if (!isMountedRef.current || isStaleLoadEvent(activeDataIdRef.current, event)) return;
+      setLoadProgress(event.loaded);
     });
     app.addEventListener('load', (event: unknown) => {
       if (!isMountedRef.current || isStaleLoadEvent(activeDataIdRef.current, event)) return;
@@ -696,7 +700,10 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       (event: DicomPositionChangeEvent) => {
         // dwv also fires it without `data` (e.g. when a drawing starts):
         // throwing here would abort dwv's event dispatch (and the drawing).
-        if (!isMountedRef.current) return;
+        // It carries no data id; a removed stack's layers are unbound by dwv,
+        // and between Clean (or a replacement) and the next load nothing is
+        // shown.
+        if (!isMountedRef.current || activeDataIdRef.current === REPLACED_LOAD) return;
         const imageUid = event.data?.imageUid;
         if (imageUid) setCurrentImageId(imageUid);
       }
@@ -731,7 +738,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       if (tracker && event.source === undefined) tracker.failedAll();
       else tracker?.failed(event.source, storedSize(event.dataid));
       // Kept only as presented: dwv's message can carry patient details.
-      pendingErrorsRef.current.push(presentLoadError(event));
+      pendingErrorsRef.current.push(presentLoadError(event, loadInputsRef.current));
       scheduleReconcile();
     };
     app.addEventListener('error', onLoadFailure);

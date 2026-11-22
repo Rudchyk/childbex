@@ -547,13 +547,16 @@ describe('DicomViewer', () => {
         Array.from({ length: count }, (_, i) => new File([new Uint8Array(4)], `IM${i + 1}`));
       /** Slice list the viewer hands to a custom sidebar (last render). */
       let sidebarItems: { imageUid: string }[] = [];
+      /** The slice on screen as the sidebar gets it (last render). */
+      let sidebarCurrent: string | undefined;
       /** Standalone viewer with one local stack handed to dwv. */
       const openStack = async (count = 3, dataid = '1') => {
         render(
           <DicomViewer
             isClean
-            renderSidebar={({ items }) => {
+            renderSidebar={({ items, currentImageId }) => {
               sidebarItems = items;
+              sidebarCurrent = currentImageId;
               return null;
             }}
           />
@@ -938,6 +941,72 @@ describe('DicomViewer', () => {
           expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
             /1 of 3 files could not be added/
           );
+        });
+
+        it('names failed inputs by position, never by URL (token, patient ids)', async () => {
+          const signed = [
+            '/api/v1/patients/p1/images/i1/file?token=secret',
+            '/api/v1/patients/p1/images/i2/file?token=secret',
+          ];
+          render(<DicomViewer list={signed} />);
+          await waitFor(() => expect(mockLoadURLs).toHaveBeenCalledTimes(1));
+          act(() => {
+            mockListeners.loadstart({ dataid: '0' });
+            mockListeners.error({
+              dataid: '0',
+              source: signed[1],
+              error: `GET https://host${signed[1]} 503 (Service Unavailable)`,
+            });
+          });
+          runFrames();
+          expect(shownErrors()).toEqual([
+            expect.objectContaining({ source: 'Input 2 of 2', detail: 'HTTP 503.' }),
+          ]);
+          expect(JSON.stringify(shownErrors())).not.toMatch(/token|secret|patients|p1/);
+        });
+
+        it('ignores progress of a load that was cleaned or replaced', async () => {
+          await openStack(3, '1');
+          const progressBars = () => screen.queryAllByRole('progressbar');
+          act(() => mockListeners.loadprogress({ dataid: '1', loaded: 40 }));
+          expect(progressBars()).toHaveLength(1);
+
+          // dwv still reads files it no longer tracks after an early loadend.
+          act(() => mockToolsProps?.onClean?.());
+          act(() => mockListeners.loadprogress({ dataid: '1', loaded: 60 }));
+          expect(progressBars()).toHaveLength(0);
+
+          act(() => {
+            mockDropboxProps?.onLoadFiles(filesOf(2));
+            mockListeners.loadstart({ dataid: '2' });
+            mockListeners.loadprogress({ dataid: '1', loaded: 80 });
+          });
+          expect(progressBars()).toHaveLength(0);
+          act(() => mockListeners.loadprogress({ dataid: '2', loaded: 50 }));
+          expect(progressBars()).toHaveLength(1);
+        });
+
+        it('ignores a position change between Clean and the next load', async () => {
+          const files = await openStack(1, '1');
+          act(() => {
+            store('1', files[0]);
+            mockListeners.loadend({ dataid: '1' });
+          });
+          act(() => mockListeners.positionchange({ data: { imageUid: 'uid-0' } }));
+          expect(sidebarCurrent).toBe('uid-0');
+
+          act(() => mockToolsProps?.onClean?.());
+          act(() => mockListeners.positionchange({ data: { imageUid: 'uid-0' } }));
+          expect(sidebarCurrent).toBeUndefined();
+
+          // The next load's slices are followed again.
+          const next = filesOf(1);
+          act(() => {
+            mockDropboxProps?.onLoadFiles(next);
+            mockListeners.loadstart({ dataid: '2' });
+            mockListeners.positionchange({ data: { imageUid: 'uid-0' } });
+          });
+          expect(sidebarCurrent).toBe('uid-0');
         });
 
         it('never shows the patient values of dwv error messages', async () => {
