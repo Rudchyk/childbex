@@ -14,7 +14,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import StraightenIcon from '@mui/icons-material/Straighten';
 import CropSquareIcon from '@mui/icons-material/CropSquare';
 import { DicomViewerErroredItems } from './DicomViewerErroredItems';
-import { DicomLoadErrorEvents } from './DicomViewer.types';
+import { DicomLoadError } from './DicomViewer.loadErrors';
 import { DicomViewerTags } from './DicomViewerTags';
 import CheckIcon from '@mui/icons-material/Check';
 import { green } from '@mui/material/colors';
@@ -35,7 +35,7 @@ interface DicomViewerToolsProps {
   canRunTool: (tool: string) => boolean;
   isDataLoaded: boolean;
   isLoadSuccessful: boolean;
-  loadErrorEvents: DicomLoadErrorEvents;
+  loadErrorEvents: DicomLoadError[];
   metaData: Record<string, unknown>;
   /** Calibration of lengths of the displayed image. */
   calibration?: LengthCalibration;

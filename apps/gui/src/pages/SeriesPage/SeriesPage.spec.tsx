@@ -34,6 +34,7 @@ type ViewerProps = {
   onLoadResult: (result: {
     sliceCount: number;
     errorCount: number;
+    metadataErrorCount: number;
     loadedSources: string[];
   }) => void;
   renderSidebar?: (props: {
@@ -240,6 +241,7 @@ const checkboxOf = (imageId: string) => within(rowOf(imageId)).getByRole('checkb
 const loadedAll = (ids: string[]) => ({
   sliceCount: ids.length,
   errorCount: 0,
+  metadataErrorCount: 0,
   loadedSources: ids.map(url),
 });
 const PRESENTED = ['i2', 'i1', 'i3'];
@@ -669,6 +671,35 @@ describe('Series page', () => {
       ['a partial load', { ...loadedAll(['i2']), errorCount: 1 }],
       ['no stack that could be displayed', { ...loadedAll([]), errorCount: 3 }],
     ])('stays disabled when the viewer shows %s, even with the right slice count', (_, result) => {
+      renderSeries(response());
+      act(() => mockViewerProps?.onLoadResult(result));
+      expect(completeButton().disabled).toBe(true);
+      expect(completeButton().parentElement?.getAttribute('aria-label')).toBe(
+        'Not every image of the series could be shown'
+      );
+    });
+
+    // dwv stored every image but could not merge DICOM details (e.g.
+    // duplicate Instance Numbers): never complete, but not "missing images".
+    it('stays disabled with metadata errors even when every image is shown', () => {
+      renderSeries(response());
+      act(() =>
+        mockViewerProps?.onLoadResult({
+          ...loadedAll(PRESENTED),
+          errorCount: 2,
+          metadataErrorCount: 2,
+        })
+      );
+      expect(completeButton().disabled).toBe(true);
+      expect(completeButton().parentElement?.getAttribute('aria-label')).toBe(
+        'Every image is shown, but DICOM metadata errors were reported (e.g. duplicate or missing Instance Numbers)'
+      );
+    });
+
+    it.each([
+      ['other errors too', { ...loadedAll(PRESENTED), errorCount: 3, metadataErrorCount: 2 }],
+      ['an image missing', { ...loadedAll(['i2', 'i1']), errorCount: 1, metadataErrorCount: 1 }],
+    ])('reports missing images, not only metadata errors, with %s', (_, result) => {
       renderSeries(response());
       act(() => mockViewerProps?.onLoadResult(result));
       expect(completeButton().disabled).toBe(true);

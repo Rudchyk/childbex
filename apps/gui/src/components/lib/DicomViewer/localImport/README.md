@@ -56,14 +56,45 @@ one position (which dwv may reject), never open automatically.
 dwv's `loadend` is not a completion signal: when dwv rejects a file, it
 reports that file's end twice (`DicomBufferToView`), so its overall
 `loadend` can come before the remaining files were processed, which are
-appended afterwards. The viewer therefore counts what dwv actually did
-(`DicomViewer.loadAccount.ts`): an input is added once dwv stored it
-(`dataadd` / `dataupdate`; `loaditem` comes before the append and is no
-proof) or failed (`error` / `abort`, dwv's actual event names; an `error`
-without a source fails the whole load). Until every input is accounted for,
-it says "Still adding images"; afterwards it states how many files dwv could
-not add. The slice count, slice list and slice navigation are re-read from
-dwv's image whenever it changes, also after `loadend`.
+appended afterwards. The viewer therefore accounts for each input
+(`DicomViewer.loadAccount.ts`), identified by the `File` (or URL) handed to
+dwv, never by its name:
+
+- **stored**: `dataadd` / `dataupdate` after its `loaditem` (`loaditem`
+  comes before the append and is no proof);
+- **failed**: `error` / `abort` (dwv's actual event names) with that input
+  as source, before dwv stored it. Several errors of one input count once;
+  an `error` without a source is dwv giving up the whole load;
+- **stored, then an error**: dwv appends a slice, then merges its metadata
+  by Instance Number and fails for duplicate or missing ones (`error`, no
+  `dataupdate`). The image grew, so the input is stored: its image is shown
+  and the error is reported as a metadata error ("DICOM details
+  incomplete"), never as a missing image.
+
+Until every input is accounted for, the viewer says "Still adding images";
+afterwards it states how many files dwv could not add, and separately for
+how many it reported errors after storing them. dwv 0.35 sets no usable
+source for compressed images (and may attribute their errors to another
+file): when an event cannot be matched to an input, no precise count is
+given ("could not all be matched to files, so images may be missing").
+The number of images shown is always dwv's own (its slices).
+
+The slice count, slice list and slice navigation are re-read from dwv's
+image after its `loadend` and when it changes later, at most once per
+animation frame: the slices of a large stack still arriving after an early
+`loadend` are shown together, not re-read and re-rendered one by one. A
+pending frame is cancelled on Clean, a replacement and unmount (it holds no
+dwv data and finds nothing to publish).
+
+dwv's error messages can carry DICOM values (an `appendSlice` mismatch
+names both values, e.g. of PatientName or PatientID; a failed request its
+URL). They are reduced once, in `DicomViewer.loadErrors.ts`, to a category
+and a fixed text (attribute names and HTTP status codes only); raw messages
+are neither shown, kept nor logged.
+
+In the Series review, any load error still prevents Complete Review; when
+every image is shown and only metadata errors were reported, the reason
+says so instead of "not every image could be shown".
 
 A Series that fails to load returns to the imported list (no re-import);
 Clean is available after any load error, and a new stack replaces the

@@ -44,10 +44,23 @@ let mockViewLayers: unknown[] | undefined;
 /** The view layer `jumpTo` moves (undefined: nothing to show yet). */
 let mockActiveViewLayer: unknown;
 const mockSetCurrentIndex = jest.fn();
+/** A volume of single-frame slices (dwv's slice count and total size). */
 const mockImageWithSlices = (count: number) => ({
-  getGeometry: () => ({ getSize: () => ({ get: () => count }) }),
+  getGeometry: () => ({ getSize: () => ({ get: () => count, getTotalSize: () => count }) }),
   getImageUid: (index: { values: number[] }) => `uid-${index.values[2]}`,
 });
+/**
+ * Animation frames the viewer requested: run explicitly (`runFrames`), so
+ * tests see exactly how many reconciliations it makes.
+ */
+let mockFrames = new Map<number, FrameRequestCallback>();
+let mockFrameId = 0;
+const runFrames = () =>
+  act(() => {
+    const frames = [...mockFrames.values()];
+    mockFrames.clear();
+    frames.forEach((frame) => frame(0));
+  });
 /** A loaded item's DICOM elements: its SOP Instance UID. */
 const sopUid = (uid: string) => ({ '00080018': { value: [uid] } });
 let mockAppOptions: { tools?: Record<string, { options?: string[] }> } = {};
@@ -160,6 +173,14 @@ beforeEach(() => {
   mockActiveViewLayer = undefined;
   mockToolsProps = null;
   mockDropboxProps = null;
+  mockFrames = new Map();
+  window.requestAnimationFrame = jest.fn((frame: FrameRequestCallback) => {
+    mockFrames.set(++mockFrameId, frame);
+    return mockFrameId;
+  });
+  window.cancelAnimationFrame = jest.fn((id: number) => {
+    mockFrames.delete(id);
+  });
   setPixelRatio(1);
 });
 
@@ -211,10 +232,12 @@ describe('DicomViewer', () => {
     expect(onLoadResult).not.toHaveBeenCalled();
 
     act(() => mockListeners.error({ error: new Error('404') }));
+    runFrames();
 
     expect(onLoadResult).toHaveBeenLastCalledWith({
       sliceCount: 0,
       errorCount: 1,
+      metadataErrorCount: 0,
       loadedSources: [],
     });
   });
@@ -245,6 +268,7 @@ describe('DicomViewer', () => {
         expect(onLoadResult).toHaveBeenLastCalledWith({
           sliceCount: 0,
           errorCount: 1,
+          metadataErrorCount: 0,
           loadedSources: [],
         });
       }
@@ -315,6 +339,7 @@ describe('DicomViewer', () => {
       expect(onLoadResult).toHaveBeenLastCalledWith({
         sliceCount: 0,
         errorCount: 3,
+        metadataErrorCount: 0,
         loadedSources: [],
       });
     });
@@ -337,6 +362,7 @@ describe('DicomViewer', () => {
       expect(onLoadResult).toHaveBeenLastCalledWith({
         sliceCount: 2,
         errorCount: 0,
+        metadataErrorCount: 0,
         loadedSources: [urls[0], urls[1]],
       });
     });
@@ -358,6 +384,7 @@ describe('DicomViewer', () => {
       expect(onLoadResult).toHaveBeenLastCalledWith({
         sliceCount: 1,
         errorCount: 1,
+        metadataErrorCount: 0,
         loadedSources: [urls[0]],
       });
     });
@@ -366,14 +393,12 @@ describe('DicomViewer', () => {
   describe('the slice on screen and the loaded volume', () => {
     /** A volume of two slices whose order differs from the list order. */
     const loadTwoSlices = () => {
-      mockImage = {
-        getGeometry: () => ({ getSize: () => ({ get: () => 2 }) }),
-        getImageUid: (index: { values: number[] }) => `uid-${index.values[2]}`,
-      };
+      mockImage = mockImageWithSlices(2);
       act(() => {
         mockListeners.loaditem({ source: urls[0], data: sopUid('uid-1') });
         mockListeners.loaditem({ source: urls[1], data: sopUid('uid-0') });
       });
+      runFrames();
     };
 
     it('reports which list entries the loaded slices are', () => {
@@ -385,6 +410,7 @@ describe('DicomViewer', () => {
       expect(onLoadResult).toHaveBeenLastCalledWith({
         sliceCount: 2,
         errorCount: 0,
+        metadataErrorCount: 0,
         loadedSources: [urls[1], urls[0]],
       });
     });
@@ -554,8 +580,6 @@ describe('DicomViewer', () => {
         mockListeners.loaditem({ dataid, source: file, data: sopUid(uid) });
         mockListeners.error({ dataid, source: file, error: new Error(message) });
       };
-      /** Lets the viewer handle what it defers past dwv's own handling. */
-      const flush = () => act(async () => undefined);
 
       beforeEach(() => {
         sidebarItems = [];
@@ -594,6 +618,7 @@ describe('DicomViewer', () => {
           expect(mockToolsProps?.canClean).toBe(false);
 
           act(() => mockListeners[eventName]({ dataid: '1', source: files[0] }));
+          runFrames();
           expect(mockToolsProps?.canClean).toBe(true);
           expect(mockDropboxProps?.isShow).toBe(false);
 
@@ -620,14 +645,14 @@ describe('DicomViewer', () => {
 
         // Not (yet) reported as complete, nor as the final count.
         expect(screen.getByTestId('local-load-pending').textContent).toMatch(
-          /Still adding images: 2 of 3 files processed \(1 images shown so far\)/
+          /Still adding images: 2 of 3 files processed \(1 image shown so far\)/
         );
         expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
         expect(sidebarItems.map((i) => i.imageUid)).toEqual(['uid-0']);
 
         mockImage = mockImageWithSlices(2);
         act(() => added('1', files[2], 'uid-1'));
-        await flush();
+        runFrames();
 
         expect(screen.queryByTestId('local-load-pending')).toBeNull();
         expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
@@ -653,10 +678,10 @@ describe('DicomViewer', () => {
 
         mockImage = mockImageWithSlices(1);
         act(() => added('1', files[1], 'uid-0', true));
-        await flush();
+        runFrames();
         mockImage = mockImageWithSlices(2);
         act(() => added('1', files[2], 'uid-1'));
-        await flush();
+        runFrames();
 
         expect(mockToolsProps?.isDataLoaded).toBe(true);
         expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
@@ -746,7 +771,7 @@ describe('DicomViewer', () => {
             error: new Error('Cannot find data to update: 1'),
           });
         });
-        await flush();
+        runFrames();
         expect(screen.queryByTestId('local-load-pending')).toBeNull();
         expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
         expect(mockToolsProps?.isDataLoaded).toBe(false);
@@ -810,6 +835,224 @@ describe('DicomViewer', () => {
 
         expect(screen.getByText(/could not be displayed. Choose another Series/)).toBeTruthy();
         expect(mockDropboxProps?.isShow).toBe(true);
+      });
+
+      /**
+       * dwv 0.35 with an image that grows as it stores slices: a metadata
+       * merge failure (duplicate or missing Instance Numbers) comes after
+       * the slice was appended, as an `error` instead of `dataupdate`.
+       */
+      describe('images dwv stored, and errors after storing them', () => {
+        let slices = 0;
+        const getImageUid = jest.fn((index: { values: number[] }) => `uid-${index.values[2]}`);
+        const store = (dataid: string, file: File, mergeError?: string) => {
+          mockListeners.loaditem({ dataid, source: file, data: sopUid(`uid-${slices}`) });
+          slices++;
+          mockDataIds.add(dataid);
+          if (mergeError) {
+            mockListeners.error({ dataid, source: file, error: new Error(mergeError) });
+          } else {
+            mockListeners[slices === 1 ? 'dataadd' : 'dataupdate']({ dataid });
+          }
+        };
+        const shownErrors = () =>
+          (mockToolsProps as unknown as { loadErrorEvents: object[] }).loadErrorEvents;
+
+        beforeEach(() => {
+          slices = 0;
+          getImageUid.mockClear();
+          mockImage = {
+            getGeometry: () => ({
+              getSize: () => ({ get: () => slices, getTotalSize: () => slices }),
+            }),
+            getImageUid,
+          };
+        });
+
+        it.each([
+          // As recorded from dwv 0.35.1 for Instance Numbers 1,1,2,2.
+          [
+            'duplicate Instance Numbers',
+            ['', 'Cannot merge object with same ids: 1, id2: 1', '', 'The first object already contains id2: 2, id1: 1,2'],
+            2,
+          ],
+          // And for four slices without Instance Numbers.
+          ['missing Instance Numbers', ['', ...Array(3).fill('Cannot merge object with same ids: , id2: ')], 3],
+        ])(
+          'shows every stored image and reports %s as metadata errors, not missing images',
+          async (_, mergeErrors, metadataFiles) => {
+            const files = await openStack(4);
+            act(() => {
+              files.forEach((file, i) => store('1', file, mergeErrors[i] || undefined));
+              mockListeners.loadend({ dataid: '1' });
+            });
+
+            expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
+            expect(screen.queryByTestId('local-load-pending')).toBeNull();
+            expect(screen.getByTestId('local-load-metadata-errors').textContent).toMatch(
+              new RegExp(`the images of ${metadataFiles} files were added and are shown`)
+            );
+            // dwv's actual image: 4 slices, all in the slice list.
+            expect(sidebarItems).toHaveLength(4);
+            // The errors are kept and reported, never a successful load.
+            expect(shownErrors()).toHaveLength(metadataFiles);
+            expect(shownErrors()[0]).toMatchObject({ category: 'metadata' });
+            expect(mockToolsProps?.isLoadSuccessful).toBe(false);
+          }
+        );
+
+        it('reports missing images and metadata errors separately', async () => {
+          const files = await openStack(4);
+          act(() => {
+            store('1', files[0]);
+            store('1', files[1], 'Cannot merge object with same ids: 1, id2: 1');
+            rejected('1', files[2], 'uid-x', 'Cannot append a slice with different number of rows');
+            mockListeners.loadend({ dataid: '1' });
+          });
+          act(() => store('1', files[3]));
+          runFrames();
+
+          expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
+            /1 of 4 files could not be added.*\(3 images shown\)/
+          );
+          expect(screen.getByTestId('local-load-metadata-errors').textContent).toMatch(
+            /the images of 1 file were added/
+          );
+        });
+
+        it('counts a file with several errors once', async () => {
+          const files = await openStack(3);
+          act(() => {
+            store('1', files[0]);
+            rejected('1', files[1], 'uid-x', 'Cannot append a slice with different number of rows');
+            mockListeners.error({ dataid: '1', source: files[1], error: new Error('again') });
+            mockListeners.loadend({ dataid: '1' });
+          });
+          // Two errors, but the third file is still being added.
+          expect(screen.getByTestId('local-load-pending').textContent).toMatch(
+            /2 of 3 files processed/
+          );
+
+          act(() => store('1', files[2]));
+          runFrames();
+          expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
+            /1 of 3 files could not be added/
+          );
+        });
+
+        it('never shows the patient values of dwv error messages', async () => {
+          const files = await openStack(2);
+          act(() => {
+            store('1', files[0]);
+            rejected(
+              '1',
+              files[1],
+              'uid-x',
+              'Cannot append a slice with different PatientName: SYNTHETIC^ALICE != SYNTHETIC^BOB'
+            );
+            mockListeners.loadend({ dataid: '1' });
+          });
+          const shown = JSON.stringify(shownErrors());
+          expect(shown).toContain('Different PatientName (values not shown).');
+          expect(shown).not.toMatch(/ALICE|BOB/);
+          expect(document.body.textContent).not.toMatch(/ALICE|BOB/);
+        });
+
+        it('reports metadata errors to the Series review (never a complete load)', () => {
+          const onLoadResult = jest.fn();
+          render(<DicomViewer list={urls} onLoadResult={onLoadResult} />);
+          act(() => {
+            mockListeners.loadstart({ dataid: '0' });
+            store('0', urls[0] as unknown as File);
+            store('0', urls[1] as unknown as File, 'Cannot merge object with same ids: 1, id2: 1');
+            mockListeners.loadend({ dataid: '0' });
+          });
+          expect(onLoadResult).toHaveBeenLastCalledWith({
+            sliceCount: 2,
+            errorCount: 1,
+            metadataErrorCount: 1,
+            loadedSources: urls,
+          });
+        });
+
+        describe('slices dwv adds after its early loadend', () => {
+          /** 1 stored slice, 1 rejected, dwv's early loadend; `count` files. */
+          const startLargeStack = async (count: number) => {
+            const files = await openStack(count);
+            act(() => {
+              store('1', files[0]);
+              rejected('1', files[1], 'uid-x', 'Cannot append a slice with different number of rows');
+              mockListeners.loadend({ dataid: '1' });
+            });
+            return files;
+          };
+
+          it('re-reads the stack once per frame, however many slices arrive', async () => {
+            const files = await startLargeStack(302);
+            getImageUid.mockClear();
+            const frames = (window.requestAnimationFrame as jest.Mock).mock.calls.length;
+
+            act(() => files.slice(2).forEach((file) => store('1', file)));
+            // 300 slices stored: one frame requested, nothing re-read yet.
+            expect((window.requestAnimationFrame as jest.Mock).mock.calls.length).toBe(frames + 1);
+            expect(getImageUid).not.toHaveBeenCalled();
+
+            runFrames();
+            // One reconciliation: every slice UID read once.
+            expect(getImageUid).toHaveBeenCalledTimes(301);
+            expect(sidebarItems).toHaveLength(301);
+            expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
+              /1 of 302 files could not be added.*\(301 images shown\)/
+            );
+          });
+
+          it('shows the final stack when the last slices come in a later frame', async () => {
+            const files = await startLargeStack(6);
+            act(() => store('1', files[2]));
+            runFrames();
+            expect(screen.getByTestId('local-load-pending')).toBeTruthy();
+
+            act(() => files.slice(3).forEach((file) => store('1', file)));
+            runFrames();
+            expect(screen.queryByTestId('local-load-pending')).toBeNull();
+            expect(sidebarItems).toHaveLength(5);
+            expect(mockFrames.size).toBe(0);
+          });
+
+          it.each(['Clean', 'replacing the Series', 'unmount'])(
+            'drops a scheduled update on %s; a late frame changes nothing',
+            async (action) => {
+              const files = await startLargeStack(4);
+              act(() => store('1', files[2]));
+              const scheduled = [...mockFrames.values()];
+              expect(scheduled).toHaveLength(1);
+              expect(sidebarItems).toHaveLength(1);
+
+              if (action === 'Clean') act(() => mockToolsProps?.onClean?.());
+              if (action === 'replacing the Series') {
+                act(() => {
+                  mockDropboxProps?.onLoadFiles(filesOf(2));
+                  mockListeners.loadstart({ dataid: '2' });
+                });
+              }
+              if (action === 'unmount') cleanup();
+              expect(window.cancelAnimationFrame).toHaveBeenCalled();
+              expect(mockFrames.size).toBe(0);
+              // Its data is gone from dwv (no frame keeps it).
+              expect(mockDataIds.has('1')).toBe(false);
+
+              getImageUid.mockClear();
+              act(() => scheduled.forEach((frame) => frame(0)));
+              expect(getImageUid).not.toHaveBeenCalled();
+              if (action !== 'unmount') {
+                expect(sidebarItems).toEqual([]);
+                expect(mockToolsProps?.isDataLoaded).toBe(false);
+                expect(screen.queryByTestId('local-load-pending')).toBeNull();
+                expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
+              }
+            }
+          );
+        });
       });
     });
   });

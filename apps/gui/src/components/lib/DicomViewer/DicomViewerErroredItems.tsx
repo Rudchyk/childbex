@@ -3,29 +3,22 @@ import { FC, useMemo } from 'react';
 import { useToggle } from '../../../hooks';
 import { UIDialog } from '../UIDialog/UIDialog';
 import ReportGmailerrorredIcon from '@mui/icons-material/ReportGmailerrorred';
-import { DicomLoadErrorEvents } from './DicomViewer.types';
+import { DicomLoadError } from './DicomViewer.loadErrors';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 
 interface DicomViewerErroredItemsProps {
-  data: DicomLoadErrorEvents;
+  data: DicomLoadError[];
 }
 
 export const DicomViewerErroredItems: FC<DicomViewerErroredItemsProps> = ({
   data,
 }) => {
   const [open, toggleOpen] = useToggle(false);
-  // One row per event (one file can fail more than once); a file is shown
-  // by its name, a URL as it is.
+  // One row per event (one file can fail more than once). Only the
+  // presented error (`presentLoadError`): never dwv's raw message, which
+  // can carry patient details.
   const rows = useMemo(
-    () =>
-      data.map((item, index) => ({
-        id: index,
-        dataid: item.dataid,
-        type: item.type,
-        loadtype: item.loadtype,
-        source: item.source instanceof File ? item.source.name : item.source,
-        error: item.error?.message,
-      })),
+    () => data.map((item, index) => ({ id: index, ...item })),
     [data]
   );
 
@@ -45,18 +38,18 @@ export const DicomViewerErroredItems: FC<DicomViewerErroredItemsProps> = ({
       flex: 1,
     },
     {
-      field: 'loadtype',
-      headerName: 'Load Type',
-      flex: 1,
-    },
-    {
       field: 'source',
       headerName: 'Source',
-      width: 300,
+      width: 250,
     },
     {
-      field: 'error',
-      headerName: 'Error',
+      field: 'label',
+      headerName: 'Problem',
+      width: 280,
+    },
+    {
+      field: 'detail',
+      headerName: 'Details',
       width: 300,
     },
   ];
