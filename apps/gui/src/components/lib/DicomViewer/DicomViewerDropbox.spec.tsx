@@ -161,12 +161,30 @@ describe('DicomViewerDropbox', () => {
     expect(screen.getByText(/encrypted/)).toBeTruthy();
   });
 
+  it('never opens a Series directly when files of its folder could not be read', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+
+    choose(folderInput(), [
+      folderFileOf(slice('1', 1), 'CT/IM1'),
+      folderFileOf(slice('1', 2), 'CT/IM2'),
+      folderFileOf(new Uint8Array([...slice('1', 3).slice(0, 140), 0xff, 0xff]), 'CT/IM3'),
+    ]);
+
+    const [row] = await screen.findAllByTestId('local-import-series');
+    expect(onLoadFiles).not.toHaveBeenCalled();
+    expect(screen.getByTestId('local-import-incomplete').textContent).toMatch(
+      /1 file or archive that may contain images could not be read \(folder CT\)/
+    );
+    expect(within(row).getByText('May be missing images')).toBeTruthy();
+  });
+
   it('offers a Series dwv cannot stack in labelled parts, never opening it directly', async () => {
     const onLoadFiles = jest.fn();
     render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
 
     choose(folderInput(), [
-      folderFileOf(slice('1', 1, { imageType: 'ORIGINAL\\PRIMARY\\LOCALIZER' }), 'CT/scout'),
+      folderFileOf(slice('1', 1, { imageType: 'DERIVED\\SECONDARY\\MPR' }), 'CT/mpr'),
       folderFileOf(slice('1', 2), 'CT/IM2'),
       folderFileOf(slice('1', 3), 'CT/IM3'),
     ]);
@@ -177,7 +195,7 @@ describe('DicomViewerDropbox', () => {
     expect(screen.getByText(/3 DICOM images in 1 Series/)).toBeTruthy();
     expect(screen.getByTestId('local-import-parts').textContent).toMatch(/Image Type/);
     expect(within(rows[0]).getByText('Part 1 of 2')).toBeTruthy();
-    expect(within(rows[0]).getByText(/LOCALIZER/)).toBeTruthy();
+    expect(within(rows[0]).getByText(/Image Type: DERIVED/)).toBeTruthy();
 
     fireEvent.click(within(rows[1]).getByRole('button', { name: /part 2 of 2/ }));
     expect(loadedNames(onLoadFiles)).toEqual(['IM2', 'IM3']);

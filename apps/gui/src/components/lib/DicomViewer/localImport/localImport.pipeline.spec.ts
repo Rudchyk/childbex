@@ -72,6 +72,13 @@ const dropFolder = (files: Record<string, Uint8Array>) => {
   const [rootName, tree] = Object.entries(toTree(files))[0];
   return selectionFromDataTransfer(fakeDataTransfer([{ name: rootName, node: tree as FakeTree }]));
 };
+/** Several folders dropped together: folder name -> relative path -> bytes. */
+const dropFolderTrees = (folders: Record<string, Record<string, Uint8Array>>) =>
+  selectionFromDataTransfer(
+    fakeDataTransfer(
+      Object.entries(folders).map(([name, files]) => ({ name, node: toTree(files) }))
+    )
+  );
 const pickFolder = (files: Record<string, Uint8Array>) =>
   selectionFromFileList(Object.entries(files).map(([path, bytes]) => folderFileOf(bytes, path)));
 const zipOf = (files: Record<string, Uint8Array>, extra: ZipFixtureEntry[] = []) =>
@@ -274,7 +281,8 @@ describe('importLocalDicom', () => {
 
     it.each([
       ['image size', { rows: 8, columns: 8 }, 'Image size: 8 × 8'],
-      ['Image Type (localizer)', { imageType: 'ORIGINAL\\PRIMARY\\LOCALIZER' }, 'Image Type: ORIGINAL\\PRIMARY\\LOCALIZER'],
+      // dwv compares the first value only (ORIGINAL / DERIVED).
+      ['Image Type (derived)', { imageType: 'DERIVED\\SECONDARY\\MPR' }, 'Image Type: DERIVED'],
       ['Modality', { modality: 'MR' }, 'Modality: MR'],
       ['SOP Class', { sopClassUid: '1.2.840.10008.5.1.4.1.1.4' }, 'SOP Class UID: 1.2.840.10008.5.1.4.1.1.4'],
       ['Transfer Syntax', { transferSyntaxUid: '1.2.840.10008.1.2.4.70' }, 'Transfer Syntax UID: 1.2.840.10008.1.2.4.70'],
@@ -297,6 +305,35 @@ describe('importLocalDicom', () => {
       // Same DICOM UIDs: parts of one Series, never another Series.
       expect(new Set(result.series.map((s) => s.seriesInstanceUid))).toEqual(new Set([SERIES]));
       expect(new Set(result.series.map((s) => s.key)).size).toBe(2);
+    });
+
+    it('keeps images whose Image Type differs after the first value in one stack', async () => {
+      // dwv compares ORIGINAL / DERIVED only: a localizer value does not
+      // stop it from stacking the slice.
+      const result = await run(
+        pickFolder({
+          'S/1': slice(SERIES, 1),
+          'S/2': slice(SERIES, 2, { imageType: 'ORIGINAL\\PRIMARY\\LOCALIZER' }),
+        })
+      );
+      expect(result.series).toHaveLength(1);
+      expect(result.series[0].part).toBeUndefined();
+    });
+
+    it('splits by pixel spacing presence (dwv compares the length unit)', async () => {
+      const result = await run(
+        pickFolder({
+          'S/1': slice(SERIES, 1, { pixelSpacing: '0.7\\0.7' }),
+          'S/2': slice(SERIES, 2),
+          'S/3': slice(SERIES, 3, { pixelSpacing: '0.5\\0.5' }),
+        })
+      );
+      // Different spacing values stay together: dwv compares the unit only.
+      expect(parts(result).map(({ part, instances }) => ({ part, instances }))).toEqual([
+        { part: '1/2', instances: [1, 3] },
+        { part: '2/2', instances: [2] },
+      ]);
+      expect(result.series[1].part?.values).toContain('Pixel spacing: unknown (pixels)');
     });
 
     it('keeps orientations within dwv tolerance in one stack', async () => {
@@ -363,6 +400,14 @@ describe('importLocalDicom', () => {
     expect(summary(result).skipped).toEqual(['not-dicom']);
   });
 
+  it('keeps pictures and videos above the DICOM file size limit, as before', async () => {
+    const video = new File([new Uint8Array(4096)], 'clip.mp4', { type: 'video/mp4' });
+    const result = await run(selectionFromFileList([video]), { limits: { maxFileBytes: 1024 } });
+    expect(result.mediaFiles.map((m) => m.file)).toEqual([video]);
+    expect(result.skipped).toEqual([]);
+    expect(result.incompleteSources).toEqual([]);
+  });
+
   it('gives dwv names its DICOM loader accepts, without touching the bytes', async () => {
     const bytes = slice(`${STUDY_1}.1`, 1);
     const ima = toDwvFile(fileOf(bytes, 'IM0001.IMA'), 'IM0001.IMA');
@@ -376,27 +421,136 @@ describe('importLocalDicom', () => {
   });
 
   describe('archives', () => {
-    it('reports nested archives, damaged entries and damaged archives without losing the rest', async () => {
-      const inner = zipOf({ 'IM1': slice(`${STUDY_2}.1`, 1) });
+    it('reports damaged and encrypted archives without losing the other sources', async () => {
       const result = await run(
         pickFiles({
-          'good.zip': buildZip([
-            { name: 'S/IM1', data: slice(`${STUDY_1}.1`, 1) },
-            { name: 'S/IM2', data: slice(`${STUDY_1}.1`, 2), crc: 42 },
-            { name: 'S/inner.zip', data: inner },
-          ]),
+          'good.zip': zipOf({ 'S/IM1': slice(`${STUDY_1}.1`, 1) }),
           'broken.zip': zipOf({ IM1: slice(`${STUDY_1}.2`, 1) }).slice(0, 60),
           'locked.zip': buildZip([{ name: 'IM1', data: slice(`${STUDY_1}.3`, 1), flags: 1 }]),
         })
       );
 
       expect(result.instanceCount).toBe(1);
-      expect(Object.fromEntries(result.skipped.map((s) => [s.path, s.reason]))).toEqual({
-        'good.zip/S/IM2': 'corrupt-entry',
-        'good.zip/S/inner.zip': 'nested-archive',
-      });
       expect(result.failedArchives.map((a) => a.path)).toEqual(['broken.zip', 'locked.zip']);
       expect(result.failedArchives[1].message).toMatch(/encrypted/i);
+    });
+
+    describe('no partial Series from an archive with an unreadable entry', () => {
+      const valid = (n: number) => ({ name: `S/IM${n}`, data: slice(`${STUDY_1}.1`, n) });
+
+      it.each([
+        ['a damaged entry (CRC-32)', { name: 'S/IM9', data: slice(`${STUDY_1}.1`, 9), crc: 42 }, /"S\/IM9" is damaged/],
+        ['an archive inside the archive', { name: 'S/inner.zip', data: zipOf({ IM1: slice(`${STUDY_2}.1`, 1) }) }, /archive inside the archive/],
+        ['an unsupported compression method', { name: 'S/IM9', data: slice(`${STUDY_1}.1`, 9), method: 12 }, /unsupported compression/],
+        ['a damaged DICOM file', { name: 'S/IM9', data: new Uint8Array([...syntheticDicom().slice(0, 140), 0xff, 0xff, 0xff]) }, /damaged DICOM file/],
+        ['DICOM without UIDs', { name: 'S/IM9', data: syntheticDicom({ seriesUid: '' }) }, /without Study, Series or SOP Instance UID/],
+      ] as const)('rejects the archive for %s after valid entries', async (_label, bad, message) => {
+        const onProgress = jest.fn();
+        const result = await run(
+          pickFiles({
+            'loose-IM': slice(`${STUDY_2}.1`, 1),
+            'study.zip': buildZip([valid(1), valid(2), bad as ZipFixtureEntry]),
+          }),
+          { onProgress }
+        );
+
+        expect(result.failedArchives.map((a) => a.path)).toEqual(['study.zip']);
+        expect(result.failedArchives[0].message).toMatch(message);
+        expect(result.failedArchives[0].message).toMatch(/Nothing from this archive was imported/);
+        // Nothing of the archive is selectable or counted…
+        expect(summary(result).series).toEqual([
+          { study: STUDY_2, series: `${STUDY_2}.1`, instances: [`${STUDY_2}.1.1`] },
+        ]);
+        expect(result.skipped).toEqual([]);
+        expect(onProgress).toHaveBeenLastCalledWith(
+          expect.objectContaining({ instancesFound: 1, skippedCount: 0 })
+        );
+        // …and the files chosen with it are marked as possibly incomplete.
+        expect(result.incompleteSources).toEqual([{ source: '', count: 1 }]);
+        expect(result.series[0].warnings).toEqual(['source-incomplete']);
+      });
+
+      it('rejects an archive with an entry above the size limit before extracting', async () => {
+        const result = await run(
+          pickFiles({ 'study.zip': buildZip([valid(1), { name: 'S/big', data: new Uint8Array(2048) }]) }),
+          { limits: { maxFileBytes: 1024 } }
+        );
+        expect(result.failedArchives[0].message).toMatch(/"S\/big" is above the size limit/);
+        expect(result.series).toEqual([]);
+      });
+
+      it('keeps an archive whose other files are no images (README, report)', async () => {
+        const result = await run(
+          pickFiles({
+            'study.zip': buildZip([
+              valid(1),
+              { name: 'README.txt', data: text('Synthetic.\n') },
+              {
+                name: 'S/report',
+                data: syntheticDicom({ sopClassUid: BASIC_TEXT_SR, pixels: false, sopUid: '2.25.9' }),
+              },
+              { name: '__MACOSX/S/._IM1', data: text('meta') },
+            ]),
+          })
+        );
+        expect(result.failedArchives).toEqual([]);
+        expect(result.instanceCount).toBe(1);
+        expect(result.incompleteSources).toEqual([]);
+        expect(result.series[0].warnings).toEqual([]);
+      });
+    });
+
+    describe('folders with unreadable DICOM candidates', () => {
+      it('marks the Series of that folder only, without assigning the file to one', async () => {
+        const result = await run(
+          dropFolderTrees({
+            A: {
+              'S1/IM1': slice(`${STUDY_1}.1`, 1),
+              'S1/IM2': slice(`${STUDY_1}.1`, 2),
+              'S2/IM1': slice(`${STUDY_1}.2`, 1),
+              'S1/broken': new Uint8Array([...syntheticDicom().slice(0, 140), 0xff, 0xff]),
+            },
+            B: { 'IM1': slice(`${STUDY_2}.1`, 1) },
+          })
+        );
+
+        expect(result.incompleteSources).toEqual([{ source: 'A', count: 1 }]);
+        const warnings = Object.fromEntries(
+          result.series.map((s) => [s.seriesInstanceUid, s.warnings])
+        );
+        // Both Series of A: the damaged file could belong to either.
+        expect(warnings).toEqual({
+          [`${STUDY_1}.1`]: ['source-incomplete'],
+          [`${STUDY_1}.2`]: ['source-incomplete'],
+          [`${STUDY_2}.1`]: [],
+        });
+        // The skipped file is listed, never moved into a Series.
+        expect(result.skipped).toEqual([{ path: 'A/S1/broken', reason: 'invalid-dicom' }]);
+        expect(result.instanceCount).toBe(4);
+      });
+
+      it('marks the Series of a folder that holds a rejected archive', async () => {
+        const result = await run(
+          dropFolderTrees({
+            A: {
+              'IM1': slice(`${STUDY_1}.1`, 1),
+              'rest.zip': buildZip([
+                { name: 'IM2', data: slice(`${STUDY_1}.1`, 2), crc: 42 },
+              ]),
+            },
+          })
+        );
+        expect(result.failedArchives.map((a) => a.path)).toEqual(['A/rest.zip']);
+        expect(result.series[0].warnings).toEqual(['source-incomplete']);
+      });
+
+      it('does not flag large pictures or other non-DICOM files', async () => {
+        const result = await run(
+          pickFolder({ 'S/IM1': slice(`${STUDY_1}.1`, 1), 'S/notes.txt': text('notes') })
+        );
+        expect(result.incompleteSources).toEqual([]);
+        expect(result.series[0].warnings).toEqual([]);
+      });
     });
 
     it('fails safely on a ZIP bomb (lying sizes) inside an archive', async () => {

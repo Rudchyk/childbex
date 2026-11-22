@@ -3,7 +3,7 @@ import { FC, useMemo } from 'react';
 import { useToggle } from '../../../hooks';
 import { UIDialog } from '../UIDialog/UIDialog';
 import ReportGmailerrorredIcon from '@mui/icons-material/ReportGmailerrorred';
-import { DicomLoadErrorEvents, DicomLoadErrorEvent } from './DicomViewer.types';
+import { DicomLoadErrorEvents } from './DicomViewer.types';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 
 interface DicomViewerErroredItemsProps {
@@ -14,8 +14,18 @@ export const DicomViewerErroredItems: FC<DicomViewerErroredItemsProps> = ({
   data,
 }) => {
   const [open, toggleOpen] = useToggle(false);
+  // One row per event (one file can fail more than once); a file is shown
+  // by its name, a URL as it is.
   const rows = useMemo(
-    () => data.map((item) => ({ ...item, id: item.loadid + item.source })),
+    () =>
+      data.map((item, index) => ({
+        id: index,
+        dataid: item.dataid,
+        type: item.type,
+        loadtype: item.loadtype,
+        source: item.source instanceof File ? item.source.name : item.source,
+        error: item.error?.message,
+      })),
     [data]
   );
 
@@ -23,9 +33,9 @@ export const DicomViewerErroredItems: FC<DicomViewerErroredItemsProps> = ({
     return null;
   }
 
-  const columns: GridColDef<DicomLoadErrorEvent>[] = [
+  const columns: GridColDef<(typeof rows)[number]>[] = [
     {
-      field: 'loadid',
+      field: 'dataid',
       headerName: 'Load ID',
       flex: 1,
     },
@@ -48,7 +58,6 @@ export const DicomViewerErroredItems: FC<DicomViewerErroredItemsProps> = ({
       field: 'error',
       headerName: 'Error',
       width: 300,
-      valueFormatter: (value: DicomLoadErrorEvent['error']) => value.message,
     },
   ];
 

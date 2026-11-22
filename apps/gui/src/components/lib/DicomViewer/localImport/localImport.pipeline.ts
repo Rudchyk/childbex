@@ -23,6 +23,7 @@ import {
   defaultLocalImportLimits,
   isArchiveLevelError,
   LocalImportError,
+  MISSING_IMAGE_REASONS,
   type FailedArchive,
   type LocalDicomInstance,
   type LocalDicomSeries,
@@ -80,6 +81,17 @@ const DIFFERENCE_ORIENTATION = 'Orientation';
 const DIFFERENCE_MULTI_FRAME = 'Multi-frame image';
 const DIFFERENCE_HEADER = 'Patient, study or device details';
 
+/**
+ * The orientation matrix dwv compares (`getOrientationFromCosines`): row
+ * and column cosines and their cross product (not normalised).
+ */
+const orientationMatrix = (c: number[]) => [
+  ...c,
+  c[1] * c[5] - c[2] * c[4],
+  c[2] * c[3] - c[0] * c[5],
+  c[0] * c[4] - c[1] * c[3],
+];
+
 const isSimilarOrientation = (a: number[], b: number[]) =>
   a.every((value, i) => Math.abs(value - b[i]) < ORIENTATION_TOLERANCE);
 
@@ -103,7 +115,7 @@ const splitIntoStacks = (instances: readonly LocalDicomInstance[]): Stack[] => {
   for (const instance of instances) {
     const { info } = instance;
     const key = `${JSON.stringify(info.stackAttributes)}|${info.headerFingerprint}`;
-    const orientation = info.orientation ?? DEFAULT_ORIENTATION;
+    const orientation = orientationMatrix(info.orientation ?? DEFAULT_ORIENTATION);
     const multiFrame = info.numberOfFrames > 1;
     let stack = multiFrame
       ? undefined
@@ -145,7 +157,8 @@ const describeParts = (stacks: readonly Stack[]) => {
     differences.flatMap((name) => {
       if (name === DIFFERENCE_HEADER) return [];
       if (name === DIFFERENCE_ORIENTATION) {
-        return [`${name}: ${stack.orientation.map((v) => +v.toFixed(3)).join('\\')}`];
+        const cosines = stack.orientation.slice(0, 6);
+        return [`${name}: ${cosines.map((v) => +v.toFixed(3)).join('\\')}`];
       }
       if (name === DIFFERENCE_MULTI_FRAME) {
         const { info } = stack.instances[0];
@@ -175,8 +188,12 @@ const hasRepeatedPositions = (stack: Stack) => {
  * Groups instances by Study and Series Instance UID, never by folder: a
  * folder may hold several Series, a Series may span folders. A Series dwv
  * cannot show as one stack is offered in labelled parts (same UIDs).
+ * A stack from a source in `incompleteSources` may be missing images.
  */
-export const groupSeries = (instances: readonly LocalDicomInstance[]): LocalDicomSeries[] => {
+export const groupSeries = (
+  instances: readonly LocalDicomInstance[],
+  incompleteSources: ReadonlySet<string> = new Set()
+): LocalDicomSeries[] => {
   const bySeries = new Map<string, LocalDicomInstance[]>();
   for (const instance of instances) {
     const key = `${instance.info.studyInstanceUid}|${instance.info.seriesInstanceUid}`;
@@ -213,7 +230,12 @@ export const groupSeries = (instances: readonly LocalDicomInstance[]): LocalDico
           differences: parts.differences,
           values: parts.valuesOf(stack),
         },
-        warnings: hasRepeatedPositions(stack) ? ['repeated-positions'] : [],
+        warnings: [
+          ...(hasRepeatedPositions(stack) ? (['repeated-positions'] as const) : []),
+          ...(stack.instances.some((i) => incompleteSources.has(i.source))
+            ? (['source-incomplete'] as const)
+            : []),
+        ],
       });
     });
   }
@@ -225,6 +247,39 @@ export const groupSeries = (instances: readonly LocalDicomInstance[]): LocalDico
       compareText(a.seriesInstanceUid, b.seriesInstanceUid) ||
       compareNumber(a.part?.index, b.part?.index)
   );
+};
+
+/** Why an archive entry rejects its archive (`MISSING_IMAGE_REASONS`). */
+const entryRejections: Partial<Record<SkipReason, string>> = {
+  'invalid-dicom': 'is a damaged DICOM file',
+  'missing-uid': 'is DICOM without Study, Series or SOP Instance UID',
+  'too-large': 'is above the size limit',
+  unreadable: 'could not be read',
+  'nested-archive': 'is an archive inside the archive',
+  'unsupported-entry': 'is a link or uses an unsupported compression method',
+  'duplicate-path': 'appears more than once in the archive',
+  'corrupt-entry': 'is damaged (size or CRC-32 check failed)',
+  'header-too-large': 'has a DICOM header too large to check',
+};
+
+/**
+ * One entry that may hide an image could not be read: the archive is
+ * rejected as a whole, so no Series from it appears complete when it is not.
+ */
+const rejectArchive = (entryPath: string, reason: SkipReason) =>
+  new LocalImportError(
+    reason === 'nested-archive' || reason === 'unsupported-entry' || reason === 'too-large'
+      ? 'UNSUPPORTED_ARCHIVE'
+      : 'CORRUPT_ARCHIVE',
+    `"${entryPath}" ${entryRejections[reason] ?? 'could not be read'}. Nothing from this ` +
+      'archive was imported, so that no Series from it appears complete when images are ' +
+      'missing. Extract the archive and choose the folder to see the readable files.'
+  );
+
+/** The chosen or dropped folder of a top-level path, `''` for loose items. */
+const sourceOf = (path: string) => {
+  const segments = splitPath(path);
+  return segments.length > 1 ? segments[0] : '';
 };
 
 /** dwv's image and video loaders accept files by their MIME type. */
@@ -289,30 +344,49 @@ export const importLocalDicom = async (
     return unique;
   };
 
-  /** Probes one file; returns whether it was kept. */
-  const checkCandidate = async (path: string, blob: Blob, name: string) => {
+  /** Probes one file; returns why it was skipped (undefined when kept). */
+  const checkCandidate = async (
+    path: string,
+    blob: Blob,
+    name: string,
+    source: string
+  ): Promise<SkipReason | undefined> => {
     const probe = await probeDicom(blob);
     throwIfCancelled(signal);
     if (probe.kind === 'skipped') {
       skip(path, probe.reason);
-      return false;
+      return probe.reason;
     }
     if (sopInstanceUids.has(probe.info.sopInstanceUid)) {
       skip(path, 'duplicate-instance');
-      return false;
+      return 'duplicate-instance';
     }
     sopInstanceUids.add(probe.info.sopInstanceUid);
     archiveAdded?.uids.push(probe.info.sopInstanceUid);
-    instances.push({ path, file: toDwvFile(blob, name), info: probe.info });
+    instances.push({ path, source, file: toDwvFile(blob, name), info: probe.info });
     progress.instancesFound++;
     progress.filesChecked++;
     report();
-    return true;
+    return undefined;
   };
 
   const sniff = async (blob: Blob) => sniffContent(await readBlobBytes(blob.slice(0, SNIFF_BYTES)));
 
-  const importArchiveEntries = async (archivePath: string, archive: File, entries: ZipEntry[]) => {
+  const importArchiveEntries = async (
+    archivePath: string,
+    archive: File,
+    entries: ZipEntry[],
+    source: string
+  ) => {
+    const isIgnored = (entry: ZipEntry) =>
+      isSystemPath(entry.segments) || isDicomDirName(baseName(entry.path));
+    // Entries that cannot be read reject the archive before anything is
+    // extracted (they may be images of a Series found in it).
+    const unreadable = entries.find(
+      (e) => e.skipReason && !isIgnored(e) && MISSING_IMAGE_REASONS.includes(e.skipReason)
+    );
+    if (unreadable?.skipReason) throw rejectArchive(unreadable.path, unreadable.skipReason);
+
     const extractable = entries.filter((e) => !e.skipReason);
     const declared = extractable
       .filter((e) => e.method !== 0)
@@ -360,31 +434,26 @@ export const importLocalDicom = async (
           },
         });
       } catch (error) {
-        if (error instanceof ZipEntryDamagedError) {
-          skip(path, 'corrupt-entry');
-          continue;
-        }
+        if (error instanceof ZipEntryDamagedError) throw rejectArchive(entry.path, 'corrupt-entry');
         throw error;
       } finally {
         compressedDone += entry.compressedSize;
       }
-      let kept = false;
-      if ((await sniff(blob)) === 'zip') {
-        skip(path, 'nested-archive');
-      } else {
-        kept = await checkCandidate(path, blob, baseName(entry.path));
-      }
+      if ((await sniff(blob)) === 'zip') throw rejectArchive(entry.path, 'nested-archive');
+      const reason = await checkCandidate(path, blob, baseName(entry.path), source);
+      if (reason && MISSING_IMAGE_REASONS.includes(reason)) throw rejectArchive(entry.path, reason);
       // Only kept files stay in memory.
-      if (!kept) budget.remainingBytes = budgetBefore;
+      if (reason) budget.remainingBytes = budgetBefore;
     }
   };
 
   /**
    * One archive is all or nothing: when it turns out to be unsafe, damaged
-   * or unsupported part-way, nothing found in it is kept (no partial Series
-   * from a rejected archive). Other files and archives are not affected.
+   * or unsupported part-way, or one of its entries that may be an image
+   * cannot be read, nothing found in it is kept (no partial Series from a
+   * rejected archive). Other files and archives are not affected.
    */
-  const importArchive = async (path: string, archive: File) => {
+  const importArchive = async (path: string, archive: File, source: string) => {
     const before = {
       instances: instances.length,
       skipped: skipped.length,
@@ -396,7 +465,7 @@ export const importLocalDicom = async (
       progress.archive = { path, percent: 0 };
       report();
       const entries = await readZipDirectory(archive, limits, signal);
-      await importArchiveEntries(path, archive, entries);
+      await importArchiveEntries(path, archive, entries, source);
     } catch (error) {
       if (!isArchiveLevelError(error)) throw error;
       instances.length = before.instances;
@@ -439,13 +508,13 @@ export const importLocalDicom = async (
       skip(path, 'unreadable');
       continue;
     }
+    const source = sourceOf(found.path);
     if (kind === 'zip') {
-      await importArchive(path, file);
+      await importArchive(path, file, source);
       progress.filesChecked++;
-    } else if (file.size > limits.maxFileBytes) {
-      skip(path, 'too-large');
     } else if (kind === 'other') {
-      // Pictures and videos keep opening as before (dwv's own loaders).
+      // Pictures and videos keep opening as before (dwv's own loaders, no
+      // size limit: they are never read by the import).
       const mediaKind = mediaKindOf(file);
       if (mediaKind) {
         mediaFiles.push({ path, file, kind: mediaKind });
@@ -454,18 +523,33 @@ export const importLocalDicom = async (
       } else {
         skip(path, 'not-dicom');
       }
+    } else if (file.size > limits.maxFileBytes) {
+      skip(path, 'too-large');
     } else {
-      await checkCandidate(path, file, file.name);
+      await checkCandidate(path, file, file.name, source);
     }
   }
   throwIfCancelled(signal);
 
+  // Unreadable files and rejected archives: which Series they belong to is
+  // unknown, so every Series of the same source is flagged.
+  const incomplete = new Map<string, number>();
+  const addIncomplete = (path: string) => {
+    const source = sourceOf(path);
+    incomplete.set(source, (incomplete.get(source) ?? 0) + 1);
+  };
+  for (const { path, reason } of skipped) {
+    if (MISSING_IMAGE_REASONS.includes(reason)) addIncomplete(path);
+  }
+  for (const { path } of failedArchives) addIncomplete(path);
+
   return {
-    series: groupSeries(instances),
+    series: groupSeries(instances, new Set(incomplete.keys())),
     fileCount: progress.filesFound,
     instanceCount: instances.length,
     skipped,
     failedArchives,
+    incompleteSources: [...incomplete].map(([source, count]) => ({ source, count })),
     mediaFiles,
     usedDropFallback: selection.usedDropFallback,
   };

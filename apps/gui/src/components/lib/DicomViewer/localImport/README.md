@@ -29,7 +29,8 @@ Choose files / Choose folder / drop  ──>  localImport.sources   (FileList, w
   never modified or copied (stored ZIP entries are slices of the archive).
 - Pictures and videos chosen or dropped as files (MIME `image/*`,
   `video/*`) are listed separately and open with dwv's own image/video
-  loaders, as before. They are not taken from ZIP archives. DWV state
+  loaders, as before (also above the DICOM file size limit: the import
+  never reads them). They are not taken from ZIP archives. DWV state
   (`.json`) files are not supported here: dwv applies them to already
   loaded data only.
 
@@ -37,17 +38,32 @@ Choose files / Choose folder / drop  ──>  localImport.sources   (FileList, w
 
 Instances are grouped by Study/Series Instance UID, never by folder name,
 and ordered by Instance Number. dwv 0.35 (`Image.appendSlice`) rejects a
-slice whose size, orientation (tolerance 1e-4), photometric interpretation
-or any compared header attribute differs from the first one (Modality, SOP
-Class, Transfer Syntax, Image Type, Bits Allocated/Stored, High Bit, Pixel
-Representation, VOI LUT Function, Lossy Image Compression, Frame of
-Reference, patient/study/device details), and appends single-frame slices
-only. Such a Series is offered in labelled **parts** (same UIDs; the
-differing technical values are shown, patient details never are), and each
+slice whose size, orientation matrix (row/column cosines and their normal,
+tolerance 1e-4), photometric interpretation or any compared header
+attribute differs from the first one (Modality, SOP Class, Transfer Syntax,
+Image Type, Bits Allocated/Stored, High Bit, Pixel Representation, VOI LUT
+Function, Lossy Image Compression, Frame of Reference, length unit, i.e.
+whether a pixel spacing is known, patient/study/device details), and
+appends single-frame slices only. Like dwv, only the first value of a
+multi-valued attribute is compared (`ORIGINAL` of `ORIGINAL\PRIMARY\AXIAL`).
+Such a Series is offered in labelled **parts** (same UIDs; the differing
+technical values are shown, patient details never are), and each
 multi-frame image is its own part. Parts, and stacks with several images at
-one position (which dwv may reject), never open automatically. After
-loading, the viewer states how many files dwv could not add, so a partial
-stack is never presented as the complete Series.
+one position (which dwv may reject), never open automatically.
+
+### Loading a stack into dwv
+
+dwv's `loadend` is not a completion signal: when dwv rejects a file, it
+reports that file's end twice (`DicomBufferToView`), so its overall
+`loadend` can come before the remaining files were processed, which are
+appended afterwards. The viewer therefore counts what dwv actually did
+(`DicomViewer.loadAccount.ts`): an input is added once dwv stored it
+(`dataadd` / `dataupdate`; `loaditem` comes before the append and is no
+proof) or failed (`error` / `abort`, dwv's actual event names; an `error`
+without a source fails the whole load). Until every input is accounted for,
+it says "Still adding images"; afterwards it states how many files dwv could
+not add. The slice count, slice list and slice navigation are re-read from
+dwv's image whenever it changes, also after `loadend`.
 
 A Series that fails to load returns to the imported list (no re-import);
 Clean is available after any load error, and a new stack replaces the
@@ -59,20 +75,39 @@ previous one (late events of the replaced load are ignored).
 | --- | --- | --- |
 | Files found (folders + ZIP entries) | 20,000 | import stops |
 | Path depth / length | 32 / 1,024 chars | import stops |
-| Single file (on disk or extracted) | 512 MB | file skipped |
+| Single DICOM file (on disk or extracted) | 512 MB | file skipped (in a ZIP: archive rejected) |
 | ZIP archive size | 2 GB | import stops |
 | ZIP entries | 20,000 | import stops |
 | Bytes inflated from ZIPs (held in memory) | 512 MB | import stops |
 | Overall ZIP expansion ratio (above 64 MB) | 100:1 | archive rejected |
 | DICOM header read | 16 MB | file skipped |
 
-An entry that inflates beyond its declared size, overlapping entries,
-traversal/absolute/drive paths, encrypted or split archives and damaged
-ZIP64 records reject that archive **as a whole**: nothing found in it is
-kept, even entries extracted before the problem was found. Other files and
-archives are not affected. An entry with a bad CRC is skipped. Links and
-unsupported compression methods are skipped. Archives inside archives, TAR,
-RAR and 7z are not unpacked.
+### Incomplete imports
+
+A Series is never presented as complete when images of it may be missing.
+
+- **ZIP archives are all or nothing.** An entry that inflates beyond its
+  declared size, overlapping entries, traversal/absolute/drive paths,
+  encrypted or split archives and damaged ZIP64 records reject the archive.
+  So does any entry that may be an image but cannot be read or checked: a
+  bad CRC-32 or damaged deflate data, an unsupported compression method or
+  link, an entry above the size limit, a duplicate path, an archive inside
+  the archive, a damaged DICOM file, DICOM without UIDs or with a header too
+  large to check (`MISSING_IMAGE_REASONS`). Nothing found in a rejected
+  archive is kept, even entries extracted before the problem was found
+  (instances, SOP Instance UIDs, paths, counters, memory budget), and the
+  reason is shown. Other files and archives are not affected. Files that
+  are no images (README, reports, OS metadata) do not reject an archive.
+- **Folders:** a file that cannot be read cannot be assigned to a Series
+  (its header is unknown), and the viewer does not guess. The file is
+  listed, and every Series from the same source (the chosen or dropped
+  folder, or all files chosen on their own) is marked "May be missing
+  images", as is every Series of a source containing a rejected archive.
+- Such Series, parts and failed archives never open automatically.
+
+TAR, RAR and 7z are not unpacked.
+
+### Responsiveness
 
 Work is done in small async steps (1 MB reads, 16 KB inflate steps, a pause
 every 8 MB inflated and every 200 files), so the page stays responsive and
@@ -88,7 +123,13 @@ the import and drop all references to the found files.
   memory (only their headers, one at a time).
 - dwv's own memory comes on top: it reads the files of the opened stack and
   holds the decoded image (roughly rows × columns × 2 bytes per slice for
-  CT). A large Series from a large ZIP can therefore need well over 1 GB;
+  CT). `App.reset()` only empties the display, so the viewer removes every
+  dwv data with `abortLoad` (which also stops a load in progress) when a
+  stack is replaced, on Clean and when the viewer is removed: only the
+  stack on screen is held. Files dwv no longer tracks after an early
+  `loadend` may still be read once; they cannot recreate removed data (dwv
+  reports them as stale errors, which are ignored).
+- A large Series from a large ZIP can therefore need well over 1 GB;
   devices with little memory may still run out. Decompression runs on the
   main thread (no Worker).
 

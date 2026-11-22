@@ -1,10 +1,14 @@
 import { DataElement } from 'dwv';
 
+/**
+ * dwv's `error` / `abort` event of a load: `source` is the failed file or
+ * URL (missing when the whole load failed); aborts carry no `error`.
+ */
 export interface DicomLoadErrorEvent {
-  error: Error;
-  loadid: number;
-  loadtype: string;
-  source: string;
+  error?: Error;
+  dataid?: string;
+  loadtype?: string;
+  source?: string | File;
   type: string;
 }
 

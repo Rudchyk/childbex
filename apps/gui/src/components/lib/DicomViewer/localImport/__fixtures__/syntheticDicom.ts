@@ -93,6 +93,8 @@ export interface SyntheticDicomOptions {
   patientName?: string;
   /** Transfer Syntax UID of the file meta (the data set stays explicit LE). */
   transferSyntaxUid?: string;
+  /** Pixel Spacing, e.g. `0.7\0.7` (default: none). */
+  pixelSpacing?: string;
 }
 
 /** A tiny synthetic CT slice (explicit VR little endian). */
@@ -119,6 +121,7 @@ export const syntheticDicom = (options: SyntheticDicomOptions = {}): Uint8Array 
     numberOfFrames = 1,
     patientName = 'SYNTHETIC^PATIENT',
     transferSyntaxUid = '1.2.840.10008.1.2.1',
+    pixelSpacing,
   } = options;
   const element = part10 ? explicitElement : implicitElement;
   const dataSet: Uint8Array[] = [
@@ -143,6 +146,7 @@ export const syntheticDicom = (options: SyntheticDicomOptions = {}): Uint8Array 
       ...(numberOfFrames > 1 ? [element(0x0028, 0x0008, 'IS', String(numberOfFrames))] : []),
       element(0x0028, 0x0010, 'US', uint16(rows)),
       element(0x0028, 0x0011, 'US', uint16(columns)),
+      ...(pixelSpacing ? [element(0x0028, 0x0030, 'DS', pixelSpacing)] : []),
       element(0x0028, 0x0100, 'US', uint16(16)),
       element(0x0028, 0x0101, 'US', uint16(bitsStored)),
       element(0x0028, 0x0102, 'US', uint16(bitsStored - 1)),

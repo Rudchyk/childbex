@@ -127,6 +127,23 @@ export const QUIET_SKIP_REASONS: readonly SkipReason[] = [
   'dicomdir',
 ];
 
+/**
+ * Files that may be (or hide) an image of a Series, but could not be read
+ * or checked: a Series found next to them may be missing images. Inside a
+ * ZIP archive any of them rejects the whole archive.
+ */
+export const MISSING_IMAGE_REASONS: readonly SkipReason[] = [
+  'invalid-dicom',
+  'missing-uid',
+  'too-large',
+  'unreadable',
+  'nested-archive',
+  'unsupported-entry',
+  'duplicate-path',
+  'corrupt-entry',
+  'header-too-large',
+];
+
 export interface SkippedFile {
   path: string;
   reason: SkipReason;
@@ -162,7 +179,7 @@ export interface DicomInstanceInfo {
    * device details). Opaque: never shown, only compared.
    */
   headerFingerprint: string;
-  /** Image Orientation (Patient), 6 values, when present. */
+  /** Image Orientation (Patient), 6 values, when present and valid. */
   orientation?: number[];
   /** Image Position (Patient), normalised, when present. */
   position?: string;
@@ -171,6 +188,11 @@ export interface DicomInstanceInfo {
 export interface LocalDicomInstance {
   /** Relative path (provenance), e.g. `study.zip/Series_001/IM0001`. */
   path: string;
+  /**
+   * The chosen or dropped folder it comes from (top-level name), or `''`
+   * for files and archives chosen or dropped on their own.
+   */
+  source: string;
   /** The original bytes (a File on disk or extracted from a ZIP). */
   file: File;
   info: DicomInstanceInfo;
@@ -211,11 +233,19 @@ export interface LocalSeriesPart {
 
 export type StackWarning =
   /** Several images share one position (e.g. phases or b-values). */
-  'repeated-positions';
+  | 'repeated-positions'
+  /**
+   * Files of the same source (chosen or dropped folder, or the loose files)
+   * could not be read: they may be images of this Series. Which Series they
+   * belong to is unknown.
+   */
+  | 'source-incomplete';
 
 export const stackWarningLabels: Record<StackWarning, string> = {
   'repeated-positions':
     'Several images share the same position: the viewer may show only some of them.',
+  'source-incomplete':
+    'Some files of the same folder or selection could not be read: images of this Series may be missing.',
 };
 
 /** Non-DICOM pictures and videos, opened by dwv's image/video loaders. */
@@ -232,6 +262,12 @@ export interface LocalImportResult {
   instanceCount: number;
   skipped: SkippedFile[];
   failedArchives: FailedArchive[];
+  /**
+   * Sources (top-level folder of the selection, or `''` for loose files)
+   * with files that may hide images (`MISSING_IMAGE_REASONS`, rejected
+   * archives), with how many.
+   */
+  incompleteSources: { source: string; count: number }[];
   /** Plain images and videos (chosen or dropped files, not ZIP entries). */
   mediaFiles: LocalMediaFile[];
   /**

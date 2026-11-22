@@ -54,6 +54,7 @@ export const openTargetKey = (target: LocalOpenTarget) =>
 export const targetToOpenDirectly = (result: LocalImportResult): LocalOpenTarget | undefined => {
   const nothingToReview =
     !result.failedArchives.length &&
+    !result.incompleteSources.length &&
     result.skipped.every((s) => QUIET_SKIP_REASONS.includes(s.reason));
   if (!nothingToReview) return undefined;
   const [series] = result.series;
@@ -88,7 +89,10 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
     () => [...new Set(result.series.flatMap((s) => s.part?.differences ?? []))],
     [result.series]
   );
-  const hasStackWarnings = result.series.some((s) => s.warnings.length);
+  const hasRepeatedPositions = result.series.some((s) =>
+    s.warnings.includes('repeated-positions')
+  );
+  const missingImages = result.incompleteSources.reduce((total, s) => total + s.count, 0);
   const skippedByReason = useMemo(() => {
     const groups = new Map<SkipReason, string[]>();
     for (const { path, reason } of result.skipped) {
@@ -177,7 +181,19 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
         </Alert>
       )}
 
-      {hasStackWarnings && (
+      {!!missingImages && (
+        <Alert severity="warning" data-testid="local-import-incomplete">
+          <AlertTitle>Images may be missing</AlertTitle>
+          {plural(missingImages, 'file or archive', 'files or archives')} that may contain
+          images could not be read ({result.incompleteSources
+            .map(({ source }) => (source ? `folder ${source}` : 'files chosen on their own'))
+            .join(', ')}
+          ). Which Series they belong to is unknown, so every Series from the same folder or
+          selection is marked <strong>May be missing images</strong>: it may not be complete.
+        </Alert>
+      )}
+
+      {hasRepeatedPositions && (
         <Alert severity="warning">
           {stackWarningLabels['repeated-positions']} Such stacks do not open automatically;
           the viewer reports how many images it could load.
@@ -226,15 +242,20 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
                             sx={{ ml: 1 }}
                           />
                         )}
-                        {!!series.warnings.length && (
+                        {series.warnings.map((warning) => (
                           <Chip
+                            key={warning}
                             size="small"
                             color="warning"
-                            label="May load incompletely"
-                            title={series.warnings.map((w) => stackWarningLabels[w]).join(' ')}
+                            label={
+                              warning === 'source-incomplete'
+                                ? 'May be missing images'
+                                : 'May load incompletely'
+                            }
+                            title={stackWarningLabels[warning]}
                             sx={{ ml: 1 }}
                           />
-                        )}
+                        ))}
                         {series.key === openedKey && (
                           <Chip size="small" label="Last opened" sx={{ ml: 1 }} />
                         )}

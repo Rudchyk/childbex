@@ -48,6 +48,11 @@ const STACK_ATTRIBUTES: Record<string, string> = {
   'Frame of Reference UID': 'x00200052',
 };
 const US_ATTRIBUTES = new Set(['x00280002', 'x00280100', 'x00280101', 'x00280102', 'x00280103']);
+/**
+ * dwv's length unit (also compared) is millimetres when one of these has
+ * two values, pixels otherwise (`getPixelSpacing`).
+ */
+const SPACING_TAGS = ['x00280030', 'x00181164', 'x00182010', 'x00280034'];
 
 /**
  * The other attributes dwv compares between slices (patient, study and
@@ -145,10 +150,22 @@ const fingerprint = (value: string) => {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 };
 
+/**
+ * dwv compares the first value of a multi-valued attribute only (`safeGet`),
+ * e.g. `ORIGINAL` of `ORIGINAL\PRIMARY\AXIAL`.
+ */
+const firstValue = (dataSet: DataSet, tag: string) =>
+  text(dataSet, tag)?.split('\\')[0].trim() || undefined;
+
 const stackAttributesOf = (dataSet: DataSet, rows: number, columns: number) => {
-  const attributes: Record<string, string> = { 'Image size': `${columns} × ${rows}` };
+  const attributes: Record<string, string> = {
+    'Image size': `${columns} × ${rows}`,
+    'Pixel spacing': SPACING_TAGS.some((tag) => text(dataSet, tag)?.split('\\').length === 2)
+      ? 'known (mm)'
+      : 'unknown (pixels)',
+  };
   for (const [name, tag] of Object.entries(STACK_ATTRIBUTES)) {
-    const value = US_ATTRIBUTES.has(tag) ? ushort(dataSet, tag)?.toString() : text(dataSet, tag);
+    const value = US_ATTRIBUTES.has(tag) ? ushort(dataSet, tag)?.toString() : firstValue(dataSet, tag);
     if (value !== undefined) attributes[name] = value;
   }
   return attributes;
@@ -238,7 +255,7 @@ export const probeDicom = async (file: Blob): Promise<DicomProbe> => {
       numberOfFrames: integer(dataSet, 'x00280008') ?? 1,
       stackAttributes: stackAttributesOf(dataSet, rows, columns),
       headerFingerprint: fingerprint(
-        FINGERPRINT_TAGS.map((tag) => text(header, tag) ?? '').join('\u0001')
+        FINGERPRINT_TAGS.map((tag) => firstValue(header, tag) ?? '').join('\u0001')
       ),
       orientation: decimals(dataSet, 'x00200037', 6),
       position: position?.join(','),
