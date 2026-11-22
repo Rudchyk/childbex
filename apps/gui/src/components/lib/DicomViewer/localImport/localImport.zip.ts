@@ -20,6 +20,7 @@ const SIG_CENTRAL = 0x02014b50;
 const SIG_EOCD = 0x06054b50;
 const SIG_EOCD64_LOCATOR = 0x07064b50;
 const SIG_EOCD64 = 0x06064b50;
+const SIG_DIGITAL_SIGNATURE = 0x05054b50;
 const EOCD_SIZE = 22;
 const EOCD64_LOCATOR_SIZE = 20;
 const EOCD64_SIZE = 56;
@@ -185,6 +186,11 @@ export const readZipDirectory = async (
       'Split (multi-part) ZIP archives are not supported.'
     );
   }
+  // Entries on this disk and in total: one disk, so both must agree (an
+  // archive whose counts disagree would lose entries silently).
+  if (ev.getUint16(8, true) !== ev.getUint16(10, true)) {
+    throw corrupt('contradictory entry counts');
+  }
   let entryCount = ev.getUint16(10, true);
   let directorySize = ev.getUint32(12, true);
   let directoryOffset = ev.getUint32(16, true);
@@ -208,19 +214,32 @@ export const readZipDirectory = async (
     if (rv.getUint32(0, true) !== SIG_EOCD64 || getUint64(rv, 4) < EOCD64_SIZE - 12) {
       throw corrupt('missing ZIP64 record');
     }
-    if (
-      rv.getUint32(16, true) !== 0 ||
-      rv.getUint32(20, true) !== 0 ||
-      getUint64(rv, 24) !== getUint64(rv, 32)
-    ) {
+    // The record (with any extensible data) ends at its locator: nothing
+    // unaccounted for in between.
+    if (recordOffset + 12 + getUint64(rv, 4) !== locatorOffset) {
+      throw corrupt('invalid ZIP64 record size');
+    }
+    if (rv.getUint32(16, true) !== 0 || rv.getUint32(20, true) !== 0) {
       throw new LocalImportError(
         'UNSUPPORTED_ARCHIVE',
         'Split (multi-part) ZIP archives are not supported.'
       );
     }
-    entryCount = getUint64(rv, 32);
-    directorySize = getUint64(rv, 40);
-    directoryOffset = getUint64(rv, 48);
+    if (getUint64(rv, 24) !== getUint64(rv, 32)) throw corrupt('contradictory entry counts');
+    const zip64 = {
+      entryCount: getUint64(rv, 32),
+      directorySize: getUint64(rv, 40),
+      directoryOffset: getUint64(rv, 48),
+    };
+    // Values not saturated in the ordinary record must be the same.
+    if (
+      (entryCount !== 0xffff && entryCount !== zip64.entryCount) ||
+      (directorySize !== 0xffffffff && directorySize !== zip64.directorySize) ||
+      (directoryOffset !== 0xffffffff && directoryOffset !== zip64.directoryOffset)
+    ) {
+      throw corrupt('contradictory ZIP64 record');
+    }
+    ({ entryCount, directorySize, directoryOffset } = zip64);
     directoryEnd = recordOffset;
   }
 
@@ -230,9 +249,11 @@ export const readZipDirectory = async (
       `A ZIP archive has more than ${limits.maxArchiveEntries.toLocaleString('en-US')} entries.`
     );
   }
+  // The central directory ends where its end record starts: records hidden
+  // in a gap would otherwise be skipped silently.
   if (
     directorySize > MAX_CENTRAL_DIRECTORY_BYTES ||
-    directoryOffset + directorySize > directoryEnd
+    directoryOffset + directorySize !== directoryEnd
   ) {
     throw corrupt('invalid central directory');
   }
@@ -333,6 +354,19 @@ export const readZipDirectory = async (
     }
     seenPaths.add(entry.path);
     entries.push(entry);
+  }
+  // Every byte of the declared directory is one of the declared entries:
+  // more records (an entry count too small) or trailing data are
+  // contradictory. A signed archive's digital signature record is not
+  // supported.
+  if (position !== directory.length) {
+    if (position + 4 <= directory.length && dv.getUint32(position, true) === SIG_DIGITAL_SIGNATURE) {
+      throw new LocalImportError(
+        'UNSUPPORTED_ARCHIVE',
+        'Digitally signed ZIP archives are not supported. Extract the archive first.'
+      );
+    }
+    throw corrupt('the central directory has more records than declared');
   }
 
   // Entry data must not overlap (a known non-recursive ZIP bomb trick) and

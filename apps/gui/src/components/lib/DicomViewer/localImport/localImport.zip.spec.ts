@@ -329,6 +329,158 @@ describe('readZipDirectory / extractZipEntry', () => {
     });
   });
 
+  /**
+   * The end records must describe the central directory exactly: an entry
+   * count too small (or bytes the count does not cover) would otherwise
+   * drop entries without any error. Archives are built by `buildZip` (no
+   * comment), then single fields are changed.
+   */
+  describe('central directory consistency', () => {
+    const slice1 = syntheticDicom({ sopUid: '2.25.70.1', instanceNumber: 1 });
+    const slice2 = syntheticDicom({ sopUid: '2.25.70.2', instanceNumber: 2 });
+    const twoSlices = (zip64End?: true) =>
+      buildZip(
+        [
+          { name: 'S/IM1', data: slice1 },
+          { name: 'S/IM2', data: slice2 },
+        ],
+        zip64End ? { zip64End } : {}
+      );
+    /** EOCD: last 22 bytes; ZIP64: locator 20 bytes and record 56 bytes before. */
+    const EOCD = 22;
+    const ZIP64_END = 22 + 20 + 56;
+    const setUint64 = (dv: DataView, at: number, value: number) => {
+      dv.setUint32(at, value % 2 ** 32, true);
+      dv.setUint32(at + 4, Math.floor(value / 2 ** 32), true);
+    };
+    const patched = (zip: Uint8Array, change: (dv: DataView, length: number) => void) => {
+      const copy = zip.slice();
+      change(new DataView(copy.buffer), copy.length);
+      return copy;
+    };
+    /** Bytes inserted right before the end records (`endSize` bytes). */
+    const inserted = (zip: Uint8Array, bytes: Uint8Array, endSize: number) => {
+      const at = zip.length - endSize;
+      const out = new Uint8Array(zip.length + bytes.length);
+      out.set(zip.subarray(0, at));
+      out.set(bytes, at);
+      out.set(zip.subarray(at), at + bytes.length);
+      return out;
+    };
+    const rejected = (zip: Uint8Array, message: RegExp, code = 'CORRUPT_ARCHIVE') =>
+      expectError(readZipDirectory(zipFile(zip), limits), code, message);
+
+    it('reads ordinary and ZIP64 archives completely', async () => {
+      for (const zip of [twoSlices(), twoSlices(true)]) {
+        const entries = await readZipDirectory(zipFile(zip), limits);
+        expect(entries.map((e) => e.path)).toEqual(['S/IM1', 'S/IM2']);
+      }
+    });
+
+    it('rejects an EOCD that declares 1 entry while the directory holds 2', async () => {
+      const zip = patched(twoSlices(), (dv, length) => {
+        dv.setUint16(length - EOCD + 8, 1, true);
+        dv.setUint16(length - EOCD + 10, 1, true);
+      });
+      await rejected(zip, /more records than declared/);
+    });
+
+    it('rejects an EOCD that declares more entries than the directory holds', async () => {
+      const zip = patched(twoSlices(), (dv, length) => {
+        dv.setUint16(length - EOCD + 8, 3, true);
+        dv.setUint16(length - EOCD + 10, 3, true);
+      });
+      await rejected(zip, /invalid central directory entry/);
+    });
+
+    it.each([
+      [1, 2],
+      [2, 1],
+    ])('rejects contradictory entry counts (this disk %i, total %i)', async (disk, total) => {
+      const zip = patched(twoSlices(), (dv, length) => {
+        dv.setUint16(length - EOCD + 8, disk, true);
+        dv.setUint16(length - EOCD + 10, total, true);
+      });
+      await rejected(zip, /contradictory entry counts/);
+    });
+
+    it('rejects bytes inside the declared directory that are no declared entry', async () => {
+      const junk = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+      const zip = patched(inserted(twoSlices(), junk, EOCD), (dv, length) => {
+        const at = length - EOCD + 12;
+        dv.setUint32(at, dv.getUint32(at, true) + junk.length, true);
+      });
+      await rejected(zip, /more records than declared/);
+    });
+
+    it('rejects a central directory record hidden after the declared directory', async () => {
+      // One entry declared (count and size), the second record after it.
+      const one = buildZip([{ name: 'S/IM1', data: slice1 }]);
+      const zip = patched(twoSlices(), (dv, length) => {
+        const oneView = new DataView(one.buffer, one.byteOffset, one.length);
+        dv.setUint16(length - EOCD + 8, 1, true);
+        dv.setUint16(length - EOCD + 10, 1, true);
+        dv.setUint32(length - EOCD + 12, oneView.getUint32(one.length - EOCD + 12, true), true);
+      });
+      await rejected(zip, /\(invalid central directory\)/);
+    });
+
+    it('rejects a digitally signed archive as unsupported', async () => {
+      const signature = new Uint8Array([0x50, 0x4b, 0x05, 0x05, 0, 0]);
+      const zip = patched(inserted(twoSlices(), signature, EOCD), (dv, length) => {
+        const at = length - EOCD + 12;
+        dv.setUint32(at, dv.getUint32(at, true) + signature.length, true);
+      });
+      await rejected(zip, /signed/, 'UNSUPPORTED_ARCHIVE');
+    });
+
+    describe('ZIP64', () => {
+      const record = (length: number) => length - ZIP64_END;
+
+      it('rejects a ZIP64 record that declares 1 entry while the directory holds 2', async () => {
+        const zip = patched(twoSlices(true), (dv, length) => {
+          setUint64(dv, record(length) + 24, 1);
+          setUint64(dv, record(length) + 32, 1);
+        });
+        await rejected(zip, /more records than declared/);
+      });
+
+      it('rejects contradictory ZIP64 entry counts (this disk, total)', async () => {
+        const zip = patched(twoSlices(true), (dv, length) => {
+          setUint64(dv, record(length) + 24, 1);
+        });
+        await rejected(zip, /contradictory entry counts/);
+      });
+
+      it('rejects an ordinary EOCD whose (unsaturated) count contradicts the ZIP64 record', async () => {
+        const zip = patched(twoSlices(true), (dv, length) => {
+          dv.setUint16(length - EOCD + 8, 1, true);
+          dv.setUint16(length - EOCD + 10, 1, true);
+        });
+        await rejected(zip, /contradictory ZIP64 record/);
+      });
+
+      it('rejects bytes inside the declared ZIP64 directory that are no declared entry', async () => {
+        const junk = new Uint8Array(8);
+        const zip = patched(inserted(twoSlices(true), junk, ZIP64_END), (dv, length) => {
+          const at = record(length) + 40;
+          setUint64(dv, at, dv.getUint32(at, true) + junk.length);
+          // The locator points at the moved record.
+          const locator = length - 22 - 20 + 8;
+          setUint64(dv, locator, dv.getUint32(locator, true) + junk.length);
+        });
+        await rejected(zip, /more records than declared/);
+      });
+
+      it('rejects a ZIP64 record whose size leaves unexplained bytes', async () => {
+        const zip = patched(twoSlices(true), (dv, length) => {
+          setUint64(dv, record(length) + 4, 60);
+        });
+        await rejected(zip, /invalid ZIP64 record size/);
+      });
+    });
+  });
+
   it('computes standard CRC-32 values', () => {
     expect(crc32(0, Uint8Array.from('123456789', (c) => c.charCodeAt(0)))).toBe(0xcbf43926);
   });

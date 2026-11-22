@@ -128,7 +128,10 @@ A Series is never presented as complete when images of it may be missing.
 
 - **ZIP archives are all or nothing.** An entry that inflates beyond its
   declared size, overlapping entries, traversal/absolute/drive paths,
-  encrypted or split archives and damaged ZIP64 records reject the archive.
+  encrypted, signed or split archives, damaged ZIP64 records and end records
+  that do not describe the central directory exactly (contradictory entry
+  counts, records or bytes beyond the declared entries, a gap before the end
+  record) reject the archive.
   So does any entry that may be an image but cannot be read or checked: a
   bad CRC-32 or damaged deflate data, an unsupported compression method or
   link, an entry above the size limit, a duplicate path, an archive inside

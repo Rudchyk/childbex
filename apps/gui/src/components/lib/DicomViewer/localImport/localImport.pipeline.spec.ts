@@ -435,6 +435,26 @@ describe('importLocalDicom', () => {
       expect(result.failedArchives[1].message).toMatch(/encrypted/i);
     });
 
+    it('rejects an archive whose end record omits entries, never a partial Series', async () => {
+      const zip = buildZip([
+        { name: 'S/IM1', data: slice(`${STUDY_1}.1`, 1) },
+        { name: 'S/IM2', data: slice(`${STUDY_1}.1`, 2) },
+      ]);
+      // Only the entry counts of the end record say 1 (directory intact).
+      const end = new DataView(zip.buffer, zip.byteOffset + zip.length - 22, 22);
+      end.setUint16(8, 1, true);
+      end.setUint16(10, 1, true);
+
+      const result = await run(pickFiles({ 'loose-IM': slice(`${STUDY_2}.1`, 1), 'study.zip': zip }));
+
+      expect(result.failedArchives.map((a) => a.path)).toEqual(['study.zip']);
+      expect(result.failedArchives[0].message).toMatch(/more records than declared/);
+      expect(summary(result).series).toEqual([
+        { study: STUDY_2, series: `${STUDY_2}.1`, instances: [`${STUDY_2}.1.1`] },
+      ]);
+      expect(result.incompleteSources).toEqual([{ source: '', count: 1 }]);
+    });
+
     describe('no partial Series from an archive with an unreadable entry', () => {
       const valid = (n: number) => ({ name: `S/IM${n}`, data: slice(`${STUDY_1}.1`, n) });
 
