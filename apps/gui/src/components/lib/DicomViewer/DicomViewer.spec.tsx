@@ -43,6 +43,8 @@ let mockImage: unknown;
 let mockViewLayers: unknown[] | undefined;
 /** The view layer `jumpTo` moves (undefined: nothing to show yet). */
 let mockActiveViewLayer: unknown;
+/** dwv's active layer group, when a test needs more than `jumpTo`. */
+let mockLayerGroup: unknown;
 const mockSetCurrentIndex = jest.fn();
 /** A volume of single-frame slices (dwv's slice count and total size). */
 const mockImageWithSlices = (count: number) => ({
@@ -72,6 +74,8 @@ let mockToolsProps: {
   isLoadSuccessful: boolean;
   onClean?: () => void;
   canClean?: boolean;
+  onReset: () => void;
+  onActualPixels: () => void;
 } | null = null;
 
 jest.mock('dwv', () => ({
@@ -91,10 +95,11 @@ jest.mock('dwv', () => ({
     getStyle: () => mockStyle,
     setTool: mockSetTool,
     setToolFeatures: mockSetToolFeatures,
-    getActiveLayerGroup: () => ({
-      setActiveLayer: jest.fn(),
-      getActiveViewLayer: () => mockActiveViewLayer,
-    }),
+    getActiveLayerGroup: () =>
+      mockLayerGroup ?? {
+        setActiveLayer: jest.fn(),
+        getActiveViewLayer: () => mockActiveViewLayer,
+      },
     getMetaData: () => mockMeta,
     getData: (dataId: string) =>
       mockRemovedIds.has(`${dataId}`) ? undefined : { image: mockImage },
@@ -113,7 +118,14 @@ jest.mock('dwv', () => ({
   ) {
     this.values = values;
   }),
-  Point2D: jest.fn(),
+  Point2D: jest.fn().mockImplementation(function (
+    this: { getX: () => number; getY: () => number },
+    x: number,
+    y: number
+  ) {
+    this.getX = () => x;
+    this.getY = () => y;
+  }),
   custom: {},
 }));
 jest.mock('./DicomViewerTools', () => ({
@@ -182,6 +194,7 @@ beforeEach(() => {
     },
   ];
   mockActiveViewLayer = undefined;
+  mockLayerGroup = undefined;
   mockToolsProps = null;
   mockDropboxProps = null;
   mockSidebarProps = null;
@@ -1488,8 +1501,8 @@ describe('DicomViewer', () => {
         expect(container.style.height).toBe('1200px');
         expect(container.style.transform).toBe('scale(0.5)');
         expect(mockFitToContainer).toHaveBeenCalledTimes(fits + 1);
-        // dwv keeps zoom/pan relative to the fit: nothing resets them, the
-        // tool, the drawings or the loaded data.
+        // An untouched (fitted) view follows the viewport; nothing resets
+        // zoom/pan, the tool, the drawings or the loaded data.
         expect(mockResetZoomPan).not.toHaveBeenCalled();
         expect(mockReset).not.toHaveBeenCalled();
         expect(mockAbortAllLoads).not.toHaveBeenCalled();
@@ -1500,6 +1513,132 @@ describe('DicomViewer', () => {
       } finally {
         delete (window as { ResizeObserver?: unknown }).ResizeObserver;
       }
+    });
+
+    /**
+     * The user's zoom/pan on resize (`DicomViewer.refit` has the geometry).
+     * dwv's layer group reports zoom and pan changes (`zoomchange`,
+     * `offsetchange`), as dwv forwards them to the App; its fit changes
+     * the plane units per canvas pixel (`unitsPerPixel`).
+     */
+    describe('zoom and pan set by the user', () => {
+      let resize: () => void = () => undefined;
+      const view = { unitsPerPixel: 1 };
+      const emit = (type: string) => mockListeners[type]?.({ type });
+      const point = (x: number, y: number) => ({ getX: () => x, getY: () => y });
+      const createLayerGroup = () => {
+        const viewController = {
+          getImageSize: () => ({ get: () => 512 }),
+          get2DSpacing: () => ({ x: 1, y: 1 }),
+          getPlanePositionFromPlanePoint: jest.fn(() => ({})),
+          getOffset3DFromPlaneOffset: ({ x, y }: { x: number; y: number }) => ({
+            getX: () => x,
+            getY: () => y,
+            getZ: () => 0,
+          }),
+        };
+        const toPlane = (p: { getX(): number; getY(): number }) =>
+          point(p.getX() * view.unitsPerPixel, p.getY() * view.unitsPerPixel);
+        const layer = {
+          getViewController: () => viewController,
+          displayToPlaneScale: toPlane,
+          displayToPlanePos: toPlane,
+          displayToMainPlanePos: toPlane,
+        };
+        return {
+          setActiveLayer: jest.fn(),
+          getActiveViewLayer: () => undefined,
+          getBaseViewLayer: () => layer,
+          getScale: () => ({ x: 2, y: 2, z: 2 }),
+          setScale: jest.fn(() => emit('zoomchange')),
+          addScale: jest.fn(() => emit('zoomchange')),
+          addTranslation: jest.fn(() => emit('offsetchange')),
+          draw: jest.fn(),
+        };
+      };
+      let group: ReturnType<typeof createLayerGroup>;
+      /** The viewer showing a stack in an 800 x 600 viewport. */
+      const openStack = async () => {
+        render(<DicomViewer list={urls} />);
+        await waitFor(() => expect(mockLoadURLs).toHaveBeenCalledTimes(1));
+        act(() => mockListeners.loadend({ dataid: '0' }));
+      };
+      /** The viewport gets wider (a panel collapsed); dwv's fit grows. */
+      const widen = () => {
+        mockFitToContainer.mockImplementationOnce(() => {
+          view.unitsPerPixel = 0.8;
+        });
+        sizeViewport(1000, 600);
+        resize();
+      };
+
+      beforeEach(() => {
+        view.unitsPerPixel = 1;
+        group = createLayerGroup();
+        mockLayerGroup = group;
+        (window as { ResizeObserver?: unknown }).ResizeObserver = jest
+          .fn()
+          .mockImplementation((callback: () => void) => {
+            resize = () => act(() => callback());
+            return { observe: jest.fn(), disconnect: jest.fn() };
+          });
+        sizeViewport(800, 600);
+      });
+      afterEach(() => {
+        delete (window as { ResizeObserver?: unknown }).ResizeObserver;
+      });
+
+      it('keeps their magnification and centre, without a reload or reset', async () => {
+        await openStack();
+        const toolCalls = mockSetTool.mock.calls.length;
+        const fits = mockFitToContainer.mock.calls.length;
+        act(() => emit('zoomchange')); // e.g. the wheel or the Zoom tool
+
+        widen();
+
+        expect(mockFitToContainer).toHaveBeenCalledTimes(fits + 1);
+        // dwv's fit grew by 1 / 0.8: the zoom relative to it shrinks by 0.8.
+        expect(group.setScale).toHaveBeenCalledWith({ x: 1.6, y: 1.6, z: 1.6 });
+        // The image point at the old centre (400, 300 at 1 unit/pixel) is
+        // panned to the new one: by what is there now (500, 300 at 0.8
+        // units/pixel, i.e. 400, 240) minus it.
+        expect(group.addTranslation).toHaveBeenCalledWith({ x: 0, y: -60, z: 0 });
+        expect(group.draw).toHaveBeenCalled();
+        expect(mockResetZoomPan).not.toHaveBeenCalled();
+        expect(mockReset).not.toHaveBeenCalled();
+        expect(mockSetTool).toHaveBeenCalledTimes(toolCalls);
+        expect(mockLoadURLs).toHaveBeenCalledTimes(1);
+        expect(jest.requireMock('dwv').App).toHaveBeenCalledTimes(1);
+      });
+
+      it('keeps "Actual pixels" (1:1) across the resize', async () => {
+        jest.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(800);
+        jest.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600);
+        await openStack();
+        act(() => mockToolsProps?.onActualPixels());
+        // 512 image pixels in 600 canvas pixels: zoom 512 / 600 of the fit.
+        expect(group.addScale).toHaveBeenCalledWith(512 / 600 - 1, expect.anything());
+
+        widen();
+
+        expect(group.setScale).toHaveBeenCalledTimes(1);
+        expect(group.addTranslation).toHaveBeenCalledTimes(1);
+      });
+
+      it('lets a fitted view (untouched, or after Reset) follow the viewport', async () => {
+        await openStack();
+        act(() => emit('offsetchange')); // panned...
+        mockResetZoomPan.mockImplementationOnce(() => {
+          emit('zoomchange');
+          emit('offsetchange');
+        });
+        act(() => mockToolsProps?.onReset()); // ...and reset
+
+        widen();
+
+        expect(group.setScale).not.toHaveBeenCalled();
+        expect(group.addTranslation).not.toHaveBeenCalled();
+      });
     });
 
     it('keeps CSS pixels on standard displays and with touch input', () => {

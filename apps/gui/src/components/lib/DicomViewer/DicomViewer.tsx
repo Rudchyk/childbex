@@ -59,6 +59,7 @@ import {
   hiDpiLayout,
   type HiDpiLayout,
 } from './DicomViewer.display';
+import { refitKeepingView, type ContainerSize } from './DicomViewer.refit';
 
 /** What a custom slice list gets from the viewer. */
 export interface DicomViewerSidebarRenderProps {
@@ -360,6 +361,13 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   const activeDataIdRef = useRef<string | undefined>(undefined);
   const isCleanRef = useRef(isClean);
   isCleanRef.current = isClean;
+  /**
+   * Whether the view is dwv's fit (it follows the viewport when resized),
+   * or zoom/pan the user set (kept on resize: `refitKeepingView`).
+   */
+  const followsFitRef = useRef(true);
+  /** Container size dwv was last fitted to (none: not fitted yet). */
+  const fittedSizeRef = useRef<ContainerSize | null>(null);
   /** The default image list (standalone viewer): expanded or collapsed. */
   const [isImageListExpanded, setIsImageListExpanded] = useState(true);
   const toggleImageList = useCallback(() => setIsImageListExpanded((value) => !value), []);
@@ -398,6 +406,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   const onReset = () => {
     if (appRef.current) {
       appRef.current.resetZoomPan();
+      followsFitRef.current = true;
     }
   };
   /** One image pixel per device pixel, centred ("Actual pixels" 1:1). */
@@ -453,6 +462,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     activeDataIdRef.current = REPLACED_LOAD;
     forgetLoad();
     if (appRef.current) releaseDwvData(appRef.current);
+    followsFitRef.current = true;
     setLoadAccount(null);
     setItems([]);
     setSliceCount(0);
@@ -532,9 +542,20 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     };
   }, []);
 
-  // dwv reads the container size when it fits: refit after a change.
+  // dwv reads the container size when it fits: refit after a change. The
+  // fit follows the viewport; zoom/pan the user set (e.g. "Actual pixels")
+  // keeps its magnification and centre.
   useEffect(() => {
-    if (layout && isDataLoaded) appRef.current?.fitToContainer();
+    const app = appRef.current;
+    if (!isDataLoaded) fittedSizeRef.current = null;
+    if (!layout || !isDataLoaded || !app) return;
+    const previous = fittedSizeRef.current;
+    const next = { width: layout.width, height: layout.height };
+    fittedSizeRef.current = next;
+    // (dwv's fit emits no zoom/pan events; keeping the view does, but only
+    // runs once the view no longer follows the fit.)
+    if (followsFitRef.current || !previous) app.fitToContainer();
+    else refitKeepingView(app, previous, next);
   }, [layout, isDataLoaded]);
 
   useEffect(() => {
@@ -596,6 +617,8 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       if (shownDataIdRef.current === dataId) return true;
 
       shownDataIdRef.current = dataId;
+      // dwv shows a new stack fitted.
+      followsFitRef.current = true;
       setLoadStateError(null);
       const canScroll = vc.canScroll();
       if (vc.isMonochrome()) setCanWindowLevel(true);
@@ -751,8 +774,15 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     app.addEventListener('keydown', (event: KeyboardEvent) => {
       if (isMountedRef.current) app.defaultOnKeydown(event);
     });
-
-    window.addEventListener('resize', app.onResize);
+    // Zoom or pan by a tool (or "Actual pixels"): kept on resize.
+    const onViewChange = () => {
+      followsFitRef.current = false;
+    };
+    app.addEventListener('zoomchange', onViewChange);
+    app.addEventListener('offsetchange', onViewChange);
+    // No `app.onResize` on window resizes: the viewport's resize (window
+    // resizes included) refits through the layout above, which keeps the
+    // user's zoom/pan.
 
     if (list?.length) {
       Promise.resolve(getRequestHeaders?.() ?? {}).then((headers) => {
@@ -773,7 +803,6 @@ export const DicomViewer: FC<DicomViewerProps> = ({
 
     return () => {
       isMountedRef.current = false;
-      window.removeEventListener('resize', app.onResize);
       // Requests still in flight belong to this viewer only (e.g. the
       // previous Series): stop them before the next viewer loads, and free
       // the decoded data.
