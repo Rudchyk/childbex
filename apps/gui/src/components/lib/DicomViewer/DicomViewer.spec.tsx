@@ -5,7 +5,7 @@
  * ratio. dwv itself (canvas rendering) is replaced by a fake App.
  */
 import { useState } from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { DicomViewer } from './DicomViewer';
 
 const mockLoadURLs = jest.fn();
@@ -16,6 +16,13 @@ const mockSetToolFeatures = jest.fn();
 const mockFitToContainer = jest.fn();
 const mockResetZoomPan = jest.fn();
 const mockDefaultOnKeydown = jest.fn();
+/** dwv's data storage: ids of the data it holds, and removed ones. */
+let mockDataIds = new Set<string>();
+let mockRemovedIds = new Set<string>();
+const mockAbortLoad = jest.fn((dataId: string) => {
+  mockDataIds.delete(dataId);
+  mockRemovedIds.add(dataId);
+});
 /** Listeners the viewer registered on the (fake) dwv App, by event. */
 const mockListeners: Record<string, (event: unknown) => void> = {};
 /** dwv's draw style (the parts the viewer adapts). */
@@ -37,10 +44,23 @@ let mockViewLayers: unknown[] | undefined;
 /** The view layer `jumpTo` moves (undefined: nothing to show yet). */
 let mockActiveViewLayer: unknown;
 const mockSetCurrentIndex = jest.fn();
+/** A volume of single-frame slices (dwv's slice count and total size). */
 const mockImageWithSlices = (count: number) => ({
-  getGeometry: () => ({ getSize: () => ({ get: () => count }) }),
+  getGeometry: () => ({ getSize: () => ({ get: () => count, getTotalSize: () => count }) }),
   getImageUid: (index: { values: number[] }) => `uid-${index.values[2]}`,
 });
+/**
+ * Animation frames the viewer requested: run explicitly (`runFrames`), so
+ * tests see exactly how many reconciliations it makes.
+ */
+let mockFrames = new Map<number, FrameRequestCallback>();
+let mockFrameId = 0;
+const runFrames = () =>
+  act(() => {
+    const frames = [...mockFrames.values()];
+    mockFrames.clear();
+    frames.forEach((frame) => frame(0));
+  });
 /** A loaded item's DICOM elements: its SOP Instance UID. */
 const sopUid = (uid: string) => ({ '00080018': { value: [uid] } });
 let mockAppOptions: { tools?: Record<string, { options?: string[] }> } = {};
@@ -50,6 +70,8 @@ let mockToolsProps: {
   calibration?: { kind: string };
   isDataLoaded: boolean;
   isLoadSuccessful: boolean;
+  onClean?: () => void;
+  canClean?: boolean;
 } | null = null;
 
 jest.mock('dwv', () => ({
@@ -74,7 +96,10 @@ jest.mock('dwv', () => ({
       getActiveViewLayer: () => mockActiveViewLayer,
     }),
     getMetaData: () => mockMeta,
-    getData: () => ({ image: mockImage }),
+    getData: (dataId: string) =>
+      mockRemovedIds.has(`${dataId}`) ? undefined : { image: mockImage },
+    getDataIds: () => [...mockDataIds],
+    abortLoad: mockAbortLoad,
     getViewLayersByDataId: () => mockViewLayers,
   })),
   AppOptions: jest.fn().mockImplementation(() => {
@@ -101,7 +126,15 @@ jest.mock('./DicomViewerSidebar', () => ({
   DicomViewerSidebar: () => <div data-testid="default-sidebar" />,
 }));
 jest.mock('./DicomViewerFooter', () => ({ DicomViewerFooter: () => null }));
-jest.mock('./DicomViewerDropbox', () => ({ DicomViewerDropbox: () => null }));
+/** The local import's props (last render). */
+let mockDropboxProps: { isShow: boolean; onLoadFiles: (files: File[]) => void } | null =
+  null;
+jest.mock('./DicomViewerDropbox', () => ({
+  DicomViewerDropbox: (props: NonNullable<typeof mockDropboxProps>) => {
+    mockDropboxProps = props;
+    return null;
+  },
+}));
 
 const urls = [
   '/api/v1/patients/p1/images/i1/file',
@@ -125,6 +158,8 @@ const setPixelRatio = (ratio: number, coarse = false) => {
 beforeEach(() => {
   jest.clearAllMocks();
   mockMeta = {};
+  mockDataIds = new Set();
+  mockRemovedIds = new Set();
   mockImage = mockImageWithSlices(1);
   mockViewLayers = [
     {
@@ -137,6 +172,15 @@ beforeEach(() => {
   ];
   mockActiveViewLayer = undefined;
   mockToolsProps = null;
+  mockDropboxProps = null;
+  mockFrames = new Map();
+  window.requestAnimationFrame = jest.fn((frame: FrameRequestCallback) => {
+    mockFrames.set(++mockFrameId, frame);
+    return mockFrameId;
+  });
+  window.cancelAnimationFrame = jest.fn((id: number) => {
+    mockFrames.delete(id);
+  });
   setPixelRatio(1);
 });
 
@@ -187,11 +231,13 @@ describe('DicomViewer', () => {
     await waitFor(() => expect(mockLoadURLs).toHaveBeenCalledTimes(1));
     expect(onLoadResult).not.toHaveBeenCalled();
 
-    act(() => mockListeners.loaderror({ error: new Error('404') }));
+    act(() => mockListeners.error({ error: new Error('404') }));
+    runFrames();
 
     expect(onLoadResult).toHaveBeenLastCalledWith({
       sliceCount: 0,
       errorCount: 1,
+      metadataErrorCount: 0,
       loadedSources: [],
     });
   });
@@ -222,6 +268,7 @@ describe('DicomViewer', () => {
         expect(onLoadResult).toHaveBeenLastCalledWith({
           sliceCount: 0,
           errorCount: 1,
+          metadataErrorCount: 0,
           loadedSources: [],
         });
       }
@@ -236,7 +283,7 @@ describe('DicomViewer', () => {
       mockViewLayers = [];
       mockAbortAllLoads.mockImplementationOnce(() => {
         mockListeners.loadend({ dataid: '0' });
-        mockListeners.loadabort({ error: new Error('cancelled') });
+        mockListeners.abort({ error: new Error('cancelled') });
       });
       unmount();
 
@@ -259,7 +306,7 @@ describe('DicomViewer', () => {
       // drive the (reset) dwv app and its global label template.
       act(() => {
         mockListeners.loadend({ dataid: '0' });
-        mockListeners.loadabort({ error: new Error('cancelled') });
+        mockListeners.abort({ error: new Error('cancelled') });
         mockListeners.load({});
         mockListeners.keydown(new KeyboardEvent('keydown', { key: 'ArrowUp' }));
       });
@@ -274,13 +321,13 @@ describe('DicomViewer', () => {
     it('reports a failed stack when every image failed before loadend', () => {
       const onLoadResult = jest.fn();
       render(<DicomViewer list={urls} onLoadResult={onLoadResult} />);
-      // dwv: each failed request is a loaderror; loadend follows once all
+      // dwv: each failed request is an `error` event; loadend follows once all
       // requests ended, with no image decoded and so no view layer.
       mockImage = undefined;
       mockViewLayers = [];
       act(() => {
-        mockListeners.loaderror({ error: new Error('503') });
-        mockListeners.loaderror({ error: new Error('503') });
+        mockListeners.error({ error: new Error('503') });
+        mockListeners.error({ error: new Error('503') });
         mockListeners.loadend({ dataid: '0' });
       });
 
@@ -292,6 +339,7 @@ describe('DicomViewer', () => {
       expect(onLoadResult).toHaveBeenLastCalledWith({
         sliceCount: 0,
         errorCount: 3,
+        metadataErrorCount: 0,
         loadedSources: [],
       });
     });
@@ -314,6 +362,7 @@ describe('DicomViewer', () => {
       expect(onLoadResult).toHaveBeenLastCalledWith({
         sliceCount: 2,
         errorCount: 0,
+        metadataErrorCount: 0,
         loadedSources: [urls[0], urls[1]],
       });
     });
@@ -325,7 +374,7 @@ describe('DicomViewer', () => {
       mockImage = mockImageWithSlices(1);
       act(() => {
         mockListeners.loaditem({ source: urls[0], data: sopUid('uid-0') });
-        mockListeners.loaderror({ error: new Error('503') });
+        mockListeners.error({ error: new Error('503') });
         mockListeners.loadend({ dataid: '0' });
       });
 
@@ -335,6 +384,7 @@ describe('DicomViewer', () => {
       expect(onLoadResult).toHaveBeenLastCalledWith({
         sliceCount: 1,
         errorCount: 1,
+        metadataErrorCount: 0,
         loadedSources: [urls[0]],
       });
     });
@@ -343,14 +393,12 @@ describe('DicomViewer', () => {
   describe('the slice on screen and the loaded volume', () => {
     /** A volume of two slices whose order differs from the list order. */
     const loadTwoSlices = () => {
-      mockImage = {
-        getGeometry: () => ({ getSize: () => ({ get: () => 2 }) }),
-        getImageUid: (index: { values: number[] }) => `uid-${index.values[2]}`,
-      };
+      mockImage = mockImageWithSlices(2);
       act(() => {
         mockListeners.loaditem({ source: urls[0], data: sopUid('uid-1') });
         mockListeners.loaditem({ source: urls[1], data: sopUid('uid-0') });
       });
+      runFrames();
     };
 
     it('reports which list entries the loaded slices are', () => {
@@ -362,6 +410,7 @@ describe('DicomViewer', () => {
       expect(onLoadResult).toHaveBeenLastCalledWith({
         sliceCount: 2,
         errorCount: 0,
+        metadataErrorCount: 0,
         loadedSources: [urls[1], urls[0]],
       });
     });
@@ -463,6 +512,618 @@ describe('DicomViewer', () => {
 
     expect(getRequestHeaders).not.toHaveBeenCalled();
     expect(mockLoadURLs).not.toHaveBeenCalled();
+  });
+
+  describe('local import (standalone viewer only)', () => {
+    it('is offered by the standalone viewer and hands one Series to dwv', async () => {
+      render(<DicomViewer isClean />);
+      await act(async () => undefined);
+      expect(mockDropboxProps?.isShow).toBe(true);
+
+      const files = [new File([new Uint8Array(4)], 'IM1')];
+      act(() => mockDropboxProps?.onLoadFiles(files));
+
+      const app = (jest.requireMock('dwv').App as jest.Mock).mock.results[0].value;
+      expect(app.loadFiles).toHaveBeenCalledWith(files);
+      // Hidden while dwv loads (Clean shows it again).
+      expect(mockDropboxProps?.isShow).toBe(false);
+    });
+
+    it('is never offered by the Series review viewer', async () => {
+      render(<DicomViewer list={urls} />);
+      await act(async () => undefined);
+      expect(mockDropboxProps?.isShow).toBe(false);
+    });
+
+    it('is not offered outside the standalone viewer, even without a list', async () => {
+      render(<DicomViewer />);
+      await act(async () => undefined);
+      expect(mockDropboxProps?.isShow).toBe(false);
+    });
+
+    describe('failed and partial loads', () => {
+      const appOf = () => (jest.requireMock('dwv').App as jest.Mock).mock.results[0].value;
+      const filesOf = (count: number) =>
+        Array.from({ length: count }, (_, i) => new File([new Uint8Array(4)], `IM${i + 1}`));
+      /** Slice list the viewer hands to a custom sidebar (last render). */
+      let sidebarItems: { imageUid: string }[] = [];
+      /** The slice on screen as the sidebar gets it (last render). */
+      let sidebarCurrent: string | undefined;
+      /** Standalone viewer with one local stack handed to dwv. */
+      const openStack = async (count = 3, dataid = '1') => {
+        render(
+          <DicomViewer
+            isClean
+            renderSidebar={({ items, currentImageId }) => {
+              sidebarItems = items;
+              sidebarCurrent = currentImageId;
+              return null;
+            }}
+          />
+        );
+        await act(async () => undefined);
+        const files = filesOf(count);
+        act(() => {
+          mockDropboxProps?.onLoadFiles(files);
+          mockListeners.loadstart({ dataid });
+        });
+        return files;
+      };
+      /**
+       * dwv 0.35 for an input it stored (`loaditem`, then `dataadd` for the
+       * first slice or `dataupdate` once appended) or rejected (`loaditem`,
+       * then `error` with that file as source: nothing stored).
+       */
+      const added = (dataid: string, file: File, uid: string, first = false) => {
+        mockListeners.loaditem({ dataid, source: file, data: sopUid(uid) });
+        mockDataIds.add(dataid);
+        mockListeners[first ? 'dataadd' : 'dataupdate']({ dataid });
+      };
+      const rejected = (dataid: string, file: File, uid: string, message: string) => {
+        mockListeners.loaditem({ dataid, source: file, data: sopUid(uid) });
+        mockListeners.error({ dataid, source: file, error: new Error(message) });
+      };
+
+      beforeEach(() => {
+        sidebarItems = [];
+      });
+
+      it('returns to the imported Series list when no image could be shown', async () => {
+        const files = await openStack(2);
+        mockImage = undefined;
+        act(() => {
+          rejected('1', files[0], 'uid-a', 'decode');
+          rejected('1', files[1], 'uid-b', 'decode');
+          mockListeners.loadend({ dataid: '1' });
+        });
+
+        expect(screen.getByText(/DICOM image stack could not be displayed/)).toBeTruthy();
+        expect(mockDropboxProps?.isShow).toBe(true);
+        expect(mockToolsProps?.isLoadSuccessful).toBe(false);
+      });
+
+      it('reports a load dwv gave up as a whole (error without a source)', async () => {
+        await openStack(3);
+        mockImage = undefined;
+        act(() => {
+          mockListeners.error({ dataid: '1', error: new Error('No loader found') });
+          mockListeners.loadend({ dataid: '1' });
+        });
+
+        expect(screen.getByText(/DICOM image stack could not be displayed/)).toBeTruthy();
+        expect(mockDropboxProps?.isShow).toBe(true);
+      });
+
+      it.each(['error', 'abort'])(
+        'enables Clean after %s even without a loaded stack, and Clean shows the list',
+        async (eventName) => {
+          const files = await openStack();
+          expect(mockToolsProps?.canClean).toBe(false);
+
+          act(() => mockListeners[eventName]({ dataid: '1', source: files[0] }));
+          runFrames();
+          expect(mockToolsProps?.canClean).toBe(true);
+          expect(mockDropboxProps?.isShow).toBe(false);
+
+          act(() => mockToolsProps?.onClean?.());
+          expect(mockAbortAllLoads).toHaveBeenCalled();
+          expect(mockReset).toHaveBeenCalled();
+          expect(mockDropboxProps?.isShow).toBe(true);
+          expect(mockToolsProps?.canClean).toBe(false);
+        }
+      );
+
+      // The order recorded from dwv 0.35.1's own loaders (synthetic slices,
+      // the second with another row count): dwv reports the end of the
+      // rejected file twice, so its overall loadend comes before the third
+      // file was processed, which is appended afterwards.
+      it('follows the slices dwv appends after its early loadend', async () => {
+        const files = await openStack(3);
+        mockImage = mockImageWithSlices(1);
+        act(() => {
+          added('1', files[0], 'uid-0', true);
+          rejected('1', files[1], 'uid-x', 'Cannot append a slice with different number of rows');
+          mockListeners.loadend({ dataid: '1' });
+        });
+
+        // Not (yet) reported as complete, nor as the final count.
+        expect(screen.getByTestId('local-load-pending').textContent).toMatch(
+          /Still adding images: 2 of 3 files processed \(1 image shown so far\)/
+        );
+        expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
+        expect(sidebarItems.map((i) => i.imageUid)).toEqual(['uid-0']);
+
+        mockImage = mockImageWithSlices(2);
+        act(() => added('1', files[2], 'uid-1'));
+        runFrames();
+
+        expect(screen.queryByTestId('local-load-pending')).toBeNull();
+        expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
+          /1 of 3 files could not be added, so this is not the complete Series \(2 images shown\)/
+        );
+        // Slice navigation and the sidebar follow the actual volume.
+        expect(sidebarItems.map((i) => i.imageUid)).toEqual(['uid-0', 'uid-1']);
+        expect(mockToolsProps?.isLoadSuccessful).toBe(false);
+        expect(mockToolsProps?.canClean).toBe(true);
+      });
+
+      it('shows a stack whose first slice dwv adds only after its early loadend', async () => {
+        const files = await openStack(3);
+        mockImage = undefined;
+        act(() => {
+          rejected('1', files[0], 'uid-x', 'damaged');
+          mockListeners.loadend({ dataid: '1' });
+        });
+        // Not a failure yet: two files are still being read.
+        expect(screen.queryByText(/could not be displayed/)).toBeNull();
+        expect(mockDropboxProps?.isShow).toBe(false);
+        expect(screen.getByTestId('local-load-pending')).toBeTruthy();
+
+        mockImage = mockImageWithSlices(1);
+        act(() => added('1', files[1], 'uid-0', true));
+        runFrames();
+        mockImage = mockImageWithSlices(2);
+        act(() => added('1', files[2], 'uid-1'));
+        runFrames();
+
+        expect(mockToolsProps?.isDataLoaded).toBe(true);
+        expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
+          /1 of 3 files could not be added.*\(2 images shown\)/
+        );
+        expect(sidebarItems).toHaveLength(2);
+      });
+
+      it('reports a complete stack without a warning', async () => {
+        const files = await openStack(2);
+        mockImage = mockImageWithSlices(2);
+        act(() => {
+          added('1', files[0], 'uid-0', true);
+          added('1', files[1], 'uid-1');
+          mockListeners.load({ dataid: '1' });
+          mockListeners.loadend({ dataid: '1' });
+        });
+        expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
+        expect(screen.queryByTestId('local-load-pending')).toBeNull();
+        expect(mockToolsProps?.isLoadSuccessful).toBe(true);
+      });
+
+      it('removes the previous stack first and ignores its late events', async () => {
+        const files = await openStack(3, '1');
+        act(() => added('1', files[0], 'uid-0', true));
+        const app = appOf();
+        mockReset.mockClear();
+        mockAbortAllLoads.mockClear();
+
+        act(() => {
+          mockDropboxProps?.onLoadFiles(filesOf(2));
+          mockListeners.loadstart({ dataid: '2' });
+        });
+        expect(mockAbortAllLoads).toHaveBeenCalledTimes(1);
+        // Its data is removed from dwv, not only from the display.
+        expect(mockAbortLoad).toHaveBeenCalledWith('1');
+        expect(mockReset).toHaveBeenCalledTimes(1);
+        expect(app.loadFiles).toHaveBeenCalledTimes(2);
+
+        // The replaced load reports late (dwv cannot update removed data).
+        act(() => {
+          mockListeners.loaditem({ dataid: '1', source: files[1], data: sopUid('uid-old') });
+          mockListeners.error({
+            dataid: '1',
+            source: files[1],
+            error: new Error('Cannot find data to update: 1'),
+          });
+          mockListeners.abort({ dataid: '1' });
+          mockListeners.loadend({ dataid: '1' });
+        });
+        expect(screen.queryByText(/could not be displayed/)).toBeNull();
+        expect(mockToolsProps?.canClean).toBe(false);
+        expect(mockDropboxProps?.isShow).toBe(false);
+
+        mockImage = mockImageWithSlices(2);
+        const next = filesOf(2);
+        act(() => {
+          added('2', next[0], 'uid-0', true);
+          added('2', next[1], 'uid-1');
+          mockListeners.load({ dataid: '2' });
+          mockListeners.loadend({ dataid: '2' });
+        });
+        expect(mockToolsProps?.isLoadSuccessful).toBe(true);
+        expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
+        expect(sidebarItems.map((i) => i.imageUid)).toEqual(['uid-0', 'uid-1']);
+      });
+
+      it('cleans a stack whose load still has pending slices after an early loadend', async () => {
+        const files = await openStack(3, '1');
+        act(() => {
+          added('1', files[0], 'uid-0', true);
+          rejected('1', files[1], 'uid-x', 'different orientation');
+          mockListeners.loadend({ dataid: '1' });
+        });
+
+        act(() => mockToolsProps?.onClean?.());
+        expect(mockAbortLoad).toHaveBeenCalledWith('1');
+        expect(mockDataIds.size).toBe(0);
+        expect(mockDropboxProps?.isShow).toBe(true);
+
+        // dwv still reads the third file: it cannot reach the cleaned viewer.
+        act(() => {
+          mockListeners.loaditem({ dataid: '1', source: files[2], data: sopUid('uid-1') });
+          mockListeners.error({
+            dataid: '1',
+            source: files[2],
+            error: new Error('Cannot find data to update: 1'),
+          });
+        });
+        runFrames();
+        expect(screen.queryByTestId('local-load-pending')).toBeNull();
+        expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
+        expect(mockToolsProps?.isDataLoaded).toBe(false);
+        expect(mockToolsProps?.canClean).toBe(false);
+        expect(mockDropboxProps?.isShow).toBe(true);
+      });
+
+      it('keeps no earlier Series in dwv when switching repeatedly', async () => {
+        await openStack(1, '0');
+        /** Opens Series `n` (the first one is already handed to dwv). */
+        const openSeries = (n: number) => {
+          const [file] = filesOf(1);
+          if (n > 0) {
+            mockDropboxProps?.onLoadFiles([file]);
+            mockListeners.loadstart({ dataid: `${n}` });
+          }
+          added(`${n}`, file, `uid-${n}`, true);
+          mockListeners.loadend({ dataid: `${n}` });
+        };
+        for (let n = 0; n < 5; n++) {
+          act(() => openSeries(n));
+          // Only the Series on screen is held.
+          expect([...mockDataIds]).toEqual([`${n}`]);
+        }
+        expect(mockAbortLoad.mock.calls.map(([id]) => id)).toEqual(['0', '1', '2', '3']);
+      });
+
+      it('frees the shown Series when the viewer is removed', async () => {
+        const files = await openStack(1, '1');
+        act(() => {
+          added('1', files[0], 'uid-0', true);
+          mockListeners.loadend({ dataid: '1' });
+        });
+        cleanup();
+        expect(mockAbortLoad).toHaveBeenCalledWith('1');
+        expect(mockDataIds.size).toBe(0);
+      });
+
+      it('ignores events the aborted load emits synchronously while being removed', async () => {
+        await openStack(3, '1');
+        mockAbortAllLoads.mockImplementationOnce(() => {
+          mockListeners.abort({ dataid: '1' });
+          mockListeners.loadend({ dataid: '1' });
+        });
+        mockImage = undefined;
+        act(() => mockToolsProps?.onClean?.());
+
+        expect(screen.queryByText(/could not be displayed/)).toBeNull();
+        expect(mockDropboxProps?.isShow).toBe(true);
+        expect(mockToolsProps?.canClean).toBe(false);
+      });
+
+      it('shows the list again when dwv refuses the files', async () => {
+        render(<DicomViewer isClean />);
+        await act(async () => undefined);
+        appOf().loadFiles.mockImplementationOnce(() => {
+          throw new Error('No loader found');
+        });
+
+        act(() => mockDropboxProps?.onLoadFiles(filesOf(1)));
+
+        expect(screen.getByText(/could not be displayed. Choose another Series/)).toBeTruthy();
+        expect(mockDropboxProps?.isShow).toBe(true);
+      });
+
+      /**
+       * dwv 0.35 with an image that grows as it stores slices: a metadata
+       * merge failure (duplicate or missing Instance Numbers) comes after
+       * the slice was appended, as an `error` instead of `dataupdate`.
+       */
+      describe('images dwv stored, and errors after storing them', () => {
+        let slices = 0;
+        const getImageUid = jest.fn((index: { values: number[] }) => `uid-${index.values[2]}`);
+        const store = (dataid: string, file: File, mergeError?: string) => {
+          mockListeners.loaditem({ dataid, source: file, data: sopUid(`uid-${slices}`) });
+          slices++;
+          mockDataIds.add(dataid);
+          if (mergeError) {
+            mockListeners.error({ dataid, source: file, error: new Error(mergeError) });
+          } else {
+            mockListeners[slices === 1 ? 'dataadd' : 'dataupdate']({ dataid });
+          }
+        };
+        const shownErrors = () =>
+          (mockToolsProps as unknown as { loadErrorEvents: object[] }).loadErrorEvents;
+
+        beforeEach(() => {
+          slices = 0;
+          getImageUid.mockClear();
+          mockImage = {
+            getGeometry: () => ({
+              getSize: () => ({ get: () => slices, getTotalSize: () => slices }),
+            }),
+            getImageUid,
+          };
+        });
+
+        it.each([
+          // As recorded from dwv 0.35.1 for Instance Numbers 1,1,2,2.
+          [
+            'duplicate Instance Numbers',
+            ['', 'Cannot merge object with same ids: 1, id2: 1', '', 'The first object already contains id2: 2, id1: 1,2'],
+            2,
+          ],
+          // And for four slices without Instance Numbers.
+          ['missing Instance Numbers', ['', ...Array(3).fill('Cannot merge object with same ids: , id2: ')], 3],
+        ])(
+          'shows every stored image and reports %s as metadata errors, not missing images',
+          async (_, mergeErrors, metadataFiles) => {
+            const files = await openStack(4);
+            act(() => {
+              files.forEach((file, i) => store('1', file, mergeErrors[i] || undefined));
+              mockListeners.loadend({ dataid: '1' });
+            });
+
+            expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
+            expect(screen.queryByTestId('local-load-pending')).toBeNull();
+            expect(screen.getByTestId('local-load-metadata-errors').textContent).toMatch(
+              new RegExp(`the images of ${metadataFiles} files were added and are shown`)
+            );
+            // dwv's actual image: 4 slices, all in the slice list.
+            expect(sidebarItems).toHaveLength(4);
+            // The errors are kept and reported, never a successful load.
+            expect(shownErrors()).toHaveLength(metadataFiles);
+            expect(shownErrors()[0]).toMatchObject({ category: 'metadata' });
+            expect(mockToolsProps?.isLoadSuccessful).toBe(false);
+          }
+        );
+
+        it('reports missing images and metadata errors separately', async () => {
+          const files = await openStack(4);
+          act(() => {
+            store('1', files[0]);
+            store('1', files[1], 'Cannot merge object with same ids: 1, id2: 1');
+            rejected('1', files[2], 'uid-x', 'Cannot append a slice with different number of rows');
+            mockListeners.loadend({ dataid: '1' });
+          });
+          act(() => store('1', files[3]));
+          runFrames();
+
+          expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
+            /1 of 4 files could not be added.*\(3 images shown\)/
+          );
+          expect(screen.getByTestId('local-load-metadata-errors').textContent).toMatch(
+            /the images of 1 file were added/
+          );
+        });
+
+        it('counts a file with several errors once', async () => {
+          const files = await openStack(3);
+          act(() => {
+            store('1', files[0]);
+            rejected('1', files[1], 'uid-x', 'Cannot append a slice with different number of rows');
+            mockListeners.error({ dataid: '1', source: files[1], error: new Error('again') });
+            mockListeners.loadend({ dataid: '1' });
+          });
+          // Two errors, but the third file is still being added.
+          expect(screen.getByTestId('local-load-pending').textContent).toMatch(
+            /2 of 3 files processed/
+          );
+
+          act(() => store('1', files[2]));
+          runFrames();
+          expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
+            /1 of 3 files could not be added/
+          );
+        });
+
+        it('names failed inputs by position, never by URL (token, patient ids)', async () => {
+          const signed = [
+            '/api/v1/patients/p1/images/i1/file?token=secret',
+            '/api/v1/patients/p1/images/i2/file?token=secret',
+          ];
+          render(<DicomViewer list={signed} />);
+          await waitFor(() => expect(mockLoadURLs).toHaveBeenCalledTimes(1));
+          act(() => {
+            mockListeners.loadstart({ dataid: '0' });
+            mockListeners.error({
+              dataid: '0',
+              source: signed[1],
+              error: `GET https://host${signed[1]} 503 (Service Unavailable)`,
+            });
+          });
+          runFrames();
+          expect(shownErrors()).toEqual([
+            expect.objectContaining({ source: 'Input 2 of 2', detail: 'HTTP 503.' }),
+          ]);
+          expect(JSON.stringify(shownErrors())).not.toMatch(/token|secret|patients|p1/);
+        });
+
+        it('ignores progress of a load that was cleaned or replaced', async () => {
+          await openStack(3, '1');
+          const progressBars = () => screen.queryAllByRole('progressbar');
+          act(() => mockListeners.loadprogress({ dataid: '1', loaded: 40 }));
+          expect(progressBars()).toHaveLength(1);
+
+          // dwv still reads files it no longer tracks after an early loadend.
+          act(() => mockToolsProps?.onClean?.());
+          act(() => mockListeners.loadprogress({ dataid: '1', loaded: 60 }));
+          expect(progressBars()).toHaveLength(0);
+
+          act(() => {
+            mockDropboxProps?.onLoadFiles(filesOf(2));
+            mockListeners.loadstart({ dataid: '2' });
+            mockListeners.loadprogress({ dataid: '1', loaded: 80 });
+          });
+          expect(progressBars()).toHaveLength(0);
+          act(() => mockListeners.loadprogress({ dataid: '2', loaded: 50 }));
+          expect(progressBars()).toHaveLength(1);
+        });
+
+        it('ignores a position change between Clean and the next load', async () => {
+          const files = await openStack(1, '1');
+          act(() => {
+            store('1', files[0]);
+            mockListeners.loadend({ dataid: '1' });
+          });
+          act(() => mockListeners.positionchange({ data: { imageUid: 'uid-0' } }));
+          expect(sidebarCurrent).toBe('uid-0');
+
+          act(() => mockToolsProps?.onClean?.());
+          act(() => mockListeners.positionchange({ data: { imageUid: 'uid-0' } }));
+          expect(sidebarCurrent).toBeUndefined();
+
+          // The next load's slices are followed again.
+          const next = filesOf(1);
+          act(() => {
+            mockDropboxProps?.onLoadFiles(next);
+            mockListeners.loadstart({ dataid: '2' });
+            mockListeners.positionchange({ data: { imageUid: 'uid-0' } });
+          });
+          expect(sidebarCurrent).toBe('uid-0');
+        });
+
+        it('never shows the patient values of dwv error messages', async () => {
+          const files = await openStack(2);
+          act(() => {
+            store('1', files[0]);
+            rejected(
+              '1',
+              files[1],
+              'uid-x',
+              'Cannot append a slice with different PatientName: SYNTHETIC^ALICE != SYNTHETIC^BOB'
+            );
+            mockListeners.loadend({ dataid: '1' });
+          });
+          const shown = JSON.stringify(shownErrors());
+          expect(shown).toContain('Different PatientName (values not shown).');
+          expect(shown).not.toMatch(/ALICE|BOB/);
+          expect(document.body.textContent).not.toMatch(/ALICE|BOB/);
+        });
+
+        it('reports metadata errors to the Series review (never a complete load)', () => {
+          const onLoadResult = jest.fn();
+          render(<DicomViewer list={urls} onLoadResult={onLoadResult} />);
+          act(() => {
+            mockListeners.loadstart({ dataid: '0' });
+            store('0', urls[0] as unknown as File);
+            store('0', urls[1] as unknown as File, 'Cannot merge object with same ids: 1, id2: 1');
+            mockListeners.loadend({ dataid: '0' });
+          });
+          expect(onLoadResult).toHaveBeenLastCalledWith({
+            sliceCount: 2,
+            errorCount: 1,
+            metadataErrorCount: 1,
+            loadedSources: urls,
+          });
+        });
+
+        describe('slices dwv adds after its early loadend', () => {
+          /** 1 stored slice, 1 rejected, dwv's early loadend; `count` files. */
+          const startLargeStack = async (count: number) => {
+            const files = await openStack(count);
+            act(() => {
+              store('1', files[0]);
+              rejected('1', files[1], 'uid-x', 'Cannot append a slice with different number of rows');
+              mockListeners.loadend({ dataid: '1' });
+            });
+            return files;
+          };
+
+          it('re-reads the stack once per frame, however many slices arrive', async () => {
+            const files = await startLargeStack(302);
+            getImageUid.mockClear();
+            const frames = (window.requestAnimationFrame as jest.Mock).mock.calls.length;
+
+            act(() => files.slice(2).forEach((file) => store('1', file)));
+            // 300 slices stored: one frame requested, nothing re-read yet.
+            expect((window.requestAnimationFrame as jest.Mock).mock.calls.length).toBe(frames + 1);
+            expect(getImageUid).not.toHaveBeenCalled();
+
+            runFrames();
+            // One reconciliation: every slice UID read once.
+            expect(getImageUid).toHaveBeenCalledTimes(301);
+            expect(sidebarItems).toHaveLength(301);
+            expect(screen.getByTestId('local-load-incomplete').textContent).toMatch(
+              /1 of 302 files could not be added.*\(301 images shown\)/
+            );
+          });
+
+          it('shows the final stack when the last slices come in a later frame', async () => {
+            const files = await startLargeStack(6);
+            act(() => store('1', files[2]));
+            runFrames();
+            expect(screen.getByTestId('local-load-pending')).toBeTruthy();
+
+            act(() => files.slice(3).forEach((file) => store('1', file)));
+            runFrames();
+            expect(screen.queryByTestId('local-load-pending')).toBeNull();
+            expect(sidebarItems).toHaveLength(5);
+            expect(mockFrames.size).toBe(0);
+          });
+
+          it.each(['Clean', 'replacing the Series', 'unmount'])(
+            'drops a scheduled update on %s; a late frame changes nothing',
+            async (action) => {
+              const files = await startLargeStack(4);
+              act(() => store('1', files[2]));
+              const scheduled = [...mockFrames.values()];
+              expect(scheduled).toHaveLength(1);
+              expect(sidebarItems).toHaveLength(1);
+
+              if (action === 'Clean') act(() => mockToolsProps?.onClean?.());
+              if (action === 'replacing the Series') {
+                act(() => {
+                  mockDropboxProps?.onLoadFiles(filesOf(2));
+                  mockListeners.loadstart({ dataid: '2' });
+                });
+              }
+              if (action === 'unmount') cleanup();
+              expect(window.cancelAnimationFrame).toHaveBeenCalled();
+              expect(mockFrames.size).toBe(0);
+              // Its data is gone from dwv (no frame keeps it).
+              expect(mockDataIds.has('1')).toBe(false);
+
+              getImageUid.mockClear();
+              act(() => scheduled.forEach((frame) => frame(0)));
+              expect(getImageUid).not.toHaveBeenCalled();
+              if (action !== 'unmount') {
+                expect(sidebarItems).toEqual([]);
+                expect(mockToolsProps?.isDataLoaded).toBe(false);
+                expect(screen.queryByTestId('local-load-pending')).toBeNull();
+                expect(screen.queryByTestId('local-load-incomplete')).toBeNull();
+              }
+            }
+          );
+        });
+      });
+    });
   });
 
   describe('measurements', () => {

@@ -207,8 +207,10 @@ export const sliceLabel = (
 const showsExactly = (
   result: DicomLoadResult | undefined,
   presentedSources: string[]
-) => {
-  if (!result || result.errorCount !== 0) return false;
+) => !!result && result.errorCount === 0 && showsAllImages(result, presentedSources);
+
+/** Every presented file once and nothing else, whatever errors came. */
+const showsAllImages = (result: DicomLoadResult, presentedSources: string[]) => {
   const loaded = new Set(result.loadedSources);
   return (
     result.sliceCount === presentedSources.length &&
@@ -265,13 +267,22 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
   );
   const [loadResult, setLoadResult] = useState<DicomLoadResult>();
   const fullyLoaded = showsExactly(loadResult, Object.keys(itemsMapping));
+  // Still not complete (no review without intact DICOM details), but not
+  // reported as missing images either.
+  const onlyMetadataErrors =
+    !!loadResult &&
+    loadResult.metadataErrorCount > 0 &&
+    loadResult.errorCount === loadResult.metadataErrorCount &&
+    showsAllImages(loadResult, Object.keys(itemsMapping));
   const disabledReason = !presented.length
     ? 'No images to review'
     : !loadResult
       ? 'Waiting until every image of the series is loaded'
-      : !fullyLoaded
-        ? 'Not every image of the series could be shown'
-        : undefined;
+      : onlyMetadataErrors
+        ? 'Every image is shown, but DICOM metadata errors were reported (e.g. duplicate or missing Instance Numbers)'
+        : !fullyLoaded
+          ? 'Not every image of the series could be shown'
+          : undefined;
   // Only an image of this Series, at a known position in the loaded volume:
   // the header, the vote form and the vote request all use this one image.
   const currentImage = active.source ? itemsMapping[active.source] : undefined;
