@@ -42,6 +42,13 @@ for name in "${HOOKS[@]}"; do
   elif [[ ! -e "$dst" ]]; then
     echo "PENDING: $name is not yet installed"
   else
+    if [[ "$DEST_DIR" == /etc/letsencrypt/renewal-hooks/deploy ]]; then
+      owner_mode="$(stat -c '%a %U:%G' "$dst")"
+      if [[ "$owner_mode" != "755 root:root" ]]; then
+        echo "ERROR: $name has unexpected owner or permissions ($owner_mode)" >&2
+        failed=1
+      fi
+    fi
     echo "OK: $name matches repository"
   fi
 done
