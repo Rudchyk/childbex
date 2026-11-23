@@ -159,8 +159,18 @@ export interface SkippedFile {
   reason: SkipReason;
 }
 
+/**
+ * An archive that was not opened. It is shown by `index` and `format`, never
+ * by name: file and entry names may identify the patient.
+ */
 export interface FailedArchive {
+  /** Where it was found: flags the Series of its source; not shown. */
   path: string;
+  /** Position among the archives found (1-based). */
+  index: number;
+  /** `ZIP`, `TAR.GZ`, `GZIP`… */
+  format: string;
+  /** Static text without file or entry names. */
   message: string;
 }
 

@@ -275,16 +275,28 @@ const entryRejections: Partial<Record<SkipReason, string>> = {
 /**
  * One entry that may hide an image could not be read: the archive is
  * rejected as a whole, so no Series from it appears complete when it is not.
+ * The message never names the entry (names may identify the patient).
  */
-const rejectArchive = (entryPath: string, reason: SkipReason) =>
+const rejectArchive = (reason: SkipReason) =>
   new LocalImportError(
     reason === 'nested-archive' || reason === 'unsupported-entry' || reason === 'too-large'
       ? 'UNSUPPORTED_ARCHIVE'
       : 'CORRUPT_ARCHIVE',
-    `"${entryPath}" ${entryRejections[reason] ?? 'could not be read'}. Nothing from this ` +
-      'archive was imported, so that no Series from it appears complete when images are ' +
-      'missing. Extract the archive and choose the folder to see the readable files.'
+    `An entry of this archive ${entryRejections[reason] ?? 'could not be read'}. Nothing ` +
+      'from this archive was imported, so that no Series from it appears complete when ' +
+      'images are missing. Extract the archive and choose the folder to see the readable files.'
   );
+
+/**
+ * Whether a skipped archive entry rejects its archive. System files and
+ * DICOMDIR are ignored when they cannot be read, but links, devices, FIFOs
+ * and other unsupported entries reject the archive whatever their name.
+ */
+const rejectsArchive = (reason: SkipReason, segments: readonly string[]) =>
+  reason === 'unsupported-entry' ||
+  (MISSING_IMAGE_REASONS.includes(reason) &&
+    !isSystemPath(segments) &&
+    !isDicomDirName(segments[segments.length - 1] ?? ''));
 
 const SUPPORTED_ARCHIVES = ['.zip', ...TAR_EXTENSIONS].join(', ');
 
@@ -432,9 +444,9 @@ export const importLocalDicom = async (
     source: string,
     budgetBefore: number
   ) => {
-    if (isArchiveKind(await sniff(blob))) throw rejectArchive(entryPath, 'nested-archive');
+    if (isArchiveKind(await sniff(blob))) throw rejectArchive('nested-archive');
     const reason = await checkCandidate(path, blob, baseName(entryPath), source);
-    if (reason && MISSING_IMAGE_REASONS.includes(reason)) throw rejectArchive(entryPath, reason);
+    if (reason && MISSING_IMAGE_REASONS.includes(reason)) throw rejectArchive(reason);
     // Only kept files stay in memory.
     if (reason) budget.remainingBytes = budgetBefore;
   };
@@ -446,14 +458,12 @@ export const importLocalDicom = async (
     source: string,
     index: number
   ) => {
-    const isIgnored = (entry: ZipEntry) =>
-      isSystemPath(entry.segments) || isDicomDirName(baseName(entry.path));
     // Entries that cannot be read reject the archive before anything is
     // extracted (they may be images of a Series found in it).
     const unreadable = entries.find(
-      (e) => e.skipReason && !isIgnored(e) && MISSING_IMAGE_REASONS.includes(e.skipReason)
+      (e) => e.skipReason && rejectsArchive(e.skipReason, e.segments)
     );
-    if (unreadable?.skipReason) throw rejectArchive(unreadable.path, unreadable.skipReason);
+    if (unreadable?.skipReason) throw rejectArchive(unreadable.skipReason);
 
     const extractable = entries.filter((e) => !e.skipReason);
     const declared = extractable
@@ -497,7 +507,7 @@ export const importLocalDicom = async (
             reportArchive(index, 'ZIP', ((doneBefore + read) / totalCompressed) * 100),
         });
       } catch (error) {
-        if (error instanceof ZipEntryDamagedError) throw rejectArchive(entry.path, 'corrupt-entry');
+        if (error instanceof ZipEntryDamagedError) throw rejectArchive('corrupt-entry');
         throw error;
       } finally {
         compressedDone += entry.compressedSize;
@@ -527,11 +537,8 @@ export const importLocalDicom = async (
       throwIfCancelled(signal);
       await countFile();
       const path = uniquePath(`${archivePath}/${entry.path}`);
-      const isIgnored = isSystemPath(entry.segments) || isDicomDirName(baseName(entry.path));
       if (entry.skipReason) {
-        if (!isIgnored && MISSING_IMAGE_REASONS.includes(entry.skipReason)) {
-          throw rejectArchive(entry.path, entry.skipReason);
-        }
+        if (rejectsArchive(entry.skipReason, entry.segments)) throw rejectArchive(entry.skipReason);
         skip(path, entry.skipReason);
         continue;
       }
@@ -546,7 +553,7 @@ export const importLocalDicom = async (
       // Only the head is read first: other files are skipped without being
       // copied out of a compressed archive.
       const kind = sniffContent(await entry.head(SNIFF_BYTES));
-      if (isArchiveKind(kind)) throw rejectArchive(entry.path, 'nested-archive');
+      if (isArchiveKind(kind)) throw rejectArchive('nested-archive');
       if (kind !== 'dicom') {
         skip(path, 'not-dicom');
         continue;
@@ -593,7 +600,7 @@ export const importLocalDicom = async (
       for (const added of archiveAdded.paths) usedPaths.delete(added);
       budget.remainingBytes = before.budget;
       Object.assign(progress, before.progress);
-      failedArchives.push({ path, message: error.message });
+      failedArchives.push({ path, index, format: formatLabel(format), message: error.message });
     } finally {
       archiveAdded = undefined;
       progress.archive = undefined;
@@ -633,7 +640,12 @@ export const importLocalDicom = async (
       if (kind === TAR_SIGNATURES[tarFormat]) {
         await importArchive(path, file, source, tarFormat);
       } else {
-        failedArchives.push({ path, message: tarMismatchError(file.name, kind).message });
+        failedArchives.push({
+          path,
+          index: ++archiveCount,
+          format: formatLabel(tarFormat),
+          message: tarMismatchError(file.name, kind).message,
+        });
       }
       progress.filesChecked++;
       report();
@@ -641,7 +653,12 @@ export const importLocalDicom = async (
       await importArchive(path, file, source, 'zip');
       progress.filesChecked++;
     } else if (isArchiveKind(kind)) {
-      failedArchives.push({ path, message: unnamedArchiveError().message });
+      failedArchives.push({
+        path,
+        index: ++archiveCount,
+        format: kind.toUpperCase(),
+        message: unnamedArchiveError().message,
+      });
       progress.filesChecked++;
       report();
     } else if (kind === 'other') {

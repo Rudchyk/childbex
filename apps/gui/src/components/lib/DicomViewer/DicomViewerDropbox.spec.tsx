@@ -168,8 +168,30 @@ describe('DicomViewerDropbox', () => {
     choose(filesInput(), [
       fileOf(buildTar([{ name: 'IM1', data: slice('1', 1) }]), 'study.tar.xz'),
     ]);
-    expect(await screen.findByText('study.tar.xz could not be opened')).toBeTruthy();
+    expect(await screen.findByText('Archive 1 (TAR.XZ) could not be opened')).toBeTruthy();
     expect(screen.getByText(/does not match the archive content/)).toBeTruthy();
+  });
+
+  it('names failed archives by position and format, never by file or entry name', async () => {
+    // Synthetic names shaped like patient identifiers.
+    const phi = 'DOE^JANE_MRN-0042';
+    render(<DicomViewerDropbox isShow onLoadFiles={jest.fn()} />);
+    choose(filesInput(), [
+      fileOf(buildZip([{ name: `${phi}/IM1`, data: slice('1', 1), crc: 42 }]), `${phi}.zip`),
+      fileOf(
+        gzipSync(buildTar([{ name: `${phi}/IM1`, type: '2', linkName: `${phi}/IM2` }])),
+        `${phi}.tar.gz`
+      ),
+      fileOf(buildTar([{ name: 'IM1', data: slice('1', 1) }]), `${phi}.tar.xz`),
+    ]);
+
+    const alerts = await screen.findAllByTestId('local-import-failed-archive');
+    expect(alerts.map((a) => a.querySelector('.MuiAlertTitle-root')?.textContent)).toEqual([
+      'Archive 1 (ZIP) could not be opened',
+      'Archive 2 (TAR.GZ) could not be opened',
+      'Archive 3 (TAR.XZ) could not be opened',
+    ]);
+    for (const alert of alerts) expect(alert.textContent).not.toMatch(/DOE|JANE|MRN|0042/);
   });
 
   it('cancels a running .tar.xz import and retries it', async () => {
@@ -214,7 +236,7 @@ describe('DicomViewerDropbox', () => {
     choose(filesInput(), [
       fileOf(buildZip([{ name: 'IM1', data: slice('1', 1), flags: 1 }]), 'locked.zip'),
     ]);
-    expect(await screen.findByText('locked.zip could not be opened')).toBeTruthy();
+    expect(await screen.findByText('Archive 1 (ZIP) could not be opened')).toBeTruthy();
     expect(screen.getByText(/encrypted/)).toBeTruthy();
   });
 
@@ -285,7 +307,7 @@ describe('DicomViewerDropbox', () => {
       ),
     ]);
 
-    expect(await screen.findByText('study.zip could not be opened')).toBeTruthy();
+    expect(await screen.findByText('Archive 1 (ZIP) could not be opened')).toBeTruthy();
     expect(screen.queryAllByTestId('local-import-series')).toHaveLength(0);
     expect(screen.getByText(/No DICOM images that can be displayed/)).toBeTruthy();
     expect(onLoadFiles).not.toHaveBeenCalled();

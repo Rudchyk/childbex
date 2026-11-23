@@ -476,7 +476,7 @@ describe('importLocalDicom', () => {
       const valid = (n: number) => ({ name: `S/IM${n}`, data: slice(`${STUDY_1}.1`, n) });
 
       it.each([
-        ['a damaged entry (CRC-32)', { name: 'S/IM9', data: slice(`${STUDY_1}.1`, 9), crc: 42 }, /"S\/IM9" is damaged/],
+        ['a damaged entry (CRC-32)', { name: 'S/IM9', data: slice(`${STUDY_1}.1`, 9), crc: 42 }, /An entry of this archive is damaged \(size or CRC-32/],
         ['an archive inside the archive', { name: 'S/inner.zip', data: zipOf({ IM1: slice(`${STUDY_2}.1`, 1) }) }, /archive inside the archive/],
         ['an unsupported compression method', { name: 'S/IM9', data: slice(`${STUDY_1}.1`, 9), method: 12 }, /unsupported compression/],
         ['a damaged DICOM file', { name: 'S/IM9', data: new Uint8Array([...syntheticDicom().slice(0, 140), 0xff, 0xff, 0xff]) }, /damaged DICOM file/],
@@ -512,7 +512,7 @@ describe('importLocalDicom', () => {
           pickFiles({ 'study.zip': buildZip([valid(1), { name: 'S/big', data: new Uint8Array(2048) }]) }),
           { limits: { maxFileBytes: 1024 } }
         );
-        expect(result.failedArchives[0].message).toMatch(/"S\/big" is above the size limit/);
+        expect(result.failedArchives[0].message).toMatch(/An entry of this archive is above the size limit/);
         expect(result.series).toEqual([]);
       });
 
@@ -978,6 +978,170 @@ describe('importLocalDicom: TAR-family archives', () => {
       expect(result.failedArchives).toEqual([]);
       expect(result.instanceCount).toBe(1);
       expect(result.series[0].warnings).toEqual([]);
+    });
+
+    describe('links and special files are rejected whatever their name', () => {
+      const named: [string, TarFixtureEntry][] = [
+        [
+          'a symbolic link named like macOS metadata',
+          { name: '__MACOSX/S/._IM1', type: '2', linkName: 'x' },
+        ],
+        ['a hard link named .DS_Store', { name: 'S/.DS_Store', type: '1', linkName: 'S/IM1' }],
+        ['a FIFO named DICOMDIR', { name: 'DICOMDIR', type: '6' }],
+        ['a character device named Thumbs.db', { name: 'S/Thumbs.db', type: '3' }],
+        ['a block device named DICOMDIR', { name: 'S/DICOMDIR', type: '4' }],
+      ];
+
+      describe.each(formats)('%s', (name, encode) => {
+        it.each(named)('rejects the archive for %s', async (_label, bad) => {
+          const result = await run(
+            pickFiles({
+              'loose-IM': slice(`${STUDY_2}.1`, 1),
+              [name]: encode(buildTar([valid(1), bad, valid(2)])),
+            })
+          );
+          expect(result.failedArchives.map((a) => a.path)).toEqual([name]);
+          expect(result.failedArchives[0].message).toMatch(/is a link or special file/);
+          expect(result.instanceCount).toBe(1);
+          expect(result.skipped).toEqual([]);
+          expect(result.series[0].warnings).toEqual(['source-incomplete']);
+        });
+      });
+
+      it.each([
+        [
+          'a symbolic link named like macOS metadata',
+          { name: '__MACOSX/S/._IM1', data: text('x'), unixMode: 0o120777 },
+        ],
+        [
+          'a symbolic link named DICOMDIR',
+          { name: 'S/DICOMDIR', data: text('IM1'), unixMode: 0o120777 },
+        ],
+        ['a FIFO named .DS_Store', { name: '.DS_Store', unixMode: 0o010644 }],
+        [
+          'an unsupported compression method on .DS_Store',
+          { name: '.DS_Store', data: text('x'), method: 12 },
+        ],
+      ] as [string, ZipFixtureEntry][])('rejects a ZIP for %s', async (_label, bad) => {
+        const result = await run(pickFiles({ 'study.zip': buildZip([valid(1), bad]) }));
+        expect(result.failedArchives.map((a) => a.path)).toEqual(['study.zip']);
+        expect(result.failedArchives[0].message).toMatch(/is a link or special file/);
+        expect(result.series).toEqual([]);
+      });
+
+      it('still skips ordinary system files and DICOMDIR that cannot be read', async () => {
+        const dicomdir = syntheticDicom({ sopClassUid: MEDIA_STORAGE_DIRECTORY, pixels: false });
+        const entries: TarFixtureEntry[] = [
+          valid(1),
+          { name: 'S/.DS_Store', data: new Uint8Array(2048) },
+          { name: 'DICOMDIR', data: dicomdir },
+          { name: 'DICOMDIR', data: dicomdir },
+          { name: '__MACOSX/S/._IM1', data: text('meta') },
+        ];
+        for (const [name, encode] of formats) {
+          const result = await run(pickFiles({ [name]: encode(buildTar(entries)) }), {
+            limits: { maxFileBytes: 1024 },
+          });
+          expect(result.failedArchives).toEqual([]);
+          expect(result.instanceCount).toBe(1);
+          expect(result.skipped.map((s) => s.reason)).toEqual([
+            'too-large',
+            'dicomdir',
+            'duplicate-path',
+            'system-file',
+          ]);
+          expect(result.series[0].warnings).toEqual([]);
+        }
+      });
+    });
+  });
+
+  describe('failed archives never name a file or entry', () => {
+    // Synthetic names shaped like patient identifiers.
+    const phi = 'DOE^JANE_MRN-0042';
+    const PHI = /DOE|JANE|MRN|0042/;
+    const entry = (data: Uint8Array) => ({ name: `${phi}/${phi}_IM9`, data });
+    const damagedDicom = new Uint8Array([...syntheticDicom().slice(0, 140), 0xff, 0xff, 0xff]);
+    const tarCases: [string, TarFixtureEntry][] = [
+      ['a symbolic link', { name: `${phi}/${phi}_IM9`, type: '2', linkName: `${phi}/IM1` }],
+      ['a nested archive', entry(buildTar([valid(5)]))],
+      ['a damaged DICOM file', entry(damagedDicom)],
+      ['DICOM without UIDs', entry(syntheticDicom({ seriesUid: '' }))],
+      ['a duplicate path', { name: 'S/./IM1', data: tarSlice(`${TAR_STUDY_1}.1`, 9) }],
+      ['an unsafe path', { name: `../${phi}/IM9`, data: tarSlice(`${TAR_STUDY_1}.1`, 9) }],
+      ['a PAX path traversal', { name: 'S/IM9', pax: { path: `${phi}/../../${phi}` } }],
+      ['a control character', { name: `${phi}\u0007/IM9`, data: tarSlice(`${TAR_STUDY_1}.1`, 9) }],
+    ];
+    const zipCases: [string, ZipFixtureEntry][] = [
+      ['a damaged entry (CRC-32)', { ...entry(slice(`${STUDY_1}.1`, 9)), crc: 42 }],
+      ['an entry above the size limit', entry(new Uint8Array(2 * 1024 * 1024))],
+      ['an unsupported compression method', { ...entry(slice(`${STUDY_1}.1`, 9)), method: 12 }],
+      ['a symbolic link', { ...entry(text('IM1')), unixMode: 0o120777 }],
+      ['a ZIP bomb', { ...entry(new Uint8Array(2 * 1024 * 1024)), declaredSize: 100 }],
+      ['an unsafe path', { name: `../${phi}/IM9`, data: slice(`${STUDY_1}.1`, 9) }],
+    ];
+
+    const expectPrivate = (result: LocalImportResult, archiveName: string, format: string) => {
+      expect(result.failedArchives).toHaveLength(1);
+      const [failed] = result.failedArchives;
+      // The path stays internal (incomplete-source flags); the rest is shown.
+      expect(failed.path).toBe(archiveName);
+      expect(failed).toMatchObject({ index: 1, format });
+      expect(failed.message).not.toMatch(PHI);
+      expect(failed.message).not.toMatch(/IM9|IM1/);
+      expect(result.incompleteSources).toEqual([{ source: '', count: 1 }]);
+    };
+
+    describe.each([
+      [`${phi}.tar`, 'TAR', (bytes: Uint8Array) => bytes],
+      [`${phi}.tar.gz`, 'TAR.GZ', (bytes: Uint8Array) => gzipSync(bytes)],
+    ])('%s', (archiveName, format, encode) => {
+      it.each(tarCases)('for %s', async (_label, bad) => {
+        const result = await run(
+          pickFiles({
+            'loose-IM': slice(`${STUDY_2}.1`, 1),
+            [archiveName]: encode(buildTar([valid(1), bad])),
+          })
+        );
+        expectPrivate(result, archiveName, format);
+      });
+    });
+
+    it.each(zipCases)(`${phi}.zip: for %s`, async (_label, bad) => {
+      const result = await run(
+        pickFiles({
+          'loose-IM': slice(`${STUDY_2}.1`, 1),
+          [`${phi}.zip`]: buildZip([{ name: `${phi}/IM1`, data: slice(`${STUDY_1}.1`, 1) }, bad]),
+        }),
+        { limits: { maxFileBytes: 1024 * 1024 } }
+      );
+      expectPrivate(result, `${phi}.zip`, 'ZIP');
+    });
+
+    it.each([
+      [`${phi}.tar.xz`, tar, 'TAR.XZ'],
+      [`${phi}.tar.bz2`, text(phi), 'TAR.BZ2'],
+      [`${phi}.gz`, gzipSync(tar), 'GZIP'],
+      [phi, tar, 'TAR'],
+    ])('%s: for a name that does not match the content', async (archiveName, bytes, format) => {
+      const result = await run(
+        pickFiles({ 'loose-IM': slice(`${STUDY_2}.1`, 1), [archiveName]: bytes })
+      );
+      expectPrivate(result, archiveName, format);
+    });
+
+    it('numbers archives in the order they are found', async () => {
+      const result = await run(
+        pickFiles({
+          [`a-${phi}.zip`]: buildZip([{ ...entry(slice(`${STUDY_1}.1`, 9)), crc: 42 }]),
+          [`b-${phi}.tar.gz`]: gzipSync(tar),
+          [`c-${phi}.tar.bz2`]: text('x'),
+        })
+      );
+      expect(result.failedArchives.map(({ index, format }) => ({ index, format }))).toEqual([
+        { index: 1, format: 'ZIP' },
+        { index: 3, format: 'TAR.BZ2' },
+      ]);
     });
   });
 

@@ -351,6 +351,9 @@ export const parsePaxRecords = (data: Uint8Array): Map<string, string> => {
     const valueBytes = record.subarray(equals + 1);
     // NUL inside a value would end the name early in other tools.
     if (valueBytes.includes(0)) throw unsafe('NUL character in a PAX record');
+    // Tools differ in which of two values they use (first or last): a
+    // repeated key could give this reader and another tool different names.
+    if (records.has(key)) throw unsafe('repeated PAX key');
     records.set(key, utf8(valueBytes));
     offset = end;
   }

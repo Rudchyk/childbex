@@ -131,9 +131,12 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
         </Alert>
       )}
 
+      {/* Archives are named by position and format: file names may identify the patient. */}
       {result.failedArchives.map((archive) => (
-        <Alert severity="error" key={archive.path}>
-          <AlertTitle>{archive.path} could not be opened</AlertTitle>
+        <Alert severity="error" key={archive.index} data-testid="local-import-failed-archive">
+          <AlertTitle>
+            Archive {archive.index} ({archive.format}) could not be opened
+          </AlertTitle>
           {archive.message}
         </Alert>
       ))}

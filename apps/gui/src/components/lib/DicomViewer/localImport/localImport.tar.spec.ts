@@ -353,6 +353,43 @@ describe('readTarEntries', () => {
       expect(size.code).toBe('CORRUPT_ARCHIVE');
     });
 
+    describe('repeated PAX keys', () => {
+      /** A PAX header written verbatim (repeated keys), then the entry. */
+      const withPax = (records: string, entry: TarFixtureEntry) =>
+        new Uint8Array([
+          ...tarEntryBlocks({ name: 'PaxHeader', type: 'x', data: bytesOf(records) }),
+          ...tarWith([entry]),
+        ]);
+
+      it.each([
+        ['path, same value', paxRecord('path', 'S/IM1') + paxRecord('path', 'S/IM1')],
+        ['path, conflicting values', paxRecord('path', 'S/IM1') + paxRecord('path', 'S/IM2')],
+        ['path, safe then unsafe', paxRecord('path', 'S/IM1') + paxRecord('path', '../IM1')],
+        ['size, conflicting values', paxRecord('size', '10') + paxRecord('size', '20')],
+        [
+          'an ordinary key',
+          paxRecord('mtime', '1.5') + paxRecord('path', 'S/IM1') + paxRecord('mtime', '2.5'),
+        ],
+      ])('rejects a repeated key: %s', async (_label, records) => {
+        const error = await listError(withPax(records, { name: 'IM1', data: dicom }));
+        expect(error.code).toBe('UNSAFE_ARCHIVE');
+        expect(error.message).toMatch(/repeated PAX key/);
+        expect(error.message).not.toMatch(/IM1|IM2|path|size|mtime/);
+        expect(() => parsePaxRecords(bytesOf(records))).toThrow(/repeated PAX key/);
+      });
+
+      it('still reads one PAX header with distinct keys, and GNU long names', async () => {
+        const records = paxRecord('path', 'S/IM1') + paxRecord('mtime', '1.5');
+        expect(await list(withPax(records, { name: 'ignored', data: dicom }))).toEqual([
+          { path: 'S/IM1', size: dicom.length, bytes: dicom },
+        ]);
+        const long = `${'folder_'.repeat(20)}/IM1`;
+        expect(await list(tarWith([{ name: 'short', gnuLongName: long, data: dicom }]))).toEqual([
+          { path: long, size: dicom.length, bytes: dicom },
+        ]);
+      });
+    });
+
     it('rejects extended headers without an entry, or two for one entry', async () => {
       const paxHeader = () =>
         tarEntryBlocks({ name: 'x', type: 'x', data: bytesOf(paxRecord('path', 'x')) });

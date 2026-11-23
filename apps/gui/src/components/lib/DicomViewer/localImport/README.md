@@ -184,12 +184,17 @@ does not exist.
   lengths); a NUL in a value is rejected; a PAX `size` replaces the header
   size. A global PAX header (`g`) may carry comments (e.g. `git archive`)
   but not `path`, `linkpath` or `size`. Two PAX headers (or two long
-  names) for one entry, or one without an entry, are rejected.
+  names) for one entry, or one without an entry, are rejected. A key
+  repeated within one PAX header (`path`, `size` or any other, same or
+  different value) rejects the archive as unsafe: tools differ in which
+  value they use, so the name or size read here could differ from another
+  tool's.
 - **Entry types:** regular files (`0`, NUL, `7`) are read; directories
   (`5`, GNU `D`) and GNU volume labels (`V`) are skipped. Hard and symbolic
   links, character and block devices and FIFOs are never followed or
-  created: they reject the archive (unless under an OS metadata path such
-  as `__MACOSX`). GNU sparse files (`S`, `GNU.sparse.*`), multi-volume
+  created: they reject the archive **whatever their name**, also when
+  named like OS metadata (`__MACOSX/…`, `.DS_Store`) or `DICOMDIR`. Only
+  regular files with such names are skipped as junk. GNU sparse files (`S`, `GNU.sparse.*`), multi-volume
   (`M`), non-UTF-8 PAX names and any other type reject the archive as
   unsupported.
 - **Structure:** an archive must end with the end-of-archive marker (one
@@ -208,8 +213,9 @@ does not exist.
 - The browser limits are lower (see the table) and the TAR stream must fit
   in 2 GB after decompression.
 - The server skips links that stay inside the archive; the browser rejects
-  any archive with a link outside OS metadata paths (a link may stand for
-  an image that would then be missing).
+  any archive with a link, whatever its name (a link may stand for an image
+  that would then be missing).
+- A key repeated within one PAX header rejects the archive.
 - The browser requires the end-of-archive marker and zero bytes after it,
   and verifies the gzip trailer of every member.
 - Like the server, xz files with a SHA-256 check or a dictionary above
@@ -242,7 +248,15 @@ A Series is never presented as complete when images of it may be missing.
   archive is kept, even entries extracted before the problem was found
   (instances, SOP Instance UIDs, paths, counters, memory budget), and the
   reason is shown. Other files and archives are not affected. Files that
-  are no images (README, reports, OS metadata) do not reject an archive.
+  are no images (README, reports, OS metadata) do not reject an archive;
+  OS metadata and DICOMDIR files are skipped even when they cannot be read,
+  but a link, device, FIFO or unsupported entry (ZIP: also an unsupported
+  compression method) rejects the archive whatever its name.
+  A rejected archive is shown as "Archive 2 (TAR.GZ) could not be opened"
+  with a static reason: neither the archive's file name nor the name of the
+  entry at fault appears in the message (names may identify the patient).
+  The path is kept internally only, to flag the Series of its folder or
+  selection.
   For a TAR, any damaged, truncated, unsafe or unsupported part (see
   [TAR-family archives](#tar-family-archives)) rejects it the same way.
   A rejected archive keeps no Blob of it: the instances that held them are

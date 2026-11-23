@@ -439,7 +439,7 @@ export const extractZipEntry = async (
       ? new Inflate((data) => {
           produced += data.length;
           if (produced > entry.uncompressedSize) {
-            throw unsafe(`"${entry.path}" expands beyond its declared size, possible ZIP bomb`);
+            throw unsafe('an entry expands beyond its declared size, possible ZIP bomb');
           }
           if (produced > budget.remainingBytes) {
             throw new LocalImportError(
@@ -480,11 +480,11 @@ export const extractZipEntry = async (
     }
   } catch (error) {
     if (error instanceof LocalImportError) throw error;
-    throw new ZipEntryDamagedError(entry.path);
+    throw new ZipEntryDamagedError();
   }
 
   if (produced !== entry.uncompressedSize || crc !== entry.crc32) {
-    throw new ZipEntryDamagedError(entry.path);
+    throw new ZipEntryDamagedError();
   }
   if (!inflate) return archive.slice(dataStart, dataEnd);
   budget.remainingBytes -= produced;
@@ -494,8 +494,9 @@ export const extractZipEntry = async (
 
 /** One entry is damaged (inflate error, size or CRC-32 mismatch). */
 export class ZipEntryDamagedError extends Error {
-  constructor(path: string) {
-    super(`"${path}" is damaged.`);
+  constructor() {
+    // No entry path: names inside an archive may identify the patient.
+    super('An archive entry is damaged.');
     this.name = 'ZipEntryDamagedError';
   }
 }
