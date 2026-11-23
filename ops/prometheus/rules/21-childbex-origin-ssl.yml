@@ -1,0 +1,56 @@
+groups:
+  - name: childbex-origin-ssl
+    rules:
+      - alert: ChildBExOriginSSLExpiresIn30Days
+        expr: |
+          (childbex_origin_ssl_certificate_expiry_timestamp_seconds{job="childbex-node"} - time()) < 30 * 24 * 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "ChildBEx origin SSL expires within 30 days: {{ $labels.certificate }} ({{ $labels.source }})"
+          description: "The origin certificate expires soon. Check Certbot renewal and Nginx, not only the Cloudflare edge certificate."
+
+      - alert: ChildBExOriginSSLExpiresIn7Days
+        expr: |
+          (childbex_origin_ssl_certificate_expiry_timestamp_seconds{job="childbex-node"} - time()) < 7 * 24 * 3600
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ChildBEx origin SSL expires within 7 days: {{ $labels.certificate }} ({{ $labels.source }})"
+          description: "Origin TLS certificate expiry is imminent."
+
+      - alert: ChildBExOriginSSLReadFailed
+        expr: childbex_origin_ssl_certificate_read_success{job="childbex-node"} == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ChildBEx origin SSL collector cannot read {{ $labels.certificate }} ({{ $labels.source }})"
+
+      - alert: ChildBExOriginSSLAuthCopyMismatch
+        expr: childbex_origin_ssl_auth_matches_certbot{job="childbex-node"} == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ChildBEx auth Nginx certificate differs from Certbot certificate"
+
+      - alert: ChildBExOriginSSLCollectorFailed
+        expr: childbex_origin_ssl_collector_success{job="childbex-node"} == 0
+        for: 20m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ChildBEx origin SSL certificate metrics collection failed"
+
+      - alert: ChildBExOriginSSLCollectorStale
+        expr: |
+          (time() - childbex_origin_ssl_collector_last_run_timestamp_seconds{job="childbex-node"} > 2 * 3600)
+          or absent(childbex_origin_ssl_collector_last_run_timestamp_seconds{job="childbex-node"})
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ChildBEx origin SSL certificate metrics are missing or older than 2 hours"
