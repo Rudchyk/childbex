@@ -251,7 +251,10 @@ A Series is never presented as complete when images of it may be missing.
   are no images (README, reports, OS metadata) do not reject an archive;
   OS metadata and DICOMDIR files are skipped even when they cannot be read,
   but a link, device, FIFO or unsupported entry (ZIP: also an unsupported
-  compression method) rejects the archive whatever its name.
+  compression method) rejects the archive whatever its name. In a ZIP the
+  Unix file type is checked before the name: an entry whose name ends in
+  `/` or `\` is skipped as a directory only when it is not a link or
+  special file and holds no data.
   A rejected archive is shown as "Archive 2 (TAR.GZ) could not be opened"
   with a static reason: neither the archive's file name nor the name of the
   entry at fault appears in the message (names may identify the patient).

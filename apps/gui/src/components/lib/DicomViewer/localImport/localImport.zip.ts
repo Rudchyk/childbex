@@ -318,7 +318,18 @@ export const readZipDirectory = async (
     position = next;
     const isDirectoryName = /[\\/]$/.test(rawName);
     const unixType = madeBy >> 8 === HOST_UNIX ? (externalAttributes >>> 16) & S_IFMT : 0;
-    if (isDirectoryName || unixType === S_IFDIR || !segments.length) continue;
+    // The Unix type decides before the name: a link, FIFO or device is
+    // never skipped as a directory because its name ends in a separator.
+    const isSpecialType = unixType !== 0 && unixType !== S_IFREG && unixType !== S_IFDIR;
+    const looksLikeDirectory = isDirectoryName || unixType === S_IFDIR || !segments.length;
+    // A directory holds no data (nothing to decompress): one that does
+    // would hide it behind a directory name.
+    const isEmptyDirectory =
+      looksLikeDirectory &&
+      !isSpecialType &&
+      uncompressedSize === 0 &&
+      (method === METHOD_STORED || method === METHOD_DEFLATE || compressedSize === 0);
+    if (isEmptyDirectory) continue;
     checkPathLimits(segments, limits);
 
     const entry: ZipEntry = {
@@ -331,8 +342,9 @@ export const readZipDirectory = async (
       localHeaderOffset,
       limitOffset: directoryOffset,
     };
-    if (unixType !== 0 && unixType !== S_IFREG) {
-      // Links are never followed; devices and the like are not files.
+    if (isSpecialType || looksLikeDirectory) {
+      // Links are never followed; devices and the like are not files; a
+      // directory with data is neither.
       entry.skipReason = 'unsupported-entry';
     } else if (method !== METHOD_STORED && method !== METHOD_DEFLATE) {
       entry.skipReason = 'unsupported-entry';

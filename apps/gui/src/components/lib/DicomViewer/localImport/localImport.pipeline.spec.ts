@@ -1022,11 +1022,52 @@ describe('importLocalDicom: TAR-family archives', () => {
           'an unsupported compression method on .DS_Store',
           { name: '.DS_Store', data: text('x'), method: 12 },
         ],
+        // Named like a directory (trailing separator): the Unix type decides.
+        [
+          'a symbolic link with a trailing /',
+          { name: 'S/IM9/', data: text('IM1'), unixMode: 0o120777 },
+        ],
+        [
+          'a symbolic link under __MACOSX with a trailing /',
+          { name: '__MACOSX/S/IM9/', data: text('IM1'), unixMode: 0o120777 },
+        ],
+        ['a FIFO with a trailing /', { name: 'S/IM9/', unixMode: 0o010644 }],
+        ['a block device with a trailing \\', { name: 'S/IM9\\', unixMode: 0o060644 }],
+        ['a directory entry holding data', { name: 'S/IM9/', data: slice(`${STUDY_1}.1`, 9) }],
       ] as [string, ZipFixtureEntry][])('rejects a ZIP for %s', async (_label, bad) => {
-        const result = await run(pickFiles({ 'study.zip': buildZip([valid(1), bad]) }));
+        const result = await run(
+          pickFiles({
+            'loose-IM': slice(`${STUDY_2}.1`, 1),
+            'study.zip': buildZip([valid(1), bad, valid(2)]),
+          })
+        );
         expect(result.failedArchives.map((a) => a.path)).toEqual(['study.zip']);
         expect(result.failedArchives[0].message).toMatch(/is a link or special file/);
-        expect(result.series).toEqual([]);
+        // No partial Series from the rejected archive.
+        expect(summary(result).series).toEqual([
+          { study: STUDY_2, series: `${STUDY_2}.1`, instances: [`${STUDY_2}.1.1`] },
+        ]);
+        expect(result.skipped).toEqual([]);
+        expect(result.series[0].warnings).toEqual(['source-incomplete']);
+      });
+
+      it('still opens a ZIP with ordinary directory entries', async () => {
+        const result = await run(
+          pickFiles({
+            'study.zip': buildZip([
+              { name: 'S/' },
+              { name: 'S/sub/', unixMode: 0o040755 },
+              { name: 'T', unixMode: 0o040755 },
+              { name: '__MACOSX/', method: 0 },
+              valid(1),
+              { ...valid(2), name: 'S/sub/IM2' },
+            ]),
+          })
+        );
+        expect(result.failedArchives).toEqual([]);
+        expect(result.instanceCount).toBe(2);
+        expect(result.skipped).toEqual([]);
+        expect(result.series[0].warnings).toEqual([]);
       });
 
       it('still skips ordinary system files and DICOMDIR that cannot be read', async () => {
@@ -1077,6 +1118,11 @@ describe('importLocalDicom: TAR-family archives', () => {
       ['an entry above the size limit', entry(new Uint8Array(2 * 1024 * 1024))],
       ['an unsupported compression method', { ...entry(slice(`${STUDY_1}.1`, 9)), method: 12 }],
       ['a symbolic link', { ...entry(text('IM1')), unixMode: 0o120777 }],
+      [
+        'a symbolic link named like a directory',
+        { name: `${phi}/${phi}_IM9/`, data: text('IM1'), unixMode: 0o120777 },
+      ],
+      ['a FIFO named like a directory', { name: `__MACOSX/${phi}/`, unixMode: 0o010644 }],
       ['a ZIP bomb', { ...entry(new Uint8Array(2 * 1024 * 1024)), declaredSize: 100 }],
       ['an unsafe path', { name: `../${phi}/IM9`, data: slice(`${STUDY_1}.1`, 9) }],
     ];
