@@ -43,6 +43,8 @@ let mockImage: unknown;
 let mockViewLayers: unknown[] | undefined;
 /** The view layer `jumpTo` moves (undefined: nothing to show yet). */
 let mockActiveViewLayer: unknown;
+/** dwv's active layer group, when a test needs more than `jumpTo`. */
+let mockLayerGroup: unknown;
 const mockSetCurrentIndex = jest.fn();
 /** A volume of single-frame slices (dwv's slice count and total size). */
 const mockImageWithSlices = (count: number) => ({
@@ -72,6 +74,8 @@ let mockToolsProps: {
   isLoadSuccessful: boolean;
   onClean?: () => void;
   canClean?: boolean;
+  onReset: () => void;
+  onActualPixels: () => void;
 } | null = null;
 
 jest.mock('dwv', () => ({
@@ -91,10 +95,11 @@ jest.mock('dwv', () => ({
     getStyle: () => mockStyle,
     setTool: mockSetTool,
     setToolFeatures: mockSetToolFeatures,
-    getActiveLayerGroup: () => ({
-      setActiveLayer: jest.fn(),
-      getActiveViewLayer: () => mockActiveViewLayer,
-    }),
+    getActiveLayerGroup: () =>
+      mockLayerGroup ?? {
+        setActiveLayer: jest.fn(),
+        getActiveViewLayer: () => mockActiveViewLayer,
+      },
     getMetaData: () => mockMeta,
     getData: (dataId: string) =>
       mockRemovedIds.has(`${dataId}`) ? undefined : { image: mockImage },
@@ -113,7 +118,14 @@ jest.mock('dwv', () => ({
   ) {
     this.values = values;
   }),
-  Point2D: jest.fn(),
+  Point2D: jest.fn().mockImplementation(function (
+    this: { getX: () => number; getY: () => number },
+    x: number,
+    y: number
+  ) {
+    this.getX = () => x;
+    this.getY = () => y;
+  }),
   custom: {},
 }));
 jest.mock('./DicomViewerTools', () => ({
@@ -122,8 +134,19 @@ jest.mock('./DicomViewerTools', () => ({
     return <div data-testid="viewer-tools" />;
   },
 }));
+/** The default image list's props (last render). */
+let mockSidebarProps: {
+  items: { index: number }[];
+  currentImageId?: string;
+  onJumpTo: (index: number) => void;
+  expanded: boolean;
+  onToggle: () => void;
+} | null = null;
 jest.mock('./DicomViewerSidebar', () => ({
-  DicomViewerSidebar: () => <div data-testid="default-sidebar" />,
+  DicomViewerSidebar: (props: NonNullable<typeof mockSidebarProps>) => {
+    mockSidebarProps = props;
+    return <div data-testid="default-sidebar" data-expanded={props.expanded} />;
+  },
 }));
 jest.mock('./DicomViewerFooter', () => ({ DicomViewerFooter: () => null }));
 /** The local import's props (last render). */
@@ -171,8 +194,10 @@ beforeEach(() => {
     },
   ];
   mockActiveViewLayer = undefined;
+  mockLayerGroup = undefined;
   mockToolsProps = null;
   mockDropboxProps = null;
+  mockSidebarProps = null;
   mockFrames = new Map();
   window.requestAnimationFrame = jest.fn((frame: FrameRequestCallback) => {
     mockFrames.set(++mockFrameId, frame);
@@ -1277,12 +1302,13 @@ describe('DicomViewer', () => {
       expect(mockLoadURLs.mock.calls.length).toBeLessThanOrEqual(1);
     });
 
-    it('without one, the viewport is full width with the default file list (DWV page)', () => {
-      render(<DicomViewer list={urls} />);
+    it('without one and nothing loaded, the viewport is full width (DWV page import)', () => {
+      render(<DicomViewer isClean />);
       expect(flexDirection()).toBe('column');
       expect(getComputedStyle(screen.getByTestId('dicom-viewport')).width).toBe('100%');
-      expect(screen.getByTestId('default-sidebar')).toBeTruthy();
       // No panel slots: the toolbar is centred over the full-width viewport.
+      expect(screen.queryByTestId('default-sidebar')).toBeNull();
+      expect(screen.queryByTestId('dicom-viewer-image-list')).toBeNull();
       expect(screen.queryByTestId('dicom-viewer-leading')).toBeNull();
       expect(screen.queryByTestId('dicom-viewer-sidebar')).toBeNull();
       expect(screen.getByTestId('dicom-viewer-main').contains(screen.getByTestId('viewer-tools'))).toBe(true);
@@ -1305,7 +1331,123 @@ describe('DicomViewer', () => {
       unmount();
 
       render(<DicomViewer list={urls} />);
+      act(() => mockListeners.loadend({ dataid: '0' }));
+      expect(mockSidebarProps).toBeNull();
       expect(screen.queryByTestId('default-sidebar')).toBeNull();
+    });
+  });
+
+  /** The standalone (DWV page) viewer's own image list. */
+  describe('default image list', () => {
+    const appOf = () => (jest.requireMock('dwv').App as jest.Mock).mock.results[0].value;
+    /** Standalone viewer showing a local stack of `count` slices. */
+    const openStack = async (count = 3) => {
+      mockImage = mockImageWithSlices(count);
+      const view = render(<DicomViewer isClean />);
+      await act(async () => undefined);
+      const files = Array.from(
+        { length: count },
+        (_, i) => new File([new Uint8Array(4)], `IM${i + 1}`)
+      );
+      act(() => {
+        mockDropboxProps?.onLoadFiles(files);
+        mockListeners.loadstart({ dataid: '1' });
+        files.forEach((file, i) =>
+          mockListeners.loaditem({ dataid: '1', source: file, data: sopUid(`uid-${i}`) })
+        );
+        mockListeners.loadend({ dataid: '1' });
+      });
+      runFrames();
+      return view;
+    };
+    const toggle = () => act(() => mockSidebarProps?.onToggle());
+    const flexDirection = () =>
+      getComputedStyle(screen.getByTestId('dicom-viewport-row')).flexDirection;
+
+    beforeEach(() => {
+      mockSidebarProps = null;
+    });
+
+    it('sits next to the viewport (in the row, not fixed over the image), expanded', async () => {
+      await openStack();
+      const slot = screen.getByTestId('dicom-viewer-image-list');
+      expect(flexDirection()).toBe('row');
+      expect(screen.getByTestId('dicom-viewport-row').contains(slot)).toBe(true);
+      expect(screen.getByTestId('dicom-viewport').contains(slot)).toBe(false);
+      expect(slot.contains(screen.getByTestId('default-sidebar'))).toBe(true);
+      expect(getComputedStyle(slot).flexShrink).toBe('0');
+      // The viewport's column takes the rest of the row's width.
+      expect(getComputedStyle(screen.getByTestId('dicom-viewer-main')).flexGrow).toBe('1');
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport')).width).toBe('100%');
+      expect([
+        getComputedStyle(screen.getByTestId('dicom-viewer-main')).order,
+        getComputedStyle(slot).order,
+      ]).toEqual(['1', '2']);
+      expect(mockSidebarProps?.expanded).toBe(true);
+      expect(mockSidebarProps?.items.map(({ index }) => index)).toEqual([0, 1, 2]);
+    });
+
+    it('collapses and expands without a new dwv App, load, reset or tool change', async () => {
+      await openStack();
+      const app = appOf();
+      /** dwv calls that would reset or replace what is shown. */
+      const resets = () =>
+        [mockReset, mockAbortAllLoads, mockAbortLoad, mockResetZoomPan, mockSetTool].map(
+          (mock) => mock.mock.calls.length
+        );
+      // Counted after the load (importing removes the previous stack first).
+      const before = resets();
+      const current = mockSidebarProps?.currentImageId;
+      expect(current).toBe('uid-2');
+
+      for (let i = 0; i < 3; i++) {
+        toggle();
+        expect(mockSidebarProps?.expanded).toBe(false);
+        // Still in the row (its compact control), the viewport still beside it.
+        expect(screen.getByTestId('default-sidebar').dataset.expanded).toBe('false');
+        expect(flexDirection()).toBe('row');
+        toggle();
+        expect(mockSidebarProps?.expanded).toBe(true);
+      }
+
+      expect(jest.requireMock('dwv').App).toHaveBeenCalledTimes(1);
+      expect(app.loadFiles).toHaveBeenCalledTimes(1);
+      expect(mockLoadURLs).not.toHaveBeenCalled();
+      expect(resets()).toEqual(before);
+      expect(mockSidebarProps?.currentImageId).toBe(current);
+      expect(mockToolsProps?.isDataLoaded).toBe(true);
+    });
+
+    it('asks dwv for the slice the list jumps to, collapsed in between', async () => {
+      mockActiveViewLayer = {
+        getViewController: () => ({
+          getCurrentIndex: () => ({ getValues: () => [0, 0, 2] }),
+          setCurrentIndex: mockSetCurrentIndex,
+        }),
+      };
+      await openStack();
+      toggle();
+      toggle();
+      act(() => mockSidebarProps?.onJumpTo(1));
+      expect(mockSetCurrentIndex).toHaveBeenCalledTimes(1);
+      expect(mockSetCurrentIndex.mock.calls[0][0].values).toEqual([0, 0, 1]);
+      act(() => mockListeners.positionchange({ data: { imageUid: 'uid-1' } }));
+      expect(mockSidebarProps?.currentImageId).toBe('uid-1');
+    });
+
+    it('is not used by the Series review viewer (custom list)', async () => {
+      render(<DicomViewer list={urls} renderSidebar={() => <div data-testid="custom" />} />);
+      act(() => mockListeners.loadend({ dataid: '0' }));
+      expect(screen.getByTestId('custom')).toBeTruthy();
+      expect(mockSidebarProps).toBeNull();
+      expect(screen.queryByTestId('dicom-viewer-image-list')).toBeNull();
+    });
+
+    it('is gone again after Clean (full-width import)', async () => {
+      await openStack();
+      act(() => mockToolsProps?.onClean?.());
+      expect(screen.queryByTestId('dicom-viewer-image-list')).toBeNull();
+      expect(flexDirection()).toBe('column');
     });
   });
 
@@ -1359,8 +1501,8 @@ describe('DicomViewer', () => {
         expect(container.style.height).toBe('1200px');
         expect(container.style.transform).toBe('scale(0.5)');
         expect(mockFitToContainer).toHaveBeenCalledTimes(fits + 1);
-        // dwv keeps zoom/pan relative to the fit: nothing resets them, the
-        // tool, the drawings or the loaded data.
+        // An untouched (fitted) view follows the viewport; nothing resets
+        // zoom/pan, the tool, the drawings or the loaded data.
         expect(mockResetZoomPan).not.toHaveBeenCalled();
         expect(mockReset).not.toHaveBeenCalled();
         expect(mockAbortAllLoads).not.toHaveBeenCalled();
@@ -1371,6 +1513,188 @@ describe('DicomViewer', () => {
       } finally {
         delete (window as { ResizeObserver?: unknown }).ResizeObserver;
       }
+    });
+
+    /**
+     * The user's zoom/pan on resize (`DicomViewer.refit` has the geometry).
+     * dwv's layer group reports zoom and pan changes (`zoomchange`,
+     * `offsetchange`), as dwv forwards them to the App; its fit changes
+     * the plane units per canvas pixel (`unitsPerPixel`).
+     */
+    describe('zoom and pan set by the user', () => {
+      let resize: () => void = () => undefined;
+      const view = { unitsPerPixel: 1 };
+      const emit = (type: string) => mockListeners[type]?.({ type });
+      const point = (x: number, y: number) => ({ getX: () => x, getY: () => y });
+      const createLayerGroup = () => {
+        const viewController = {
+          getImageSize: () => ({ get: () => 512 }),
+          get2DSpacing: () => ({ x: 1, y: 1 }),
+          getPlanePositionFromPlanePoint: jest.fn(() => ({})),
+          getOffset3DFromPlaneOffset: ({ x, y }: { x: number; y: number }) => ({
+            getX: () => x,
+            getY: () => y,
+            getZ: () => 0,
+          }),
+        };
+        const toPlane = (p: { getX(): number; getY(): number }) =>
+          point(p.getX() * view.unitsPerPixel, p.getY() * view.unitsPerPixel);
+        const layer = {
+          getViewController: () => viewController,
+          displayToPlaneScale: toPlane,
+          displayToPlanePos: toPlane,
+          displayToMainPlanePos: toPlane,
+        };
+        return {
+          setActiveLayer: jest.fn(),
+          getActiveViewLayer: () => undefined,
+          getBaseViewLayer: () => layer,
+          getScale: () => ({ x: 2, y: 2, z: 2 }),
+          setScale: jest.fn(() => emit('zoomchange')),
+          addScale: jest.fn(() => emit('zoomchange')),
+          addTranslation: jest.fn(() => emit('offsetchange')),
+          draw: jest.fn(),
+        };
+      };
+      let group: ReturnType<typeof createLayerGroup>;
+      const appOf = () => (jest.requireMock('dwv').App as jest.Mock).mock.results[0].value;
+      /** The standalone viewer showing a local stack in an 800 x 600 viewport. */
+      const openStack = async () => {
+        render(<DicomViewer isClean />);
+        await act(async () => undefined);
+        act(() => {
+          mockDropboxProps?.onLoadFiles([new File([new Uint8Array(4)], 'IM1')]);
+          mockListeners.loadstart({ dataid: '1' });
+          mockListeners.loadend({ dataid: '1' });
+        });
+      };
+      /** The Series review viewer (custom panels), same viewport. */
+      const openReview = async () => {
+        render(
+          <DicomViewer
+            list={urls}
+            leadingPanel={<div />}
+            renderSidebar={() => <div />}
+          />
+        );
+        await waitFor(() => expect(mockLoadURLs).toHaveBeenCalledTimes(1));
+        act(() => mockListeners.loadend({ dataid: '0' }));
+      };
+      /** dwv calls that reset, replace or reload what is shown. */
+      const resetsAndLoads = () =>
+        [
+          mockReset,
+          mockAbortAllLoads,
+          mockAbortLoad,
+          mockResetZoomPan,
+          mockSetTool,
+          mockLoadURLs,
+          appOf().loadFiles,
+        ].map((mock: jest.Mock) => mock.mock.calls.length);
+      /** The viewport gets wider (a panel collapsed); dwv's fit grows. */
+      const widen = () => {
+        mockFitToContainer.mockImplementationOnce(() => {
+          view.unitsPerPixel = 0.8;
+        });
+        sizeViewport(1000, 600);
+        resize();
+      };
+
+      beforeEach(() => {
+        view.unitsPerPixel = 1;
+        group = createLayerGroup();
+        mockLayerGroup = group;
+        (window as { ResizeObserver?: unknown }).ResizeObserver = jest
+          .fn()
+          .mockImplementation((callback: () => void) => {
+            resize = () => act(() => callback());
+            return { observe: jest.fn(), disconnect: jest.fn() };
+          });
+        sizeViewport(800, 600);
+      });
+      afterEach(() => {
+        delete (window as { ResizeObserver?: unknown }).ResizeObserver;
+      });
+
+      it('standalone: keeps their magnification and centre, without a reload or reset', async () => {
+        await openStack();
+        // Counted after the load (importing removes the previous stack first).
+        const before = resetsAndLoads();
+        const fits = mockFitToContainer.mock.calls.length;
+        act(() => emit('zoomchange')); // e.g. the wheel or the Zoom tool
+
+        widen();
+
+        expect(mockFitToContainer).toHaveBeenCalledTimes(fits + 1);
+        // dwv's fit grew by 1 / 0.8: the zoom relative to it shrinks by 0.8.
+        expect(group.setScale).toHaveBeenCalledWith({ x: 1.6, y: 1.6, z: 1.6 });
+        // The image point at the old centre (400, 300 at 1 unit/pixel) is
+        // panned to the new one: by what is there now (500, 300 at 0.8
+        // units/pixel, i.e. 400, 240) minus it.
+        expect(group.addTranslation).toHaveBeenCalledWith({ x: 0, y: -60, z: 0 });
+        expect(group.draw).toHaveBeenCalled();
+        expect(resetsAndLoads()).toEqual(before);
+        expect(jest.requireMock('dwv').App).toHaveBeenCalledTimes(1);
+      });
+
+      it('standalone: keeps "Actual pixels" (1:1) across the resize', async () => {
+        jest.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(800);
+        jest.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600);
+        await openStack();
+        act(() => mockToolsProps?.onActualPixels());
+        // 512 image pixels in 600 canvas pixels: zoom 512 / 600 of the fit.
+        expect(group.addScale).toHaveBeenCalledWith(512 / 600 - 1, expect.anything());
+
+        widen();
+
+        expect(group.setScale).toHaveBeenCalledTimes(1);
+        expect(group.addTranslation).toHaveBeenCalledTimes(1);
+      });
+
+      /** Refitted by dwv alone (zoom relative to the fit), nothing kept. */
+      const expectPlainRefit = (fits: number) => {
+        expect(mockFitToContainer).toHaveBeenCalledTimes(fits + 1);
+        expect(group.setScale).not.toHaveBeenCalled();
+        expect(group.addTranslation).not.toHaveBeenCalled();
+      };
+
+      it('standalone: an untouched (fitted) view follows the viewport', async () => {
+        await openStack();
+        const fits = mockFitToContainer.mock.calls.length;
+        widen();
+        expectPlainRefit(fits);
+      });
+
+      it('standalone: a view reset after a pan follows the viewport', async () => {
+        await openStack();
+        act(() => emit('offsetchange')); // panned...
+        mockResetZoomPan.mockImplementationOnce(() => {
+          emit('zoomchange');
+          emit('offsetchange');
+        });
+        act(() => mockToolsProps?.onReset()); // ...and reset
+        const fits = mockFitToContainer.mock.calls.length;
+
+        widen();
+
+        expectPlainRefit(fits);
+      });
+
+      it('Series review: keeps dwv\'s own refit, even after zoom and pan', async () => {
+        await openReview();
+        const before = resetsAndLoads();
+        act(() => {
+          emit('zoomchange');
+          emit('offsetchange');
+        });
+        const fits = mockFitToContainer.mock.calls.length;
+
+        widen();
+
+        expectPlainRefit(fits);
+        expect(resetsAndLoads()).toEqual(before);
+        expect(jest.requireMock('dwv').App).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('keeps CSS pixels on standard displays and with touch input', () => {

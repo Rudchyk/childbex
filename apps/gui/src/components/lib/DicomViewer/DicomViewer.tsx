@@ -59,6 +59,7 @@ import {
   hiDpiLayout,
   type HiDpiLayout,
 } from './DicomViewer.display';
+import { refitKeepingView, type ContainerSize } from './DicomViewer.refit';
 
 /** What a custom slice list gets from the viewer. */
 export interface DicomViewerSidebarRenderProps {
@@ -360,9 +361,22 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   const activeDataIdRef = useRef<string | undefined>(undefined);
   const isCleanRef = useRef(isClean);
   isCleanRef.current = isClean;
-  /** Custom panels next to the viewport (without any: full width). */
+  /**
+   * Whether the view is dwv's fit (it follows the viewport when resized),
+   * or zoom/pan the user set (kept on resize in the standalone viewer:
+   * `refitKeepingView`).
+   */
+  const followsFitRef = useRef(true);
+  /** Container size dwv was last fitted to (none: not fitted yet). */
+  const fittedSizeRef = useRef<ContainerSize | null>(null);
+  /** The default image list (standalone viewer): expanded or collapsed. */
+  const [isImageListExpanded, setIsImageListExpanded] = useState(true);
+  const toggleImageList = useCallback(() => setIsImageListExpanded((value) => !value), []);
+  /** Without a custom one, the default image list (not on small screens). */
+  const showImageList = !renderSidebar && !matches && items.length > 0;
+  /** Panels next to the viewport (without any: full width). */
   const panelsBeside =
-    (!!renderSidebar || !!leadingPanel) && sidebarPlacement === 'beside';
+    (!!renderSidebar || !!leadingPanel || showImageList) && sidebarPlacement === 'beside';
 
   const onChangeTool = (tool: string) => {
     if (appRef.current) {
@@ -393,6 +407,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   const onReset = () => {
     if (appRef.current) {
       appRef.current.resetZoomPan();
+      followsFitRef.current = true;
     }
   };
   /** One image pixel per device pixel, centred ("Actual pixels" 1:1). */
@@ -448,6 +463,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     activeDataIdRef.current = REPLACED_LOAD;
     forgetLoad();
     if (appRef.current) releaseDwvData(appRef.current);
+    followsFitRef.current = true;
     setLoadAccount(null);
     setItems([]);
     setSliceCount(0);
@@ -527,9 +543,22 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     };
   }, []);
 
-  // dwv reads the container size when it fits: refit after a change.
+  // dwv reads the container size when it fits: refit after a change. The
+  // fit follows the viewport. In the standalone viewer only (Issue #57),
+  // zoom/pan the user set (e.g. "Actual pixels") keeps its magnification
+  // and centre; the Series review keeps dwv's own refit (zoom relative to
+  // the fit).
   useEffect(() => {
-    if (layout && isDataLoaded) appRef.current?.fitToContainer();
+    const app = appRef.current;
+    if (!isDataLoaded) fittedSizeRef.current = null;
+    if (!layout || !isDataLoaded || !app) return;
+    const previous = fittedSizeRef.current;
+    const next = { width: layout.width, height: layout.height };
+    fittedSizeRef.current = next;
+    // (dwv's fit emits no zoom/pan events; keeping the view does, but only
+    // runs once the view no longer follows the fit.)
+    if (!isCleanRef.current || followsFitRef.current || !previous) app.fitToContainer();
+    else refitKeepingView(app, previous, next);
   }, [layout, isDataLoaded]);
 
   useEffect(() => {
@@ -591,6 +620,8 @@ export const DicomViewer: FC<DicomViewerProps> = ({
       if (shownDataIdRef.current === dataId) return true;
 
       shownDataIdRef.current = dataId;
+      // dwv shows a new stack fitted.
+      followsFitRef.current = true;
       setLoadStateError(null);
       const canScroll = vc.canScroll();
       if (vc.isMonochrome()) setCanWindowLevel(true);
@@ -746,8 +777,15 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     app.addEventListener('keydown', (event: KeyboardEvent) => {
       if (isMountedRef.current) app.defaultOnKeydown(event);
     });
-
-    window.addEventListener('resize', app.onResize);
+    // Zoom or pan by a tool (or "Actual pixels"): kept on resize.
+    const onViewChange = () => {
+      followsFitRef.current = false;
+    };
+    app.addEventListener('zoomchange', onViewChange);
+    app.addEventListener('offsetchange', onViewChange);
+    // No `app.onResize` on window resizes: the viewport's resize (window
+    // resizes included) refits through the layout above, which keeps the
+    // user's zoom/pan.
 
     if (list?.length) {
       Promise.resolve(getRequestHeaders?.() ?? {}).then((headers) => {
@@ -768,7 +806,6 @@ export const DicomViewer: FC<DicomViewerProps> = ({
 
     return () => {
       isMountedRef.current = false;
-      window.removeEventListener('resize', app.onResize);
       // Requests still in flight belong to this viewer only (e.g. the
       // previous Series): stop them before the next viewer loads, and free
       // the decoded data.
@@ -859,8 +896,9 @@ export const DicomViewer: FC<DicomViewerProps> = ({
         Custom panels sit on both sides of the toolbar and viewport (or below
         them) and are always rendered: they keep their state when the
         placement changes, and the viewport takes the width they leave (e.g.
-        when one is collapsed; dwv refits in place on the resize). The
-        toolbar is centred over the viewport only.
+        when one is collapsed; dwv refits in place on the resize). So does
+        the default image list (standalone viewer). The toolbar is centred
+        over the viewport only.
       */}
       <Stack
         data-testid="dicom-viewport-row"
@@ -943,15 +981,22 @@ export const DicomViewer: FC<DicomViewerProps> = ({
             {renderSidebar({ items, currentImageId, jumpTo })}
           </Box>
         )}
+        {showImageList && (
+          <Box
+            data-testid="dicom-viewer-image-list"
+            sx={{ display: 'flex', flexShrink: 0, order: 2 }}
+          >
+            <DicomViewerSidebar
+              currentImageId={currentImageId}
+              items={items}
+              icon={sidebarItemIcon}
+              onJumpTo={jumpTo}
+              expanded={isImageListExpanded}
+              onToggle={toggleImageList}
+            />
+          </Box>
+        )}
       </Stack>
-      {!matches && !renderSidebar && (
-        <DicomViewerSidebar
-          currentImageId={currentImageId}
-          items={items}
-          icon={sidebarItemIcon}
-          onJumpTo={jumpTo}
-        />
-      )}
       <DicomViewerFooter />
     </Stack>
   );
