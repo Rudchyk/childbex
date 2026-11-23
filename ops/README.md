@@ -117,6 +117,14 @@ The SSH account should be a dedicated deployment identity with passwordless sudo
 
 Do not place production application secrets or model data in GitHub Actions.
 
+## Certbot renewal hooks (repository-owned)
+
+- Web (`app.childbex.com`, `childbex.com`) and auth (`auth.childbex.com`) deploy hooks live in `ops/certbot/renewal-hooks/deploy/`.
+- The existing production auth hook is mirrored without behavior changes. Its Keycloak-owned certificate copy remains separate from the web certificate reload hook.
+- The production ops installer now preflights and installs both hooks. For a Certbot-only change, use `sudo bash ops/install/install-certbot-hooks.sh --install` after `bash ops/install/install-certbot-hooks.sh --check`. Installed hook drift is a stop condition, not silently overwritten.
+- DNS-01 Cloudflare credentials and Let's Encrypt keys/certificates remain on the server **only**; no secrets are committed to Git.
+- Tests: `bash ops/tests/test-certbot-hooks.sh`. Procedure and rollback: [Certbot renewal runbook](../docs/operations/certbot-renewal.md).
+
 ## Nginx DICOM rate limiting (manual deployment)
 
 - Proposed, repository-owned Nginx snippets: `ops/nginx/conf.d/99-ratelimit.conf` and `ops/nginx/snippets/childbex-dicom-location.conf`.
