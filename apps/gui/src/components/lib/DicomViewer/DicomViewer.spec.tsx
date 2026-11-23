@@ -122,8 +122,19 @@ jest.mock('./DicomViewerTools', () => ({
     return <div data-testid="viewer-tools" />;
   },
 }));
+/** The default image list's props (last render). */
+let mockSidebarProps: {
+  items: { index: number }[];
+  currentImageId?: string;
+  onJumpTo: (index: number) => void;
+  expanded: boolean;
+  onToggle: () => void;
+} | null = null;
 jest.mock('./DicomViewerSidebar', () => ({
-  DicomViewerSidebar: () => <div data-testid="default-sidebar" />,
+  DicomViewerSidebar: (props: NonNullable<typeof mockSidebarProps>) => {
+    mockSidebarProps = props;
+    return <div data-testid="default-sidebar" data-expanded={props.expanded} />;
+  },
 }));
 jest.mock('./DicomViewerFooter', () => ({ DicomViewerFooter: () => null }));
 /** The local import's props (last render). */
@@ -173,6 +184,7 @@ beforeEach(() => {
   mockActiveViewLayer = undefined;
   mockToolsProps = null;
   mockDropboxProps = null;
+  mockSidebarProps = null;
   mockFrames = new Map();
   window.requestAnimationFrame = jest.fn((frame: FrameRequestCallback) => {
     mockFrames.set(++mockFrameId, frame);
@@ -1277,12 +1289,13 @@ describe('DicomViewer', () => {
       expect(mockLoadURLs.mock.calls.length).toBeLessThanOrEqual(1);
     });
 
-    it('without one, the viewport is full width with the default file list (DWV page)', () => {
-      render(<DicomViewer list={urls} />);
+    it('without one and nothing loaded, the viewport is full width (DWV page import)', () => {
+      render(<DicomViewer isClean />);
       expect(flexDirection()).toBe('column');
       expect(getComputedStyle(screen.getByTestId('dicom-viewport')).width).toBe('100%');
-      expect(screen.getByTestId('default-sidebar')).toBeTruthy();
       // No panel slots: the toolbar is centred over the full-width viewport.
+      expect(screen.queryByTestId('default-sidebar')).toBeNull();
+      expect(screen.queryByTestId('dicom-viewer-image-list')).toBeNull();
       expect(screen.queryByTestId('dicom-viewer-leading')).toBeNull();
       expect(screen.queryByTestId('dicom-viewer-sidebar')).toBeNull();
       expect(screen.getByTestId('dicom-viewer-main').contains(screen.getByTestId('viewer-tools'))).toBe(true);
@@ -1305,7 +1318,123 @@ describe('DicomViewer', () => {
       unmount();
 
       render(<DicomViewer list={urls} />);
+      act(() => mockListeners.loadend({ dataid: '0' }));
+      expect(mockSidebarProps).toBeNull();
       expect(screen.queryByTestId('default-sidebar')).toBeNull();
+    });
+  });
+
+  /** The standalone (DWV page) viewer's own image list. */
+  describe('default image list', () => {
+    const appOf = () => (jest.requireMock('dwv').App as jest.Mock).mock.results[0].value;
+    /** Standalone viewer showing a local stack of `count` slices. */
+    const openStack = async (count = 3) => {
+      mockImage = mockImageWithSlices(count);
+      const view = render(<DicomViewer isClean />);
+      await act(async () => undefined);
+      const files = Array.from(
+        { length: count },
+        (_, i) => new File([new Uint8Array(4)], `IM${i + 1}`)
+      );
+      act(() => {
+        mockDropboxProps?.onLoadFiles(files);
+        mockListeners.loadstart({ dataid: '1' });
+        files.forEach((file, i) =>
+          mockListeners.loaditem({ dataid: '1', source: file, data: sopUid(`uid-${i}`) })
+        );
+        mockListeners.loadend({ dataid: '1' });
+      });
+      runFrames();
+      return view;
+    };
+    const toggle = () => act(() => mockSidebarProps?.onToggle());
+    const flexDirection = () =>
+      getComputedStyle(screen.getByTestId('dicom-viewport-row')).flexDirection;
+
+    beforeEach(() => {
+      mockSidebarProps = null;
+    });
+
+    it('sits next to the viewport (in the row, not fixed over the image), expanded', async () => {
+      await openStack();
+      const slot = screen.getByTestId('dicom-viewer-image-list');
+      expect(flexDirection()).toBe('row');
+      expect(screen.getByTestId('dicom-viewport-row').contains(slot)).toBe(true);
+      expect(screen.getByTestId('dicom-viewport').contains(slot)).toBe(false);
+      expect(slot.contains(screen.getByTestId('default-sidebar'))).toBe(true);
+      expect(getComputedStyle(slot).flexShrink).toBe('0');
+      // The viewport's column takes the rest of the row's width.
+      expect(getComputedStyle(screen.getByTestId('dicom-viewer-main')).flexGrow).toBe('1');
+      expect(getComputedStyle(screen.getByTestId('dicom-viewport')).width).toBe('100%');
+      expect([
+        getComputedStyle(screen.getByTestId('dicom-viewer-main')).order,
+        getComputedStyle(slot).order,
+      ]).toEqual(['1', '2']);
+      expect(mockSidebarProps?.expanded).toBe(true);
+      expect(mockSidebarProps?.items.map(({ index }) => index)).toEqual([0, 1, 2]);
+    });
+
+    it('collapses and expands without a new dwv App, load, reset or tool change', async () => {
+      await openStack();
+      const app = appOf();
+      /** dwv calls that would reset or replace what is shown. */
+      const resets = () =>
+        [mockReset, mockAbortAllLoads, mockAbortLoad, mockResetZoomPan, mockSetTool].map(
+          (mock) => mock.mock.calls.length
+        );
+      // Counted after the load (importing removes the previous stack first).
+      const before = resets();
+      const current = mockSidebarProps?.currentImageId;
+      expect(current).toBe('uid-2');
+
+      for (let i = 0; i < 3; i++) {
+        toggle();
+        expect(mockSidebarProps?.expanded).toBe(false);
+        // Still in the row (its compact control), the viewport still beside it.
+        expect(screen.getByTestId('default-sidebar').dataset.expanded).toBe('false');
+        expect(flexDirection()).toBe('row');
+        toggle();
+        expect(mockSidebarProps?.expanded).toBe(true);
+      }
+
+      expect(jest.requireMock('dwv').App).toHaveBeenCalledTimes(1);
+      expect(app.loadFiles).toHaveBeenCalledTimes(1);
+      expect(mockLoadURLs).not.toHaveBeenCalled();
+      expect(resets()).toEqual(before);
+      expect(mockSidebarProps?.currentImageId).toBe(current);
+      expect(mockToolsProps?.isDataLoaded).toBe(true);
+    });
+
+    it('asks dwv for the slice the list jumps to, collapsed in between', async () => {
+      mockActiveViewLayer = {
+        getViewController: () => ({
+          getCurrentIndex: () => ({ getValues: () => [0, 0, 2] }),
+          setCurrentIndex: mockSetCurrentIndex,
+        }),
+      };
+      await openStack();
+      toggle();
+      toggle();
+      act(() => mockSidebarProps?.onJumpTo(1));
+      expect(mockSetCurrentIndex).toHaveBeenCalledTimes(1);
+      expect(mockSetCurrentIndex.mock.calls[0][0].values).toEqual([0, 0, 1]);
+      act(() => mockListeners.positionchange({ data: { imageUid: 'uid-1' } }));
+      expect(mockSidebarProps?.currentImageId).toBe('uid-1');
+    });
+
+    it('is not used by the Series review viewer (custom list)', async () => {
+      render(<DicomViewer list={urls} renderSidebar={() => <div data-testid="custom" />} />);
+      act(() => mockListeners.loadend({ dataid: '0' }));
+      expect(screen.getByTestId('custom')).toBeTruthy();
+      expect(mockSidebarProps).toBeNull();
+      expect(screen.queryByTestId('dicom-viewer-image-list')).toBeNull();
+    });
+
+    it('is gone again after Clean (full-width import)', async () => {
+      await openStack();
+      act(() => mockToolsProps?.onClean?.());
+      expect(screen.queryByTestId('dicom-viewer-image-list')).toBeNull();
+      expect(flexDirection()).toBe('column');
     });
   });
 

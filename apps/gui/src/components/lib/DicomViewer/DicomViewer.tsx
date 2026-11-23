@@ -360,9 +360,14 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   const activeDataIdRef = useRef<string | undefined>(undefined);
   const isCleanRef = useRef(isClean);
   isCleanRef.current = isClean;
-  /** Custom panels next to the viewport (without any: full width). */
+  /** The default image list (standalone viewer): expanded or collapsed. */
+  const [isImageListExpanded, setIsImageListExpanded] = useState(true);
+  const toggleImageList = useCallback(() => setIsImageListExpanded((value) => !value), []);
+  /** Without a custom one, the default image list (not on small screens). */
+  const showImageList = !renderSidebar && !matches && items.length > 0;
+  /** Panels next to the viewport (without any: full width). */
   const panelsBeside =
-    (!!renderSidebar || !!leadingPanel) && sidebarPlacement === 'beside';
+    (!!renderSidebar || !!leadingPanel || showImageList) && sidebarPlacement === 'beside';
 
   const onChangeTool = (tool: string) => {
     if (appRef.current) {
@@ -859,8 +864,9 @@ export const DicomViewer: FC<DicomViewerProps> = ({
         Custom panels sit on both sides of the toolbar and viewport (or below
         them) and are always rendered: they keep their state when the
         placement changes, and the viewport takes the width they leave (e.g.
-        when one is collapsed; dwv refits in place on the resize). The
-        toolbar is centred over the viewport only.
+        when one is collapsed; dwv refits in place on the resize). So does
+        the default image list (standalone viewer). The toolbar is centred
+        over the viewport only.
       */}
       <Stack
         data-testid="dicom-viewport-row"
@@ -943,15 +949,22 @@ export const DicomViewer: FC<DicomViewerProps> = ({
             {renderSidebar({ items, currentImageId, jumpTo })}
           </Box>
         )}
+        {showImageList && (
+          <Box
+            data-testid="dicom-viewer-image-list"
+            sx={{ display: 'flex', flexShrink: 0, order: 2 }}
+          >
+            <DicomViewerSidebar
+              currentImageId={currentImageId}
+              items={items}
+              icon={sidebarItemIcon}
+              onJumpTo={jumpTo}
+              expanded={isImageListExpanded}
+              onToggle={toggleImageList}
+            />
+          </Box>
+        )}
       </Stack>
-      {!matches && !renderSidebar && (
-        <DicomViewerSidebar
-          currentImageId={currentImageId}
-          items={items}
-          icon={sidebarItemIcon}
-          onJumpTo={jumpTo}
-        />
-      )}
       <DicomViewerFooter />
     </Stack>
   );
