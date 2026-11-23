@@ -125,6 +125,14 @@ Do not place production application secrets or model data in GitHub Actions.
 - DNS-01 Cloudflare credentials and Let's Encrypt keys/certificates remain on the server **only**; no secrets are committed to Git.
 - Tests: `bash ops/tests/test-certbot-hooks.sh`. Procedure and rollback: [Certbot renewal runbook](../docs/operations/certbot-renewal.md).
 
+## Origin SSL monitoring (repository-owned)
+
+- `ops/monitoring/childbex-origin-ssl-metrics` reads the three deployed origin certificates and the Certbot auth source, exposing expiry/health to the existing Node Exporter textfile collector.
+- `ops/systemd/childbex-origin-ssl-metrics.{service,timer}` runs the collector hourly with a sandboxed oneshot.
+- `ops/install/install-origin-ssl-monitoring.sh` applies the collector and units after drift checks, also invoked from the main ops installer.
+- ChildBEx-owned alert rules: `ops/prometheus/rules/21-childbex-origin-ssl.yml`. These deploy **separately to shared**, where Prometheus and Blackbox remain centrally managed.
+- Tests: `bash ops/tests/test-origin-ssl-monitoring.sh`. Procedure and rollback: [Origin SSL runbook](../docs/operations/origin-ssl-monitoring.md).
+
 ## Nginx DICOM rate limiting (manual deployment)
 
 - Proposed, repository-owned Nginx snippets: `ops/nginx/conf.d/99-ratelimit.conf` and `ops/nginx/snippets/childbex-dicom-location.conf`.

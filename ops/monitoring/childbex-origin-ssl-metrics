@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 027
+
+# Certificate contents are public, but Let's Encrypt's live/ tree is root-only.
+# The systemd oneshot reads only certificates, never private keys.
+OUTPUT_DIR="${CHILDBEX_ORIGIN_SSL_OUTPUT_DIR:-/var/lib/node_exporter/textfile_collector}"
+APP_CERT="${CHILDBEX_ORIGIN_SSL_APP_CERT:-/etc/letsencrypt/live/app.childbex.com/fullchain.pem}"
+SITE_CERT="${CHILDBEX_ORIGIN_SSL_SITE_CERT:-/etc/letsencrypt/live/childbex.com/fullchain.pem}"
+AUTH_NGINX_CERT="${CHILDBEX_ORIGIN_SSL_AUTH_NGINX_CERT:-/srv/secrets/auth.childbex.com/auth.childbex.com.pem}"
+AUTH_CERTBOT_CERT="${CHILDBEX_ORIGIN_SSL_AUTH_CERTBOT_CERT:-/etc/letsencrypt/live/auth.childbex.com/fullchain.pem}"
+
+[[ -d "$OUTPUT_DIR" && ! -L "$OUTPUT_DIR" ]] || {
+  echo "ERROR: missing or unsafe Node Exporter textfile directory" >&2
+  exit 1
+}
+tmp="$(mktemp "$OUTPUT_DIR/.childbex-origin-ssl.XXXXXXXX")"
+trap 'rm -f -- "$tmp"' EXIT
+
+{
+  echo '# HELP childbex_origin_ssl_collector_last_run_timestamp_seconds Unix time of the last completed metrics collection.'
+  echo '# TYPE childbex_origin_ssl_collector_last_run_timestamp_seconds gauge'
+  printf 'childbex_origin_ssl_collector_last_run_timestamp_seconds %s\n' "$(date -u +%s)"
+  echo '# HELP childbex_origin_ssl_certificate_expiry_timestamp_seconds Certificate notAfter Unix time.'
+  echo '# TYPE childbex_origin_ssl_certificate_expiry_timestamp_seconds gauge'
+  echo '# HELP childbex_origin_ssl_certificate_read_success Whether a certificate was parsed successfully.'
+  echo '# TYPE childbex_origin_ssl_certificate_read_success gauge'
+  echo '# HELP childbex_origin_ssl_auth_matches_certbot Whether deployed auth certificate matches Certbot original.'
+  echo '# TYPE childbex_origin_ssl_auth_matches_certbot gauge'
+  echo '# HELP childbex_origin_ssl_collector_success Whether every certificate was readable and auth copies matched.'
+  echo '# TYPE childbex_origin_ssl_collector_success gauge'
+} > "$tmp"
+
+status=0
+emit_cert() {
+  local label="$1" source="$2" path="$3" raw epoch
+  if raw="$(/usr/bin/openssl x509 -in "$path" -noout -enddate 2>/dev/null)" &&
+     [[ "$raw" == notAfter=* ]] &&
+     epoch="$(LC_ALL=C date -u -d "${raw#notAfter=}" +%s 2>/dev/null)"; then
+    printf 'childbex_origin_ssl_certificate_expiry_timestamp_seconds{certificate="%s",source="%s"} %s\n' \
+      "$label" "$source" "$epoch" >> "$tmp"
+    printf 'childbex_origin_ssl_certificate_read_success{certificate="%s",source="%s"} 1\n' \
+      "$label" "$source" >> "$tmp"
+  else
+    printf 'childbex_origin_ssl_certificate_read_success{certificate="%s",source="%s"} 0\n' \
+      "$label" "$source" >> "$tmp"
+    status=1
+  fi
+}
+
+emit_cert app.childbex.com nginx "$APP_CERT"
+emit_cert childbex.com nginx "$SITE_CERT"
+emit_cert auth.childbex.com nginx "$AUTH_NGINX_CERT"
+emit_cert auth.childbex.com certbot "$AUTH_CERTBOT_CERT"
+
+if deployed="$(/usr/bin/openssl x509 -in "$AUTH_NGINX_CERT" -noout -fingerprint -sha256 2>/dev/null)" &&
+   original="$(/usr/bin/openssl x509 -in "$AUTH_CERTBOT_CERT" -noout -fingerprint -sha256 2>/dev/null)" &&
+   [[ -n "$deployed" && "$deployed" == "$original" ]]; then
+  echo 'childbex_origin_ssl_auth_matches_certbot 1' >> "$tmp"
+else
+  echo 'childbex_origin_ssl_auth_matches_certbot 0' >> "$tmp"
+  status=1
+fi
+
+printf 'childbex_origin_ssl_collector_success %s\n' "$(( 1 - status ))" >> "$tmp"
+chmod 0644 "$tmp"
+mv -f -- "$tmp" "$OUTPUT_DIR/childbex_origin_ssl.prom"
+trap - EXIT
+
+exit "$status"
