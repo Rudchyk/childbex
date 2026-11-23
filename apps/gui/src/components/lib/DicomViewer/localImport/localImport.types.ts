@@ -1,6 +1,6 @@
 /**
- * Local (standalone `/dwv`) DICOM import: files, folders and ZIP archives
- * are read in the browser only. Nothing is uploaded or persisted.
+ * Local (standalone `/dwv`) DICOM import: files, folders, ZIP and TAR-family
+ * archives are read in the browser only. Nothing is uploaded or persisted.
  */
 
 const MiB = 1024 * 1024;
@@ -8,10 +8,11 @@ const GiB = 1024 * MiB;
 
 /**
  * Browser-side safety limits. Deliberately lower than the server archive
- * limits: everything extracted from a ZIP is held in the tab's memory.
+ * limits: everything extracted (inflated or decompressed) from an archive
+ * is held in the tab's memory.
  */
 export interface LocalImportLimits {
-  /** Files found in total (folder files and ZIP entries). */
+  /** Files found in total (folder files and archive entries). */
   maxFiles: number;
   /** Path segments of a file below the dropped/selected root. */
   maxPathDepth: number;
@@ -19,15 +20,24 @@ export interface LocalImportLimits {
   maxPathLength: number;
   /** Size of a single file (on disk or extracted); larger ones are skipped. */
   maxFileBytes: number;
-  /** Size of a ZIP archive (compressed). */
+  /**
+   * Size of an archive file, and of the TAR stream of a compressed TAR
+   * (`.tar.gz`, `.tar.bz2`, `.tar.xz`) once decompressed.
+   */
   maxArchiveBytes: number;
-  /** Entries of one ZIP archive (files and directories). */
+  /** Entries of one archive (files, directories, links…). */
   maxArchiveEntries: number;
-  /** Bytes extracted from all ZIP archives of one import (held in memory). */
+  /**
+   * Bytes copied out of all archives of one import (held in memory):
+   * inflated ZIP entries and files of compressed TARs. Stored ZIP entries
+   * and files of a plain TAR are slices of the archive file (no copy).
+   */
   maxExtractedBytes: number;
   /**
-   * Highest overall expansion ratio (declared uncompressed / archive size)
-   * of an archive that expands to more than `ratioCheckMinBytes`.
+   * Highest overall expansion ratio (uncompressed / archive size) of an
+   * archive that expands to more than `ratioCheckMinBytes`: the declared
+   * sizes of a ZIP, the bytes produced so far while a compressed TAR is
+   * being decompressed.
    */
   maxCompressionRatio: number;
   ratioCheckMinBytes: number;
@@ -52,7 +62,7 @@ export type LocalImportErrorCode =
   | 'LIMIT_EXCEEDED'
   /** The user cancelled (or the viewer was closed). */
   | 'CANCELLED'
-  /** One archive is unsafe (paths, overlapping entries, ZIP bomb). */
+  /** One archive is unsafe (paths, links, overlapping entries, archive bomb). */
   | 'UNSAFE_ARCHIVE'
   /** One archive is damaged or truncated. */
   | 'CORRUPT_ARCHIVE'
@@ -129,8 +139,8 @@ export const QUIET_SKIP_REASONS: readonly SkipReason[] = [
 
 /**
  * Files that may be (or hide) an image of a Series, but could not be read
- * or checked: a Series found next to them may be missing images. Inside a
- * ZIP archive any of them rejects the whole archive.
+ * or checked: a Series found next to them may be missing images. Inside an
+ * archive any of them rejects the whole archive.
  */
 export const MISSING_IMAGE_REASONS: readonly SkipReason[] = [
   'invalid-dicom',
@@ -193,7 +203,7 @@ export interface LocalDicomInstance {
    * for files and archives chosen or dropped on their own.
    */
   source: string;
-  /** The original bytes (a File on disk or extracted from a ZIP). */
+  /** The original bytes (a File on disk or extracted from an archive). */
   file: File;
   info: DicomInstanceInfo;
 }
@@ -268,7 +278,7 @@ export interface LocalImportResult {
    * archives), with how many.
    */
   incompleteSources: { source: string; count: number }[];
-  /** Plain images and videos (chosen or dropped files, not ZIP entries). */
+  /** Plain images and videos (chosen or dropped files, not archive entries). */
   mediaFiles: LocalMediaFile[];
   /**
    * The browser could not enumerate dropped folders (no entries API): a
@@ -282,6 +292,10 @@ export interface LocalImportProgress {
   filesChecked: number;
   instancesFound: number;
   skippedCount: number;
-  /** The archive being extracted, if any. */
-  archive?: { path: string; percent: number };
+  /**
+   * The archive being extracted, if any: its position among the archives
+   * of this import (1-based) and its format (e.g. `TAR.GZ`). Its file name
+   * is not part of the progress (it may name the patient).
+   */
+  archive?: { index: number; format: string; percent: number };
 }

@@ -1,5 +1,6 @@
 import {
   baseName,
+  isArchiveKind,
   isDicomDirName,
   isSystemPath,
   readBlobBytes,
@@ -12,6 +13,14 @@ import {
 } from './localImport.files';
 import { probeDicom } from './localImport.dicom';
 import { walkInputs, type InputSelection } from './localImport.sources';
+import {
+  readTarEntries,
+  TAR_EXTENSIONS,
+  TAR_SIGNATURES,
+  tarExtensionOf,
+  tarFormatOf,
+  type TarFormat,
+} from './localImport.tar';
 import {
   extractZipEntry,
   readZipDirectory,
@@ -256,7 +265,8 @@ const entryRejections: Partial<Record<SkipReason, string>> = {
   'too-large': 'is above the size limit',
   unreadable: 'could not be read',
   'nested-archive': 'is an archive inside the archive',
-  'unsupported-entry': 'is a link or uses an unsupported compression method',
+  'unsupported-entry':
+    'is a link or special file (device, FIFO) or uses an unsupported compression method',
   'duplicate-path': 'appears more than once in the archive',
   'corrupt-entry': 'is damaged (size or CRC-32 check failed)',
   'header-too-large': 'has a DICOM header too large to check',
@@ -276,6 +286,36 @@ const rejectArchive = (entryPath: string, reason: SkipReason) =>
       'missing. Extract the archive and choose the folder to see the readable files.'
   );
 
+const SUPPORTED_ARCHIVES = ['.zip', ...TAR_EXTENSIONS].join(', ');
+
+/**
+ * A TAR-family archive is opened only when its name and its content agree
+ * (as on the server): `.tar` holds a TAR header, `.tar.gz`/`.tgz` gzip data,
+ * and so on. Static messages: no file names.
+ */
+const tarMismatchError = (fileName: string, kind: ContentKind) => {
+  const extension = tarExtensionOf(fileName);
+  return kind === 'other' || kind === 'dicom'
+    ? new LocalImportError(
+        'CORRUPT_ARCHIVE',
+        `The file is not a valid ${extension} archive, or it is damaged.`
+      )
+    : new LocalImportError(
+        'CORRUPT_ARCHIVE',
+        `The file name (${extension}) does not match the archive content.`
+      );
+};
+
+/** gzip, bzip2, xz or TAR content whose name is not a TAR-family name. */
+const unnamedArchiveError = () =>
+  new LocalImportError(
+    'UNSUPPORTED_ARCHIVE',
+    'This file is compressed or a TAR archive, but its name does not end in a supported ' +
+      `archive extension (${SUPPORTED_ARCHIVES}). Rename or extract it first.`
+  );
+
+const formatLabel = (format: TarFormat | 'zip') => format.toUpperCase();
+
 /** The chosen or dropped folder of a top-level path, `''` for loose items. */
 const sourceOf = (path: string) => {
   const segments = splitPath(path);
@@ -290,7 +330,8 @@ const mediaKindOf = (file: File): LocalMediaFile['kind'] | undefined => {
 };
 
 /**
- * Finds the DICOM image instances in local files, folders and ZIP archives
+ * Finds the DICOM image instances in local files, folders, ZIP and TAR-family
+ * archives (`.tar`, `.tar.gz`/`.tgz`, `.tar.bz2`/`.tbz2`, `.tar.xz`/`.txz`)
  * and groups them by Series. Runs in the browser only: nothing is sent or
  * stored anywhere. Throws `LocalImportError` when cancelled or when a
  * resource limit is reached; problems of one file or archive are reported
@@ -372,11 +413,38 @@ export const importLocalDicom = async (
 
   const sniff = async (blob: Blob) => sniffContent(await readBlobBytes(blob.slice(0, SNIFF_BYTES)));
 
-  const importArchiveEntries = async (
+  /** Archives seen so far (progress names an archive by its position). */
+  let archiveCount = 0;
+  const reportArchive = (index: number, format: string, percent: number) => {
+    progress.archive = { index, format, percent: Math.min(100, Math.round(percent)) };
+    report();
+  };
+
+  /**
+   * An extracted archive file: an archive inside it or a file that may be
+   * an image but cannot be checked rejects the archive; other skipped files
+   * give their memory back.
+   */
+  const acceptArchiveFile = async (
+    path: string,
+    entryPath: string,
+    blob: Blob,
+    source: string,
+    budgetBefore: number
+  ) => {
+    if (isArchiveKind(await sniff(blob))) throw rejectArchive(entryPath, 'nested-archive');
+    const reason = await checkCandidate(path, blob, baseName(entryPath), source);
+    if (reason && MISSING_IMAGE_REASONS.includes(reason)) throw rejectArchive(entryPath, reason);
+    // Only kept files stay in memory.
+    if (reason) budget.remainingBytes = budgetBefore;
+  };
+
+  const importZipEntries = async (
     archivePath: string,
     archive: File,
     entries: ZipEntry[],
-    source: string
+    source: string,
+    index: number
   ) => {
     const isIgnored = (entry: ZipEntry) =>
       isSystemPath(entry.segments) || isDicomDirName(baseName(entry.path));
@@ -425,13 +493,8 @@ export const importLocalDicom = async (
         blob = await extractZipEntry(archive, entry, {
           budget,
           signal,
-          onProgress: (read) => {
-            progress.archive = {
-              path: archivePath,
-              percent: Math.min(100, Math.round(((doneBefore + read) / totalCompressed) * 100)),
-            };
-            report();
-          },
+          onProgress: (read) =>
+            reportArchive(index, 'ZIP', ((doneBefore + read) / totalCompressed) * 100),
         });
       } catch (error) {
         if (error instanceof ZipEntryDamagedError) throw rejectArchive(entry.path, 'corrupt-entry');
@@ -439,11 +502,58 @@ export const importLocalDicom = async (
       } finally {
         compressedDone += entry.compressedSize;
       }
-      if ((await sniff(blob)) === 'zip') throw rejectArchive(entry.path, 'nested-archive');
-      const reason = await checkCandidate(path, blob, baseName(entry.path), source);
-      if (reason && MISSING_IMAGE_REASONS.includes(reason)) throw rejectArchive(entry.path, reason);
-      // Only kept files stay in memory.
-      if (reason) budget.remainingBytes = budgetBefore;
+      await acceptArchiveFile(path, entry.path, blob, source, budgetBefore);
+    }
+  };
+
+  /**
+   * TAR entries are read in order (no directory to check first): an entry
+   * that rejects the archive is found part-way, and `importArchive` undoes
+   * what was kept before it.
+   */
+  const importTarEntries = async (
+    archivePath: string,
+    archive: File,
+    format: TarFormat,
+    source: string,
+    index: number
+  ) => {
+    const label = formatLabel(format);
+    const entries = readTarEntries(archive, format, limits, {
+      signal,
+      onProgress: (fraction) => reportArchive(index, label, fraction * 100),
+    });
+    for await (const entry of entries) {
+      throwIfCancelled(signal);
+      await countFile();
+      const path = uniquePath(`${archivePath}/${entry.path}`);
+      const isIgnored = isSystemPath(entry.segments) || isDicomDirName(baseName(entry.path));
+      if (entry.skipReason) {
+        if (!isIgnored && MISSING_IMAGE_REASONS.includes(entry.skipReason)) {
+          throw rejectArchive(entry.path, entry.skipReason);
+        }
+        skip(path, entry.skipReason);
+        continue;
+      }
+      if (isSystemPath(entry.segments)) {
+        skip(path, 'system-file');
+        continue;
+      }
+      if (isDicomDirName(baseName(entry.path))) {
+        skip(path, 'dicomdir');
+        continue;
+      }
+      // Only the head is read first: other files are skipped without being
+      // copied out of a compressed archive.
+      const kind = sniffContent(await entry.head(SNIFF_BYTES));
+      if (isArchiveKind(kind)) throw rejectArchive(entry.path, 'nested-archive');
+      if (kind !== 'dicom') {
+        skip(path, 'not-dicom');
+        continue;
+      }
+      const budgetBefore = budget.remainingBytes;
+      const blob = await entry.read(budget);
+      await acceptArchiveFile(path, entry.path, blob, source, budgetBefore);
     }
   };
 
@@ -453,7 +563,12 @@ export const importLocalDicom = async (
    * cannot be read, nothing found in it is kept (no partial Series from a
    * rejected archive). Other files and archives are not affected.
    */
-  const importArchive = async (path: string, archive: File, source: string) => {
+  const importArchive = async (
+    path: string,
+    archive: File,
+    source: string,
+    format: TarFormat | 'zip'
+  ) => {
     const before = {
       instances: instances.length,
       skipped: skipped.length,
@@ -461,11 +576,15 @@ export const importLocalDicom = async (
       progress: { ...progress },
     };
     archiveAdded = { uids: [], paths: [] };
+    const index = ++archiveCount;
     try {
-      progress.archive = { path, percent: 0 };
-      report();
-      const entries = await readZipDirectory(archive, limits, signal);
-      await importArchiveEntries(path, archive, entries, source);
+      reportArchive(index, formatLabel(format), 0);
+      if (format === 'zip') {
+        const entries = await readZipDirectory(archive, limits, signal);
+        await importZipEntries(path, archive, entries, source, index);
+      } else {
+        await importTarEntries(path, archive, format, source, index);
+      }
     } catch (error) {
       if (!isArchiveLevelError(error)) throw error;
       instances.length = before.instances;
@@ -509,9 +628,22 @@ export const importLocalDicom = async (
       continue;
     }
     const source = sourceOf(found.path);
-    if (kind === 'zip') {
-      await importArchive(path, file, source);
+    const tarFormat = tarFormatOf(file.name);
+    if (tarFormat) {
+      if (kind === TAR_SIGNATURES[tarFormat]) {
+        await importArchive(path, file, source, tarFormat);
+      } else {
+        failedArchives.push({ path, message: tarMismatchError(file.name, kind).message });
+      }
       progress.filesChecked++;
+      report();
+    } else if (kind === 'zip') {
+      await importArchive(path, file, source, 'zip');
+      progress.filesChecked++;
+    } else if (isArchiveKind(kind)) {
+      failedArchives.push({ path, message: unnamedArchiveError().message });
+      progress.filesChecked++;
+      report();
     } else if (kind === 'other') {
       // Pictures and videos keep opening as before (dwv's own loaders, no
       // size limit: they are never read by the import).

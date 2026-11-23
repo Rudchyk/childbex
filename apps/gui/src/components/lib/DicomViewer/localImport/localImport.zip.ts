@@ -9,6 +9,7 @@ import { Inflate } from 'fflate';
 import {
   checkPathLimits,
   formatBytes,
+  normalizeArchivePath,
   readBlobBytes,
   throwIfCancelled,
   yieldToBrowser,
@@ -127,19 +128,9 @@ const decodeName = (bytes: Uint8Array) => {
   return name;
 };
 
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
-
 /** Validates an entry name: no traversal, absolute or drive paths. */
-export const normalizeZipPath = (rawName: string): string[] => {
-  if (CONTROL_CHARS.test(rawName)) throw unsafe('control characters in a path');
-  const name = rawName.replace(/\\/g, '/');
-  if (name.startsWith('/')) throw unsafe('absolute path');
-  if (/^[a-zA-Z]:/.test(name)) throw unsafe('drive-letter path');
-  const segments = name.split('/').filter((s) => s !== '' && s !== '.');
-  if (segments.some((s) => s === '..')) throw unsafe('path traversal');
-  return segments;
-};
+export const normalizeZipPath = (rawName: string): string[] =>
+  normalizeArchivePath(rawName, unsafe);
 
 const findEndOfCentralDirectory = async (archive: Blob) => {
   const tailStart = Math.max(0, archive.size - EOCD_SIZE - MAX_COMMENT);

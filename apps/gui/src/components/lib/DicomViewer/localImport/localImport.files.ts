@@ -74,15 +74,89 @@ export const checkPathLimits = (
   }
 };
 
-export type ContentKind = 'dicom' | 'zip' | 'other';
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
+/** Bidirectional overrides and isolates: a name could display as another. */
+const BIDI_CONTROLS = /[‪-‮⁦-⁩]/;
 
-/** Bytes needed by `sniffContent`. */
-export const SNIFF_BYTES = 132;
+/**
+ * Validates a path inside an archive (ZIP entry name, or a TAR name after
+ * its PAX / GNU extensions are applied): no control characters, absolute,
+ * drive-letter, UNC or traversal paths. Returns the normalised segments;
+ * `unsafe` builds the archive's error (never containing the raw name).
+ */
+export const normalizeArchivePath = (
+  rawName: string,
+  unsafe: (detail: string) => Error
+): string[] => {
+  if (CONTROL_CHARS.test(rawName)) throw unsafe('control characters in a path');
+  if (BIDI_CONTROLS.test(rawName)) throw unsafe('text direction characters in a path');
+  const name = rawName.replace(/\\/g, '/');
+  // Also `\\server\share` (UNC), once separators are normalised.
+  if (name.startsWith('/')) throw unsafe('absolute path');
+  if (/^[a-zA-Z]:/.test(name)) throw unsafe('drive-letter path');
+  const segments = name.split('/').filter((s) => s !== '' && s !== '.');
+  if (segments.some((s) => s === '..')) throw unsafe('path traversal');
+  return segments;
+};
+
+export type ArchiveKind = 'zip' | 'tar' | 'gzip' | 'bzip2' | 'xz';
+export type ContentKind = 'dicom' | ArchiveKind | 'other';
+
+/** Bytes needed by `sniffContent` (a TAR header is one 512-byte block). */
+export const SNIFF_BYTES = 512;
+
+const TAR_BLOCK = 512;
+const TAR_CHECKSUM_OFFSET = 148;
+const TAR_CHECKSUM_LENGTH = 8;
+
+/**
+ * Whether a 512-byte block is a TAR header: its checksum field (octal)
+ * matches the sum of its bytes, counting the field itself as spaces. Old
+ * implementations summed signed bytes; both are accepted. Works for v7
+ * headers without the `ustar` magic too. An all-zero block is not a header.
+ */
+export const isTarHeader = (block: Uint8Array): boolean => {
+  if (block.length < TAR_BLOCK) return false;
+  const field = String.fromCharCode(
+    ...block.subarray(TAR_CHECKSUM_OFFSET, TAR_CHECKSUM_OFFSET + TAR_CHECKSUM_LENGTH)
+  );
+  const match = /^ *([0-7]{1,7})[ \0]*$/.exec(field);
+  if (!match) return false;
+  const stored = parseInt(match[1], 8);
+  let unsigned = 0;
+  let signed = 0;
+  for (let i = 0; i < TAR_BLOCK; i++) {
+    const byte =
+      i >= TAR_CHECKSUM_OFFSET && i < TAR_CHECKSUM_OFFSET + TAR_CHECKSUM_LENGTH ? 0x20 : block[i];
+    unsigned += byte;
+    signed += byte > 0x7f ? byte - 0x100 : byte;
+  }
+  // An all-zero block would sum to 256 (the spaces) and never match "0".
+  return stored === unsigned || stored === signed;
+};
+
+const startsWith = (head: Uint8Array, bytes: readonly number[]) =>
+  head.length >= bytes.length && bytes.every((b, i) => head[i] === b);
+
+const BZIP2_BLOCK_MAGIC = [0x31, 0x41, 0x59, 0x26, 0x53, 0x59];
+const BZIP2_END_MAGIC = [0x17, 0x72, 0x45, 0x38, 0x50, 0x90];
+
+/** `BZh` + block size `1`–`9`, then a block or the end-of-stream marker. */
+const isBzip2 = (head: Uint8Array) =>
+  startsWith(head, [0x42, 0x5a, 0x68]) &&
+  head.length >= 10 &&
+  head[3] >= 0x31 &&
+  head[3] <= 0x39 &&
+  (startsWith(head.subarray(4), BZIP2_BLOCK_MAGIC) ||
+    startsWith(head.subarray(4), BZIP2_END_MAGIC));
 
 /**
  * What a file is, by its first bytes (never by its extension: DICOM files
  * often have none). DICOM: Part 10 `DICM` magic, or (as dwv accepts) a
- * preamble-less data set starting with a group 0008 element.
+ * preamble-less data set starting with a group 0008 element. Archives: ZIP,
+ * gzip (deflate), bzip2 and xz signatures, or a TAR header checksum
+ * (needs `SNIFF_BYTES`).
  */
 export const sniffContent = (head: Uint8Array): ContentKind => {
   if (
@@ -103,8 +177,15 @@ export const sniffContent = (head: Uint8Array): ContentKind => {
   ) {
     return 'zip';
   }
+  if (startsWith(head, [0x1f, 0x8b, 0x08])) return 'gzip';
+  if (isBzip2(head)) return 'bzip2';
+  if (startsWith(head, [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00])) return 'xz';
   if (head.length >= 8 && head[0] === 0x08 && head[1] === 0x00) {
     return 'dicom';
   }
+  if (isTarHeader(head)) return 'tar';
   return 'other';
 };
+
+export const isArchiveKind = (kind: ContentKind): kind is ArchiveKind =>
+  kind !== 'dicom' && kind !== 'other';

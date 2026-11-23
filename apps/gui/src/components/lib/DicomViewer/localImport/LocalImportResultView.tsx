@@ -126,7 +126,7 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
 
       {!result.series.length && !result.mediaFiles.length && (
         <Alert severity="error">
-          No DICOM images that can be displayed were found. Choose a folder or ZIP archive that
+          No DICOM images that can be displayed were found. Choose a folder or an archive that
           contains DICOM image files.
         </Alert>
       )}
