@@ -39,6 +39,12 @@ const HOST_UNIX = 3;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
 const S_IFDIR = 0o040000;
+/**
+ * An empty deflate stream is 2 bytes (`03 00`, as written by zip tools for
+ * directories). No stream this short yields a byte: the shortest block with
+ * one literal takes 3 + 8 + 7 = 18 bits.
+ */
+const MAX_EMPTY_DEFLATE_BYTES = 2;
 
 /** Archive bytes read per slice. */
 const READ_CHUNK = 1024 * 1024;
@@ -322,13 +328,21 @@ export const readZipDirectory = async (
     // never skipped as a directory because its name ends in a separator.
     const isSpecialType = unixType !== 0 && unixType !== S_IFREG && unixType !== S_IFDIR;
     const looksLikeDirectory = isDirectoryName || unixType === S_IFDIR || !segments.length;
-    // A directory holds no data (nothing to decompress): one that does
-    // would hide it behind a directory name.
+    // Checked for every entry, directories included: stored data with a
+    // smaller declared size could hide a file behind an "empty" directory.
+    if (method === METHOD_STORED && compressedSize !== uncompressedSize) {
+      throw corrupt('stored entry sizes differ');
+    }
+    // A directory holds no data. Its declared size alone is not trusted:
+    // only an entry with no compressed bytes, or a deflate stream too short
+    // to produce any byte, is skipped unread. Any other "directory" could
+    // hide a file behind a directory name.
     const isEmptyDirectory =
       looksLikeDirectory &&
       !isSpecialType &&
       uncompressedSize === 0 &&
-      (method === METHOD_STORED || method === METHOD_DEFLATE || compressedSize === 0);
+      (compressedSize === 0 ||
+        (method === METHOD_DEFLATE && compressedSize <= MAX_EMPTY_DEFLATE_BYTES));
     if (isEmptyDirectory) continue;
     checkPathLimits(segments, limits);
 
@@ -348,8 +362,6 @@ export const readZipDirectory = async (
       entry.skipReason = 'unsupported-entry';
     } else if (method !== METHOD_STORED && method !== METHOD_DEFLATE) {
       entry.skipReason = 'unsupported-entry';
-    } else if (method === METHOD_STORED && compressedSize !== uncompressedSize) {
-      throw corrupt('stored entry sizes differ');
     } else if (uncompressedSize > limits.maxFileBytes) {
       entry.skipReason = 'too-large';
     } else if (seenPaths.has(entry.path)) {

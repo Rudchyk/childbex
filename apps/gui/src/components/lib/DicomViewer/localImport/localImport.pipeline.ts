@@ -266,7 +266,8 @@ const entryRejections: Partial<Record<SkipReason, string>> = {
   unreadable: 'could not be read',
   'nested-archive': 'is an archive inside the archive',
   'unsupported-entry':
-    'is a link or special file (device, FIFO) or uses an unsupported compression method',
+    'is a link or special file (device, FIFO), a directory holding data, or uses an ' +
+    'unsupported compression method',
   'duplicate-path': 'appears more than once in the archive',
   'corrupt-entry': 'is damaged (size or CRC-32 check failed)',
   'header-too-large': 'has a DICOM header too large to check',

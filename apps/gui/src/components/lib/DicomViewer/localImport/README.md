@@ -253,8 +253,13 @@ A Series is never presented as complete when images of it may be missing.
   but a link, device, FIFO or unsupported entry (ZIP: also an unsupported
   compression method) rejects the archive whatever its name. In a ZIP the
   Unix file type is checked before the name: an entry whose name ends in
-  `/` or `\` is skipped as a directory only when it is not a link or
-  special file and holds no data.
+  `/` or `\` (or with the Unix directory type) is skipped as a directory
+  only when it is not a link or special file and holds no data. The
+  declared size of 0 is not trusted alone: the entry must have no
+  compressed bytes, or be a deflate stream of at most 2 bytes (the empty
+  stream zip tools write, too short to produce any byte). A stored entry
+  whose sizes differ is rejected as damaged; any other "directory" with
+  data rejects the archive as an unsupported entry.
   A rejected archive is shown as "Archive 2 (TAR.GZ) could not be opened"
   with a static reason: neither the archive's file name nor the name of the
   entry at fault appears in the message (names may identify the patient).

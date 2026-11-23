@@ -1051,6 +1051,49 @@ describe('importLocalDicom: TAR-family archives', () => {
         expect(result.series[0].warnings).toEqual(['source-incomplete']);
       });
 
+      describe('a directory entry declaring no data but carrying a DICOM image', () => {
+        const hidden = slice(`${STUDY_1}.1`, 9);
+        it.each([
+          ['stored, trailing /', { name: 'S/IM9/', method: 0 }, /stored entry sizes differ/],
+          ['stored, trailing \\', { name: 'S/IM9\\', method: 0 }, /stored entry sizes differ/],
+          [
+            'stored, Unix directory type',
+            { name: 'S/IM9', method: 0, unixMode: 0o040755 },
+            /stored entry sizes differ/,
+          ],
+          ['deflated, trailing /', { name: 'S/IM9/' }, /is a link or special file/],
+          ['deflated, trailing \\', { name: 'S/IM9\\' }, /is a link or special file/],
+          [
+            'deflated, Unix directory type',
+            { name: 'S/IM9', unixMode: 0o040755 },
+            /is a link or special file/,
+          ],
+        ] as [string, ZipFixtureEntry, RegExp][])(
+          'rejects the ZIP (%s)',
+          async (_label, dir, message) => {
+            const result = await run(
+              pickFiles({
+                'loose-IM': slice(`${STUDY_2}.1`, 1),
+                'study.zip': buildZip([
+                  valid(1),
+                  { ...dir, data: hidden, declaredSize: 0 },
+                  valid(2),
+                ]),
+              })
+            );
+            expect(result.failedArchives.map((a) => a.path)).toEqual(['study.zip']);
+            expect(result.failedArchives[0].message).toMatch(message);
+            // No partial Series from the rejected archive.
+            expect(summary(result).series).toEqual([
+              { study: STUDY_2, series: `${STUDY_2}.1`, instances: [`${STUDY_2}.1.1`] },
+            ]);
+            expect(result.skipped).toEqual([]);
+            expect(result.incompleteSources).toEqual([{ source: '', count: 1 }]);
+            expect(result.series[0].warnings).toEqual(['source-incomplete']);
+          }
+        );
+      });
+
       it('still opens a ZIP with ordinary directory entries', async () => {
         const result = await run(
           pickFiles({
