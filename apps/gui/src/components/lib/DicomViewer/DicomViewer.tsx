@@ -363,7 +363,8 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   isCleanRef.current = isClean;
   /**
    * Whether the view is dwv's fit (it follows the viewport when resized),
-   * or zoom/pan the user set (kept on resize: `refitKeepingView`).
+   * or zoom/pan the user set (kept on resize in the standalone viewer:
+   * `refitKeepingView`).
    */
   const followsFitRef = useRef(true);
   /** Container size dwv was last fitted to (none: not fitted yet). */
@@ -543,8 +544,10 @@ export const DicomViewer: FC<DicomViewerProps> = ({
   }, []);
 
   // dwv reads the container size when it fits: refit after a change. The
-  // fit follows the viewport; zoom/pan the user set (e.g. "Actual pixels")
-  // keeps its magnification and centre.
+  // fit follows the viewport. In the standalone viewer only (Issue #57),
+  // zoom/pan the user set (e.g. "Actual pixels") keeps its magnification
+  // and centre; the Series review keeps dwv's own refit (zoom relative to
+  // the fit).
   useEffect(() => {
     const app = appRef.current;
     if (!isDataLoaded) fittedSizeRef.current = null;
@@ -554,7 +557,7 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     fittedSizeRef.current = next;
     // (dwv's fit emits no zoom/pan events; keeping the view does, but only
     // runs once the view no longer follows the fit.)
-    if (followsFitRef.current || !previous) app.fitToContainer();
+    if (!isCleanRef.current || followsFitRef.current || !previous) app.fitToContainer();
     else refitKeepingView(app, previous, next);
   }, [layout, isDataLoaded]);
 
