@@ -14,6 +14,7 @@ done
 
 # Stop on unexpected Certbot hook drift BEFORE changing production files.
 bash "$REPO_ROOT/ops/install/install-certbot-hooks.sh" --check
+bash "$REPO_ROOT/ops/install/install-origin-ssl-monitoring.sh" --check
 
 install -d -o childbex-build -g childbex-deployers -m 2770 /srv/childbex/releases
 install -d -o childbex-build -g childbex-deployers -m 2770 /srv/childbex/ml-releases
@@ -33,6 +34,7 @@ systemctl daemon-reload
 systemctl enable childbex-app.service childbex-ml.service
 
 bash "$REPO_ROOT/ops/install/install-certbot-hooks.sh" --install
+bash "$REPO_ROOT/ops/install/install-origin-ssl-monitoring.sh" --install
 
-echo "Installed ChildBEx production deploy scripts, systemd units and Certbot hooks."
+echo "Installed ChildBEx production deploy scripts, systemd units, Certbot hooks and origin SSL monitoring."
 echo "No deployment was triggered."
