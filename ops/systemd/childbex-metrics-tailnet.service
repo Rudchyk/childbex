@@ -1,0 +1,51 @@
+# Repository-owned (Issue #24). Activated by childbex-metrics-tailnet.socket.
+#
+# Plain TCP forwarding to the loopback Nginx metrics listener. The stream is
+# not parsed, so the Prometheus Authorization header reaches Nginx and the
+# backend unchanged; the backend still enforces Basic Auth.
+
+[Unit]
+Description=ChildBEx app metrics forwarder (Tailscale address to 127.0.0.1:9200)
+Documentation=https://github.com/Rudchyk/childbex/blob/main/docs/operations/metrics-tailnet-proxy.md
+Requires=childbex-metrics-tailnet.socket
+After=childbex-metrics-tailnet.socket
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=5min --connections-max=16 127.0.0.1:9200
+
+# No PrivateNetwork=: the proxy must reach the host's loopback Nginx.
+DynamicUser=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+# No SystemCallFilter=: a syscall the proxy needs (e.g. splice) would kill it
+# with SIGSYS. Tighten only after runtime checks (`systemd-analyze security`).
+UMask=0077
+
+# Outgoing connections from the proxy: loopback only. Accepted connections
+# keep the socket unit's filter (IPAddressAllow on the .socket).
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+MemoryMax=64M
+TasksMax=32
+LimitNOFILE=256
