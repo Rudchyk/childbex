@@ -133,6 +133,13 @@ Do not place production application secrets or model data in GitHub Actions.
 - ChildBEx-owned alert rules: `ops/prometheus/rules/21-childbex-origin-ssl.yml`. These deploy **separately to shared**, where Prometheus and Blackbox remain centrally managed.
 - Tests: `bash ops/tests/test-origin-ssl-monitoring.sh`. Procedure and rollback: [Origin SSL runbook](../docs/operations/origin-ssl-monitoring.md).
 
+## Chrony NTS firewall egress (repository-owned exception)
+
+- `ops/install/install-chrony-nts-ufw.sh --verify|--install` checks/applies **outbound TCP 4460** for Chrony NTS key exchange; it does not change UDP 123, inbound firewall rules or the default UFW policy.
+- The rule is already enabled on ChildBEx production following the 2026-11-24 incident; normal operation requires **read-only verification only**.
+- The installer is opt-in and **not** called by app deploys or the main ops installer. Full UFW baseline ownership is tracked in issue #9.
+- Tests: `bash ops/tests/test-chrony-nts-ufw.sh`. Details, warnings about large clock corrections, and verification: [Chrony NTS UFW runbook](../docs/operations/chrony-nts-ufw.md).
+
 ## App metrics over Tailscale (Issue #24, manual deployment)
 
 - Nginx serves the app metrics on `127.0.0.1:9200` only (`ops/nginx/conf.d/childbex-app-metrics.conf`), so it never binds a Tailscale address and starts whether or not Tailscale is ready.
