@@ -127,10 +127,17 @@ start_socket() {
 }
 stop_socket() { drop "$TAILNET" systemd; rm -f "$S/socket_active"; }
 unit_value() { sed -n "s/^$1=//p" "$UNITS/childbex-metrics-tailnet.socket" | tail -n 1; }
+conf_listen() { sed -n 's/^[[:space:]]*listen[[:space:]]\{1,\}\([^;]*\);.*/\1/p' "$CONF" | head -n 1; }
 case "$1" in
   daemon-reload) ;;
   reload)
-    new="$(sed -n 's/^[[:space:]]*listen[[:space:]]\{1,\}\([^;]*\);.*/\1/p' "$CONF" | head -n 1)"
+    new="$(conf_listen)"
+    # Injected failures when Nginx is asked to take the tailnet address back.
+    if [[ "$new" == "$TAILNET" && -e "$S/reload_kills_nginx_to_tailnet" ]]; then
+      drop "$(awk '$2 == "nginx" { print $1; exit }' "$S/listeners")" nginx
+      rm -f "$S/nginx_active"; exit 1
+    fi
+    [[ "$new" == "$TAILNET" && -e "$S/fail_reload_to_tailnet" ]] && exit 1
     old="$(awk '$2 == "nginx" { print $1; exit }' "$S/listeners")"
     [[ "$new" == "$old" ]] && exit 0
     held "$new" && exit 1
@@ -138,24 +145,42 @@ case "$1" in
     delay="$(cat "$S/release_delay" 2>/dev/null || echo 0)"
     [[ -n "$old" ]] && ((delay > 0)) && echo "$old nginx $delay" >"$S/stale"
     ;;
+  cat)
+    unit="$2"
+    [[ -f "$UNITS/$unit" ]] || exit 1
+    echo "# /etc/systemd/system/$unit"; cat "$UNITS/$unit"
+    [[ -e "$S/cat_extra-$unit" ]] && { echo; cat "$S/cat_extra-$unit"; }
+    ;;
   is-active)
     case "${@: -1}" in
-      nginx.service) [[ -e "$S/nginx_active" ]] ;;
-      childbex-metrics-tailnet.socket) [[ -e "$S/socket_active" ]] ;;
-      *) exit 3 ;;
-    esac ;;
+      nginx.service) [[ -e "$S/nginx_active" ]] && exit 0 ;;
+      childbex-metrics-tailnet.socket) [[ -e "$S/socket_active" ]] && exit 0 ;;
+    esac
+    exit 3 ;;
   is-enabled) [[ -e "$S/socket_enabled" ]] && echo enabled || { echo disabled; exit 1; } ;;
   enable)
     touch "$S/socket_enabled"
     [[ "$2" == --now ]] && start_socket ;;
   disable) rm -f "$S/socket_enabled"; [[ "$2" == --now ]] && stop_socket ;;
-  start) [[ "$2" == childbex-metrics-tailnet.socket ]] && start_socket ;;
+  start)
+    case "$2" in
+      childbex-metrics-tailnet.socket) start_socket ;;
+      nginx.service)
+        held "$(conf_listen)" && exit 1
+        echo "$(conf_listen) nginx" >>"$S/listeners"; touch "$S/nginx_active" ;;
+    esac ;;
   stop) [[ "$2" == childbex-metrics-tailnet.socket ]] && stop_socket ;;
   show)
-    prop="$3"
+    # systemctl show -p PROP --value UNIT [UNIT...]
+    prop="$3"; shift 4
     case "$prop" in
-      DropInPaths) cat "$S/dropins" 2>/dev/null ;;
+      DropInPaths) cat "$S/dropins" 2>/dev/null; for u in "$@"; do cat "$S/dropins-$u" 2>/dev/null; done ;;
       LoadState) echo loaded ;;
+      FragmentPath) cat "$S/fragment-$1" 2>/dev/null || echo "/etc/systemd/system/$1" ;;
+      NeedDaemonReload) [[ -e "$S/need_reload-$1" ]] && echo yes || echo no ;;
+      ExecStart)
+        argv="$(cat "$S/exec_override" 2>/dev/null || sed -n 's/^ExecStart=//p' "$UNITS/$1")"
+        echo "{ path=${argv%% *} ; argv[]=$argv ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }" ;;
       FreeBind|Accept|IPAddressAllow) unit_value "$prop" ;;
       Listen) echo "$(unit_value ListenStream) (Stream)" ;;
       IPAddressDeny) [[ "$(unit_value IPAddressDeny)" == any ]] && echo "0.0.0.0/0 ::/0" ;;
@@ -179,12 +204,16 @@ EOF
 cat >"$BIN/curl" <<'EOF'
 #!/usr/bin/env bash
 S="$MOCK_STATE"
+echo "curl $*" >>"$S/calls"
 url="${@: -1}"
 owner() { awk -v a="$1" '$1 == a { print $2; exit }' "$S/listeners"; }
 case "$url" in
   https://childbex.com/)
     code="$(cat "$S/public_code")"
-    [[ -e "$S/public_fail_after_reload" && -e "$S/reloaded" ]] && code=502 ;;
+    [[ -e "$S/public_fail_after_reload" && -e "$S/reloaded" ]] && code=502
+    # --resolve pins the connection; the peer address shows where it went.
+    [[ "$*" == *'%{remote_ip}'* ]] && code="$code $(cat "$S/public_remote_ip")"
+    printf '%s' "$code"; exit 0 ;;
   http://127.0.0.1:9200/metrics)
     [[ "$(owner 127.0.0.1:9200)" == nginx ]] && code=401 || code=000 ;;
   http://100.117.155.53:9200/metrics)
@@ -203,7 +232,7 @@ EOF
 cat >"$BIN/ufw" <<'EOF'
 #!/usr/bin/env bash
 S="$MOCK_STATE"
-[[ "$*" == status ]] && { cat "$S/ufw"; exit 0; }
+[[ "$*" == "status verbose" ]] && { cat "$S/ufw"; exit 0; }
 echo "ufw $*" >>"$S/calls"
 echo "UFW-MODIFY $*" >>"$S/ufw_writes"
 exit 1
@@ -218,12 +247,22 @@ chmod +x "$BIN"/*
 
 # --- Fake host ----------------------------------------------------------------
 
-UFW_OK='Status: active
+# `ufw status verbose` as on production; the 9200 line is the exact observed
+# production rule (destination-qualified).
+UFW_HEAD='Status: active
+Logging: on (low)
+Default: deny (incoming), allow (outgoing), deny (routed)
+New profiles: skip
 
 To                         Action      From
---                         ------      ----
-22/tcp                     ALLOW       Anywhere
-9200/tcp on tailscale0     ALLOW       100.78.90.38'
+--                         ------      ----'
+UFW_PROD_RULE='100.117.155.53 9200/tcp on tailscale0 ALLOW IN 100.78.90.38'
+UFW_OK="$UFW_HEAD
+22/tcp                     ALLOW IN    Anywhere
+80,443/tcp                 ALLOW IN    Anywhere
+$UFW_PROD_RULE
+22/tcp (v6)                ALLOW IN    Anywhere (v6)
+80,443/tcp (v6)            ALLOW IN    Anywhere (v6)"
 
 setup() {
   ROOT="$TMP/host-$1"; S="$TMP/state-$1"
@@ -243,6 +282,7 @@ setup() {
   : >"$S/calls"; : >"$S/stale"
   touch "$S/nginx_active"
   echo 200 >"$S/public_code"
+  echo 127.0.0.1 >"$S/public_remote_ip"
   echo 000 >"$S/tailnet_probe_code"
   printf '%s\n' "$UFW_OK" >"$S/ufw"
   export CHILDBEX_METRICS_PROXY_ROOT="$ROOT" MOCK_STATE="$S"
@@ -372,16 +412,53 @@ ok "port 9200 conflicts (other processes, wildcard listeners, other vhosts) stop
 
 # --- UFW ------------------------------------------------------------------------------
 
-setup ufwmissing
-printf 'Status: active\n\n22/tcp ALLOW Anywhere\n' >"$S/ufw"
-run --install; [[ "$RC" -ne 0 ]] || fail "missing UFW rule not detected"; assert_no_writes ufwmissing
-setup ufwbroad
-printf '%s\n9200/tcp                   ALLOW       Anywhere\n' "$UFW_OK" >"$S/ufw"
-run --install; [[ "$RC" -ne 0 ]] || fail "broader UFW rule not detected"; assert_no_writes ufwbroad
+# The exact production format (destination-qualified rule) is accepted; the
+# happy path above already installed with it. Also aligned columns.
+setup ufwaligned
+printf '%s\n100.117.155.53 9200/tcp on tailscale0  ALLOW IN    100.78.90.38\nNginx Full                 ALLOW IN    Anywhere\n9200/udp                   ALLOW IN    Anywhere\n9200/tcp                   DENY IN     Anywhere\n' \
+  "$UFW_HEAD" >"$S/ufw"
+run --check; expect_rc 0 "aligned production rule, profile, udp and DENY rules"
+expect_out "OK: UFW allows 100.117.155.53 9200/tcp on tailscale0 from 100.78.90.38 only" "UFW ok"
+expect_out 'application-profile rule not evaluated' "profile warning"
+ok "UFW: the exact production rule format is accepted (UDP and DENY rules are not conflicts)"
+
+ufw_rejects() {
+  local label="$1" rules="$2"
+  setup ufwreject
+  printf '%s\n%s\n' "$UFW_HEAD" "$rules" >"$S/ufw"
+  run --install; [[ "$RC" -ne 0 ]] || fail "UFW: $label not rejected"
+  assert_no_writes ufwreject
+}
+ufw_rejects "missing rule" '22/tcp                     ALLOW IN    Anywhere'
+ufw_rejects "wildcard destination (simplified form)" '9200/tcp on tailscale0     ALLOW IN    100.78.90.38'
+ufw_rejects "wildcard destination and source" "$UFW_PROD_RULE
+9200/tcp                   ALLOW IN    Anywhere"
+ufw_rejects "additional source" "$UFW_PROD_RULE
+100.117.155.53 9200/tcp on tailscale0 ALLOW IN 100.64.0.7"
+ufw_rejects "other interface only" '100.117.155.53 9200/tcp on eth0 ALLOW IN 100.78.90.38'
+ufw_rejects "other interface in addition" "$UFW_PROD_RULE
+100.117.155.53 9200/tcp on eth0 ALLOW IN 100.78.90.38"
+ufw_rejects "port range" "$UFW_PROD_RULE
+9000:9300/tcp              ALLOW IN    Anywhere"
+ufw_rejects "port list" "$UFW_PROD_RULE
+80,443,9200/tcp            ALLOW IN    Anywhere"
+ufw_rejects "all ports on tailscale0" "$UFW_PROD_RULE
+Anywhere on tailscale0     ALLOW IN    Anywhere"
+ufw_rejects "all ports from a network" "$UFW_PROD_RULE
+Anywhere                   ALLOW IN    100.64.0.0/10"
+ufw_rejects "IPv6 rule" "$UFW_PROD_RULE
+9200/tcp (v6) on tailscale0 ALLOW IN   Anywhere (v6)"
+ufw_rejects "LIMIT rule" "$UFW_PROD_RULE
+9200/tcp                   LIMIT IN    Anywhere"
+ufw_rejects "duplicate approved rule" "$UFW_PROD_RULE
+$UFW_PROD_RULE"
+setup ufwdefault
+sed 's/^Default: deny (incoming)/Default: allow (incoming)/' <<<"$UFW_OK" >"$S/ufw"
+run --install; [[ "$RC" -ne 0 ]] || fail "default allow incoming not rejected"; assert_no_writes ufwdefault
 setup ufwinactive
 printf 'Status: inactive\n' >"$S/ufw"
 run --install; [[ "$RC" -ne 0 ]] || fail "inactive UFW not detected"; assert_no_writes ufwinactive
-ok "UFW must keep exactly the tailscale0 rule for 100.78.90.38; the installer never changes it"
+ok "UFW: wildcard destinations, extra sources or interfaces, ranges, lists, all-port, IPv6, LIMIT and duplicate rules are rejected"
 
 # --- Failed activation and rollback ---------------------------------------------------
 
@@ -433,9 +510,104 @@ run --install; expect_rc 0 "install"
 touch "$S/no_tailnet_addr"
 run --rollback; [[ "$RC" -ne 0 ]] || fail "rollback without Tailscale address must fail"
 expect_out 'ROLLBACK FAILED' "guarded rollback"
+expect_out '^RECOVERED: ' "recovery reported"
 cmp -s "$NGINX_SRC" "$ROOT/etc/nginx/conf.d/childbex-app-metrics.conf" || fail "loopback vhost kept"
 [[ "$(owner "$TAILNET")" == systemd ]] || fail "socket restarted"
 ok "rollback never leaves Nginx with a vhost that fails nginx -t"
+
+# --- Nginx reload failures during rollback -------------------------------------------------
+
+assert_recovered_installed() {
+  cmp -s "$NGINX_SRC" "$ROOT/etc/nginx/conf.d/childbex-app-metrics.conf" || fail "loopback vhost not restored"
+  [[ -e "$S/nginx_active" ]] || fail "nginx.service not active"
+  [[ "$(owner "$LOOPBACK")" == nginx ]] || fail "Nginx not on $LOOPBACK"
+  [[ -e "$ROOT/etc/systemd/system/childbex-metrics-tailnet.socket" ]] || fail "socket unit removed"
+  grep -q '^ROLLED BACK' <<<"$OUT" && fail "claimed a completed rollback"
+  return 0
+}
+
+setup reloadfail
+run --install; expect_rc 0 "install"
+touch "$S/fail_reload_to_tailnet"
+run --rollback; expect_rc 1 "explicit rollback with failing reload"
+expect_out 'ROLLBACK FAILED: nginx reload' "reason"; expect_out '^RECOVERED: ' "recovered"
+assert_recovered_installed
+[[ "$(owner "$TAILNET")" == systemd ]] || fail "socket not restored"
+rm -f "$S/fail_reload_to_tailnet"
+run --verify; expect_rc 0 "verify after recovery"
+ok "explicit rollback: failed reload recovers the consistent installed state (verify passes)"
+
+setup reloaddies
+run --install; expect_rc 0 "install"
+touch "$S/reload_kills_nginx_to_tailnet"
+run --rollback; expect_rc 1 "rollback where the reload kills Nginx"
+expect_out '^RECOVERED: ' "recovered"
+assert_recovered_installed
+grep -q 'systemctl start nginx.service' "$S/calls" || fail "Nginx not started during recovery"
+ok "explicit rollback: Nginx stopped by a failed reload is started again on the loopback vhost"
+
+setup autoreloadfail
+echo 401 >"$S/tailnet_probe_code"            # verification fails → automatic rollback
+touch "$S/fail_reload_to_tailnet"            # … whose reload fails
+run --install; expect_rc 1 "automatic rollback with failing reload"
+expect_out 'post-install verification failed' "trigger"; expect_out '^RECOVERED: ' "recovered"
+assert_recovered_installed
+[[ "$(owner "$TAILNET")" == systemd ]] || fail "socket not restored"
+ok "automatic rollback: failed reload recovers the installed state and says the rollback did not complete"
+
+setup autoincomplete
+touch "$S/fail_socket_start" "$S/fail_reload_to_tailnet"
+run --install; expect_rc 1 "automatic rollback, reload and socket both failing"
+expect_out '^RECOVERY INCOMPLETE: .*childbex-metrics-tailnet.socket' "incomplete recovery named"
+grep -q '^RECOVERED' <<<"$OUT" && fail "claimed recovery with the socket down"
+assert_recovered_installed
+ok "recovery reports exactly which component stays inconsistent (never claims success)"
+
+# --- Effective systemd configuration -------------------------------------------------------
+
+# One install; each case injects one effective-configuration fault, checks
+# that --verify rejects it, then removes it (verify passes again).
+setup effective
+run --install; expect_rc 0 "install"
+effective_rejects() {
+  local label="$1" message="$2" knob="$S/$3" content="$4"
+  printf '%s\n' "$content" >"$knob"
+  run --verify; [[ "$RC" -ne 0 ]] || fail "verify accepted: $label"
+  expect_out "$message" "$label"
+  rm -f -- "$knob"
+}
+effective_rejects "service drop-in" 'has drop-ins' dropins-childbex-metrics-tailnet.service \
+  /etc/systemd/system/childbex-metrics-tailnet.service.d/x.conf
+effective_rejects "socket drop-in" 'has drop-ins' dropins-childbex-metrics-tailnet.socket \
+  /etc/systemd/system/childbex-metrics-tailnet.socket.d/x.conf
+effective_rejects "fragment elsewhere" 'is loaded from' fragment-childbex-metrics-tailnet.socket \
+  /run/systemd/system/childbex-metrics-tailnet.socket
+effective_rejects "pending daemon-reload" 'since the last daemon-reload' \
+  need_reload-childbex-metrics-tailnet.service yes
+effective_rejects "other proxy command" 'expected systemd-socket-proxyd command' exec_override \
+  '/usr/lib/systemd/systemd-socket-proxyd 10.0.0.1:9200'
+effective_rejects "loaded content differs" 'differs from Git' cat_extra-childbex-metrics-tailnet.socket \
+  "$(printf '# /etc/systemd/system/x.conf\n[Socket]\nIPAddressAllow=any')"
+run --verify; expect_rc 0 "verify after removing every injected fault"
+ok "verify checks the effective units: drop-ins, fragment, daemon-reload, ExecStart, loaded content"
+
+# --- HTTP probes ----------------------------------------------------------------------------
+
+setup probes
+run --install; expect_rc 0 "install"
+probes="$(grep '^curl ' "$S/calls")"
+[[ -n "$probes" ]] || fail "no HTTP probes recorded"
+if grep -v -- "--noproxy \*" <<<"$probes" | grep -q .; then fail "probe without --noproxy '*'"; fi
+grep -q -- "--resolve childbex.com:443:127.0.0.1" <<<"$probes" || fail "public probe not pinned to 127.0.0.1"
+grep -Eq -- ' -v | --verbose| -i | --include| -D ' <<<"$probes" && fail "a probe could print headers"
+grep -q -- '-o /dev/null' <<<"$probes" || fail "response bodies not discarded"
+ok "every HTTP probe bypasses proxies and discards bodies; the public probe is pinned to 127.0.0.1"
+
+setup notlocal
+echo 203.0.113.10 >"$S/public_remote_ip"
+run --install; [[ "$RC" -ne 0 ]] || fail "public probe that did not reach 127.0.0.1 accepted"
+expect_out 'public site check' "reason"; assert_no_writes notlocal
+ok "a public probe answered by anything other than the local Nginx stops the install"
 
 # --- Root requirement ---------------------------------------------------------------------
 

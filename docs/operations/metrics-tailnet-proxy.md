@@ -120,8 +120,15 @@ It stops, without changing anything, when:
 - another Nginx file listens on `100.117.155.53` or port 9200;
 - anything other than Nginx or the systemd socket listens on port 9200 (any
   address, including wildcards);
-- UFW is inactive, the `tailscale0` rule for `100.78.90.38` is missing, or
-  another rule allows port 9200.
+- UFW (`ufw status verbose`) is inactive, its default incoming policy is not
+  deny, or the rules are not exactly one approved rule in the production
+  format `100.117.155.53 9200/tcp on tailscale0 ALLOW IN 100.78.90.38` plus
+  rules that cannot reach TCP/9200. Rejected as conflicts: the same port
+  without the destination address (wildcard destination), other sources or
+  interfaces, IPv6 variants, `LIMIT`, port lists or ranges including 9200,
+  and rules without a port (all ports, e.g. `Anywhere on tailscale0`).
+  Application-profile rules (e.g. `Nginx Full`) are listed as warnings, not
+  evaluated; DENY and UDP rules are ignored.
 
 Expected output ends with `CHECKED: state 'legacy'; no changes made`.
 
@@ -166,7 +173,11 @@ sudo bash ops/install/install-metrics-tailnet-proxy.sh --verify
 ```
 
 It checks the files against Git, `nginx.service` active, the socket enabled
-and active, the **effective** socket settings (`systemctl show`: `FreeBind=yes`,
+and active, the **effective** units (no drop-ins, loaded from
+`/etc/systemd/system`, `systemctl cat` identical to Git, no pending
+`daemon-reload`, the service's `ExecStart` exactly
+`/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=5min --connections-max=16 127.0.0.1:9200`),
+the **effective** socket settings (`systemctl show`: `FreeBind=yes`,
 `Accept=no`, `Listen=100.117.155.53:9200 (Stream)`,
 `IPAddressAllow=100.78.90.38/32`, deny-all), the listeners (Nginx on
 `127.0.0.1:9200`, systemd on `100.117.155.53:9200`, nothing else), `nginx -t`,
@@ -174,6 +185,26 @@ the public site (200), anonymous loopback metrics (401), and that a request from
 ChildBEx itself to `100.117.155.53:9200` gets **no** HTTP answer (its source
 is not `100.78.90.38`, and UFW accepts loopback traffic, so only the socket
 filter can drop it): this is the runtime proof that the systemd IP filter works.
+All HTTP probes use `--noproxy '*'`, discard bodies and print only status
+codes; the public probe uses `--resolve childbex.com:443:127.0.0.1` and must
+report `127.0.0.1` as the peer, so it really reached the local Nginx.
+
+**Output formats to confirm on the host (systemd 259) before the first
+install.** The tests use mocks; `--verify` fails closed (stops) if a format
+differs, but confirm once with:
+
+```bash
+systemctl show childbex-metrics-tailnet.socket -p Listen -p FreeBind -p Accept -p IPAddressAllow -p IPAddressDeny
+#   expected: Listen=100.117.155.53:9200 (Stream), FreeBind=yes, Accept=no,
+#             IPAddressAllow=100.78.90.38/32, IPAddressDeny=0.0.0.0/0 ::/0
+systemctl show childbex-metrics-tailnet.service -p ExecStart -p DropInPaths -p FragmentPath -p NeedDaemonReload
+#   expected ExecStart: { path=... ; argv[]=/usr/lib/systemd/systemd-socket-proxyd ... ; ... }
+systemctl cat childbex-metrics-tailnet.socket | head -n 1   # "# /etc/systemd/system/childbex-metrics-tailnet.socket"
+```
+
+These units can be checked without starting anything: copy them to a scratch
+directory and run `systemd-analyze verify` there, or run `--install` only
+after these outputs match.
 
 Manual equivalents:
 
@@ -216,7 +247,7 @@ code here means metrics are reachable beyond Shared: roll back and investigate.
 ## 7. UFW and Nginx checks
 
 ```bash
-sudo ufw status | grep 9200    # unchanged: 9200/tcp on tailscale0 ALLOW 100.78.90.38
+sudo ufw status verbose | grep 9200   # unchanged: 100.117.155.53 9200/tcp on tailscale0 ALLOW IN 100.78.90.38
 sudo nginx -t
 systemctl is-active nginx
 sudo journalctl -u nginx -b --no-pager | grep -E 'emerg|bind\(\)' || echo 'no bind errors'
@@ -237,10 +268,24 @@ Order: disable and stop the socket and the proxy service **first**, wait until
 `nginx -t`, reload, wait for Nginx on the tailnet address, remove the two unit
 files (only if they still match Git), `daemon-reload`.
 
-Rollback reintroduces the original boot race. It refuses to leave Nginx with a
-configuration that fails `nginx -t`: if Tailscale has no address at that
-moment, it restores the loopback vhost, restarts the socket and reports
-`ROLLBACK FAILED`; retry once Tailscale is up.
+Rollback reintroduces the original boot race.
+
+If a rollback step fails after the socket was stopped (the restored vhost fails
+`nginx -t`, e.g. Tailscale has no address at that moment; the reload fails;
+Nginx does not take the address back), the installer reports
+`ROLLBACK FAILED: <reason>` and recovers the installed state: loopback vhost
+written and validated, Nginx reloaded (or started, if the failed reload
+stopped it), socket restarted. It then prints either
+
+- `RECOVERED: installed state restored ...; the rollback did NOT complete`
+  (consistent; metrics work; retry the rollback later), or
+- `RECOVERY INCOMPLETE: <component>` for each part that is still wrong
+  (manual action required, see below).
+
+It never prints `ROLLED BACK` unless the legacy vhost is active again. The same
+recovery runs when an automatic rollback during `--install` fails. Any other
+unexpected failure prints `ERROR: unexpected failure at line N` instead of
+exiting silently; run `--check` before anything else.
 
 Manual rollback if the script cannot be used:
 
