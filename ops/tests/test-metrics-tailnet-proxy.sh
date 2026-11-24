@@ -100,7 +100,15 @@ cat >"$BIN/ss" <<'EOF'
 S="$MOCK_STATE"
 echo "ss $*" >>"$S/calls"
 while read -r a o; do
-  [[ -n "$a" ]] && printf 'LISTEN 0 511 %s 0.0.0.0:* users:(("%s",pid=10,fd=6))\n' "$a" "$o"
+  if [[ "$a" == "100.117.155.53:9200" && "$o" == systemd && -e "$S/proxy_holds_socket" ]]; then
+    # Actual production ss output after a scrape: the proxy process is shown
+    # FIRST, but PID 1 still owns the inherited listening socket too.
+    extra=""
+    [[ -e "$S/foreign_socket_owner" ]] && extra=',("python3",pid=77,fd=4)'
+    printf 'LISTEN 0 64 %s 0.0.0.0:* users:(("systemd-socket-",pid=99,fd=3),("systemd",pid=1,fd=85)%s)\n' "$a" "$extra"
+  elif [[ -n "$a" ]]; then
+    printf 'LISTEN 0 511 %s 0.0.0.0:* users:(("%s",pid=10,fd=6))\n' "$a" "$o"
+  fi
 done <"$S/listeners"
 # Old Nginx workers: still listening for the next N calls.
 if [[ -s "$S/stale" ]]; then
@@ -342,6 +350,23 @@ ok "install hands $TAILNET to systemd after old Nginx workers release it (delaye
 
 run --verify; expect_rc 0 "verify after install"; expect_out '^VERIFIED: ' "verify summary"
 ok "verify passes on the installed state"
+
+# Regression: a real systemd-socket-proxyd shares PID 1's listener fd after
+# receiving metrics traffic, and ss lists proxyd before systemd. Reject any
+# unexpected additional co-owner rather than silently trusting the first one.
+touch "$S/proxy_holds_socket"
+run --verify; expect_rc 0 "verify with active socket-proxyd co-owner"
+run --check; expect_rc 0 "preflight with active socket-proxyd co-owner"
+run --install; expect_rc 0 "idempotent install with active socket-proxyd co-owner"
+touch "$S/foreign_socket_owner"
+run --verify; [[ "$RC" -ne 0 ]] || fail "verify accepted foreign co-owner alongside systemd"
+expect_out "does not hold" "foreign co-owner"
+run --check; [[ "$RC" -ne 0 ]] || fail "check accepted foreign co-owner alongside systemd"
+expect_out 'CONFLICT' "foreign co-owner is reported"
+rm -f "$S/foreign_socket_owner"
+run --verify; expect_rc 0 "verify after unknown co-owner removed"
+ok "active proxyd + systemd fd co-owners pass; unexpected third owner fails closed"
+
 
 reloads="$(count 'systemctl reload')"
 run --install; expect_rc 0 "second install"
