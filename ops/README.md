@@ -133,6 +133,13 @@ Do not place production application secrets or model data in GitHub Actions.
 - ChildBEx-owned alert rules: `ops/prometheus/rules/21-childbex-origin-ssl.yml`. These deploy **separately to shared**, where Prometheus and Blackbox remain centrally managed.
 - Tests: `bash ops/tests/test-origin-ssl-monitoring.sh`. Procedure and rollback: [Origin SSL runbook](../docs/operations/origin-ssl-monitoring.md).
 
+## App metrics over Tailscale (Issue #24, manual deployment)
+
+- Nginx serves the app metrics on `127.0.0.1:9200` only (`ops/nginx/conf.d/childbex-app-metrics.conf`), so it never binds a Tailscale address and starts whether or not Tailscale is ready.
+- `ops/systemd/childbex-metrics-tailnet.{socket,service}` own `100.117.155.53:9200` (systemd `FreeBind=yes`, allow `100.78.90.38/32` only) and forward to it with `systemd-socket-proxyd`. The Prometheus target, labels and backend Basic Auth are unchanged; UFW is not modified.
+- `ops/install/install-metrics-tailnet-proxy.sh --check|--verify|--install|--rollback` is opt-in and **not** called by the main ops installer. It stops on drift or port conflicts, backs up the original vhost and rolls back automatically on failure.
+- Tests: `bash ops/tests/test-metrics-tailnet-proxy.sh`. Procedure, verification from Shared, rollback and the controlled reboot that closes #24: [`docs/operations/metrics-tailnet-proxy.md`](../docs/operations/metrics-tailnet-proxy.md).
+
 ## Nginx DICOM rate limiting (manual deployment)
 
 - Proposed, repository-owned Nginx snippets: `ops/nginx/conf.d/99-ratelimit.conf` and `ops/nginx/snippets/childbex-dicom-location.conf`.

@@ -91,3 +91,5 @@ jobs:
           bash -n ops/install/install-production-deploy.sh
           bash ops/tests/test-certbot-hooks.sh
           bash ops/tests/test-origin-ssl-monitoring.sh
+          bash -n ops/install/install-metrics-tailnet-proxy.sh
+          bash ops/tests/test-metrics-tailnet-proxy.sh
