@@ -120,7 +120,15 @@ check_owner_mode() {
 listeners() {
   local _state _recv _send local_addr _peer rest owner
   ss -H -l -t -n -p "sport = :$PORT" | while read -r _state _recv _send local_addr _peer rest; do
-    owner="$(sed -n 's/.*users:(("\([^"]*\)".*/\1/p' <<<"$rest")"
+    # ss may list multiple processes holding one socket after the first
+    # scrape: systemd-socket-proxyd inherits the listening fd from PID 1
+    # and can appear BEFORE systemd. Inspect every owner, not just the first.
+    owner="$(grep -oE '\("[^"]+",pid=' <<<"$rest" | sed -E 's/^\("([^"]+)",pid=$/\1/' | LC_ALL=C sort -u | paste -sd, - || true)"
+    # Allow only the expected pair, including a Linux-truncated comm name.
+    # Unknown/extra co-owners must still fail the normal conflict checks.
+    if [[ "$owner" =~ ^systemd,systemd-socket-[A-Za-z0-9_-]*$ ]]; then
+      owner=systemd
+    fi
     echo "$local_addr ${owner:-?}"
   done
 }
