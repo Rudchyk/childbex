@@ -9,6 +9,7 @@ import { Inflate } from 'fflate';
 import {
   checkPathLimits,
   formatBytes,
+  normalizeArchivePath,
   readBlobBytes,
   throwIfCancelled,
   yieldToBrowser,
@@ -38,6 +39,12 @@ const HOST_UNIX = 3;
 const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
 const S_IFDIR = 0o040000;
+/**
+ * An empty deflate stream is 2 bytes (`03 00`, as written by zip tools for
+ * directories). No stream this short yields a byte: the shortest block with
+ * one literal takes 3 + 8 + 7 = 18 bits.
+ */
+const MAX_EMPTY_DEFLATE_BYTES = 2;
 
 /** Archive bytes read per slice. */
 const READ_CHUNK = 1024 * 1024;
@@ -127,19 +134,9 @@ const decodeName = (bytes: Uint8Array) => {
   return name;
 };
 
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
-
 /** Validates an entry name: no traversal, absolute or drive paths. */
-export const normalizeZipPath = (rawName: string): string[] => {
-  if (CONTROL_CHARS.test(rawName)) throw unsafe('control characters in a path');
-  const name = rawName.replace(/\\/g, '/');
-  if (name.startsWith('/')) throw unsafe('absolute path');
-  if (/^[a-zA-Z]:/.test(name)) throw unsafe('drive-letter path');
-  const segments = name.split('/').filter((s) => s !== '' && s !== '.');
-  if (segments.some((s) => s === '..')) throw unsafe('path traversal');
-  return segments;
-};
+export const normalizeZipPath = (rawName: string): string[] =>
+  normalizeArchivePath(rawName, unsafe);
 
 const findEndOfCentralDirectory = async (archive: Blob) => {
   const tailStart = Math.max(0, archive.size - EOCD_SIZE - MAX_COMMENT);
@@ -327,7 +324,26 @@ export const readZipDirectory = async (
     position = next;
     const isDirectoryName = /[\\/]$/.test(rawName);
     const unixType = madeBy >> 8 === HOST_UNIX ? (externalAttributes >>> 16) & S_IFMT : 0;
-    if (isDirectoryName || unixType === S_IFDIR || !segments.length) continue;
+    // The Unix type decides before the name: a link, FIFO or device is
+    // never skipped as a directory because its name ends in a separator.
+    const isSpecialType = unixType !== 0 && unixType !== S_IFREG && unixType !== S_IFDIR;
+    const looksLikeDirectory = isDirectoryName || unixType === S_IFDIR || !segments.length;
+    // Checked for every entry, directories included: stored data with a
+    // smaller declared size could hide a file behind an "empty" directory.
+    if (method === METHOD_STORED && compressedSize !== uncompressedSize) {
+      throw corrupt('stored entry sizes differ');
+    }
+    // A directory holds no data. Its declared size alone is not trusted:
+    // only an entry with no compressed bytes, or a deflate stream too short
+    // to produce any byte, is skipped unread. Any other "directory" could
+    // hide a file behind a directory name.
+    const isEmptyDirectory =
+      looksLikeDirectory &&
+      !isSpecialType &&
+      uncompressedSize === 0 &&
+      (compressedSize === 0 ||
+        (method === METHOD_DEFLATE && compressedSize <= MAX_EMPTY_DEFLATE_BYTES));
+    if (isEmptyDirectory) continue;
     checkPathLimits(segments, limits);
 
     const entry: ZipEntry = {
@@ -340,13 +356,12 @@ export const readZipDirectory = async (
       localHeaderOffset,
       limitOffset: directoryOffset,
     };
-    if (unixType !== 0 && unixType !== S_IFREG) {
-      // Links are never followed; devices and the like are not files.
+    if (isSpecialType || looksLikeDirectory) {
+      // Links are never followed; devices and the like are not files; a
+      // directory with data is neither.
       entry.skipReason = 'unsupported-entry';
     } else if (method !== METHOD_STORED && method !== METHOD_DEFLATE) {
       entry.skipReason = 'unsupported-entry';
-    } else if (method === METHOD_STORED && compressedSize !== uncompressedSize) {
-      throw corrupt('stored entry sizes differ');
     } else if (uncompressedSize > limits.maxFileBytes) {
       entry.skipReason = 'too-large';
     } else if (seenPaths.has(entry.path)) {
@@ -448,7 +463,7 @@ export const extractZipEntry = async (
       ? new Inflate((data) => {
           produced += data.length;
           if (produced > entry.uncompressedSize) {
-            throw unsafe(`"${entry.path}" expands beyond its declared size, possible ZIP bomb`);
+            throw unsafe('an entry expands beyond its declared size, possible ZIP bomb');
           }
           if (produced > budget.remainingBytes) {
             throw new LocalImportError(
@@ -489,11 +504,11 @@ export const extractZipEntry = async (
     }
   } catch (error) {
     if (error instanceof LocalImportError) throw error;
-    throw new ZipEntryDamagedError(entry.path);
+    throw new ZipEntryDamagedError();
   }
 
   if (produced !== entry.uncompressedSize || crc !== entry.crc32) {
-    throw new ZipEntryDamagedError(entry.path);
+    throw new ZipEntryDamagedError();
   }
   if (!inflate) return archive.slice(dataStart, dataEnd);
   budget.remainingBytes -= produced;
@@ -503,8 +518,9 @@ export const extractZipEntry = async (
 
 /** One entry is damaged (inflate error, size or CRC-32 mismatch). */
 export class ZipEntryDamagedError extends Error {
-  constructor(path: string) {
-    super(`"${path}" is damaged.`);
+  constructor() {
+    // No entry path: names inside an archive may identify the patient.
+    super('An archive entry is damaged.');
     this.name = 'ZipEntryDamagedError';
   }
 }

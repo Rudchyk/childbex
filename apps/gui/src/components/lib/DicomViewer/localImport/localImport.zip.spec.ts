@@ -119,6 +119,84 @@ describe('readZipDirectory / extractZipEntry', () => {
     ]);
   });
 
+  it('checks the Unix type before skipping an entry named like a directory', async () => {
+    const target = Uint8Array.from('IM1', (c) => c.charCodeAt(0));
+    const archive = zipFile(
+      buildZip([
+        // Ordinary directories: skipped.
+        { name: 'S/' },
+        { name: 'T/', unixMode: 0o040755 },
+        { name: 'U', unixMode: 0o040755 },
+        { name: 'V\\', method: 0 },
+        { name: 'W/', method: 12 },
+        // Special files with a trailing separator: never skipped.
+        { name: 'S/link/', data: target, unixMode: 0o120777 },
+        { name: '__MACOSX/S/link/', data: target, unixMode: 0o120777 },
+        { name: 'S/fifo/', unixMode: 0o010644 },
+        { name: 'S/chr\\', unixMode: 0o020644 },
+        { name: 'S/blk/', unixMode: 0o060644 },
+        { name: 'S/sock/', unixMode: 0o140644 },
+        // A "directory" with data hides it behind a directory name.
+        { name: 'S/data/', data: target },
+        { name: 'S/dir-data', data: target, unixMode: 0o040755 },
+        { name: 'S/IM1', data: syntheticDicom() },
+      ])
+    );
+
+    const entries = await readZipDirectory(archive, limits);
+
+    expect(entries.map((e) => [e.path, e.skipReason])).toEqual([
+      ['S/link', 'unsupported-entry'],
+      ['__MACOSX/S/link', 'unsupported-entry'],
+      ['S/fifo', 'unsupported-entry'],
+      ['S/chr', 'unsupported-entry'],
+      ['S/blk', 'unsupported-entry'],
+      ['S/sock', 'unsupported-entry'],
+      ['S/data', 'unsupported-entry'],
+      ['S/dir-data', 'unsupported-entry'],
+      ['S/IM1', undefined],
+    ]);
+  });
+
+  describe('directory entries that declare no data but carry some', () => {
+    const hidden = syntheticDicom();
+    const named: [string, { name: string; unixMode?: number }][] = [
+      ['a trailing /', { name: 'S/IM9/' }],
+      ['a trailing \\', { name: 'S/IM9\\' }],
+      ['the Unix directory type', { name: 'S/IM9', unixMode: 0o040755 }],
+    ];
+
+    it.each(named)('rejects a stored entry named with %s (sizes differ)', async (_label, dir) => {
+      const archive = zipFile(buildZip([{ ...dir, data: hidden, method: 0, declaredSize: 0 }]));
+      await expectError(
+        readZipDirectory(archive, limits),
+        'CORRUPT_ARCHIVE',
+        /stored entry sizes differ/
+      );
+    });
+
+    it.each(named)('never skips a deflated entry named with %s', async (_label, dir) => {
+      const archive = zipFile(buildZip([{ ...dir, data: hidden, declaredSize: 0 }]));
+      const entries = await readZipDirectory(archive, limits);
+      expect(entries.map((e) => [e.path, e.skipReason])).toEqual([['S/IM9', 'unsupported-entry']]);
+    });
+
+    it('still skips empty directories, stored or deflated (an empty stream is 2 bytes)', async () => {
+      const archive = zipFile(
+        buildZip([
+          { name: 'S/', method: 0 },
+          { name: 'T/' },
+          { name: 'U\\' },
+          { name: 'V', unixMode: 0o040755 },
+          { name: 'W', unixMode: 0o040755, method: 0 },
+          { name: 'S/IM1', data: syntheticDicom() },
+        ])
+      );
+      const entries = await readZipDirectory(archive, limits);
+      expect(entries.map((e) => [e.path, e.skipReason])).toEqual([['S/IM1', undefined]]);
+    });
+  });
+
   it('rejects entries whose data overlaps (non-recursive ZIP bomb)', async () => {
     const data = syntheticDicom();
     const archive = zipFile(

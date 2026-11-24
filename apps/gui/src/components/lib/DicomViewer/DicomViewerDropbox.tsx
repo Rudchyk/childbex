@@ -27,6 +27,9 @@ export interface DicomViewerDropboxProps {
   limits?: Partial<LocalImportLimits>;
 }
 
+/** Archive types opened by the local import (as accepted by the server). */
+const LOCAL_ARCHIVE_TYPES = 'ZIP, TAR, TAR.GZ/TGZ, TAR.BZ2/TBZ2, TAR.XZ/TXZ';
+
 /** `<input webkitdirectory>`: Chrome, Edge, Firefox and Safari support it. */
 const supportsFolderPicker = () =>
   typeof document !== 'undefined' && 'webkitdirectory' in document.createElement('input');
@@ -37,7 +40,7 @@ const setDirectoryInput = (input: HTMLInputElement | null) => {
 
 /**
  * Local DICOM import of the standalone viewer: files, folders (dropped or
- * chosen, read recursively) and ZIP archives, read in this browser only.
+ * chosen, read recursively), ZIP and TAR-family archives, read in this browser only.
  * Images are grouped by Series; one Series at a time goes to the viewer.
  */
 export const DicomViewerDropbox: FC<DicomViewerDropboxProps> = ({
@@ -177,19 +180,20 @@ export const DicomViewerDropbox: FC<DicomViewerDropboxProps> = ({
       {state.status === 'idle' && (
         <Stack spacing={2} alignItems="center" textAlign="center">
           <Typography variant="h6">Open DICOM images</Typography>
-          <Typography>Drag and drop files, folders or a ZIP archive here, or</Typography>
+          <Typography>Drag and drop files, folders or an archive here, or</Typography>
           {pickers}
           {!canPickFolder && (
             <Typography variant="body2" color="text.secondary">
-              This browser cannot choose folders: drag the folder here or choose a ZIP archive.
+              This browser cannot choose folders: drag the folder here or choose an archive.
             </Typography>
           )}
           <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 520 }}>
             Files are opened in this browser only: nothing is uploaded or saved. Folders are
             searched recursively; files are recognised by their content (no .dcm extension
-            needed). Up to {effectiveLimits.maxFiles.toLocaleString('en-US')} files, ZIP archives
-            up to {formatBytes(effectiveLimits.maxArchiveBytes)} (not encrypted, no archives
-            inside archives).
+            needed). Archives: {LOCAL_ARCHIVE_TYPES}. Up to{' '}
+            {effectiveLimits.maxFiles.toLocaleString('en-US')} files, archives up to{' '}
+            {formatBytes(effectiveLimits.maxArchiveBytes)} (not encrypted, no archives inside
+            archives).
           </Typography>
         </Stack>
       )}
@@ -198,7 +202,7 @@ export const DicomViewerDropbox: FC<DicomViewerDropboxProps> = ({
         <Stack spacing={2} sx={{ width: '100%', maxWidth: 520 }} role="status" aria-live="polite">
           <Typography>
             {state.progress.archive
-              ? `Extracting ${state.progress.archive.path}… ${state.progress.archive.percent}%`
+              ? `Extracting archive ${state.progress.archive.index} (${state.progress.archive.format})… ${state.progress.archive.percent}%`
               : 'Reading files…'}
           </Typography>
           {state.progress.archive ? (

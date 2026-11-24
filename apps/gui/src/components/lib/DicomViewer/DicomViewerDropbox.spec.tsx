@@ -1,9 +1,11 @@
 /**
- * The standalone viewer's local import: files, folders and ZIP archives
- * are read in the browser, a single Series opens directly, several are
- * offered one at a time, and cancel/retry/reset work while reading.
+ * The standalone viewer's local import: files, folders, ZIP and TAR-family
+ * archives are read in the browser, a single Series opens directly, several
+ * are offered one at a time, and cancel/retry/reset work while reading.
  */
 import { TextDecoder } from 'util';
+import { ReadableStream } from 'stream/web';
+import { gzipSync } from 'fflate';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DicomViewerDropbox } from './DicomViewerDropbox';
 import { fakeDataTransfer } from './localImport/__fixtures__/fakeEntries';
@@ -14,8 +16,14 @@ import {
   syntheticDicom,
   type SyntheticDicomOptions,
 } from './localImport/__fixtures__/syntheticDicom';
+import { buildTar } from './localImport/__fixtures__/syntheticTar';
+import { TAR_STUDY_XZ } from './localImport/__fixtures__/tarFixtures';
 
-Object.assign(globalThis, { TextDecoder });
+Object.assign(globalThis, {
+  TextDecoder,
+  // The browser's web streams (jsdom has none), used by the xz decoder.
+  ReadableStream: globalThis.ReadableStream ?? ReadableStream,
+});
 
 const slice = (series: string, n: number, extra: SyntheticDicomOptions = {}) =>
   syntheticDicom({
@@ -63,7 +71,12 @@ describe('DicomViewerDropbox', () => {
 
   it('offers files, a folder (webkitdirectory) and drag and drop, without uploading', () => {
     render(<DicomViewerDropbox isShow onLoadFiles={jest.fn()} />);
-    expect(screen.getByText(/Drag and drop files, folders or a ZIP archive/)).toBeTruthy();
+    expect(screen.getByText(/Drag and drop files, folders or an archive/)).toBeTruthy();
+    expect(
+      screen.getByText(/Archives: ZIP, TAR, TAR\.GZ\/TGZ, TAR\.BZ2\/TBZ2, TAR\.XZ\/TXZ/)
+    ).toBeTruthy();
+    // No `accept` filter: extensionless DICOM files stay selectable.
+    expect(filesInput().hasAttribute('accept')).toBe(false);
     expect(screen.getByText('Choose files')).toBeTruthy();
     expect(screen.getByText('Choose folder')).toBeTruthy();
     expect(folderInput().hasAttribute('webkitdirectory')).toBe(true);
@@ -130,6 +143,72 @@ describe('DicomViewerDropbox', () => {
     expect(screen.getByText(/3 files checked: 2 DICOM images in 2 Series/)).toBeTruthy();
   });
 
+  it('opens the single Series of a dropped .tar.gz directly', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+    const tar = buildTar([
+      { name: 'Study/', type: '5' },
+      { name: 'Study/S1/IM2', data: slice('1', 2) },
+      { name: 'Study/S1/IM1', data: slice('1', 1) },
+    ]);
+
+    fireEvent.drop(screen.getByTestId('dicom-viewer-dropbox'), {
+      dataTransfer: fakeDataTransfer([
+        { name: 'study.tar.gz', node: fileOf(gzipSync(tar), 'study.tar.gz') },
+      ]),
+    });
+
+    await waitFor(() => expect(onLoadFiles).toHaveBeenCalledTimes(1));
+    expect(loadedNames(onLoadFiles)).toEqual(['IM1', 'IM2']);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('reports a TAR archive whose name does not match its content', async () => {
+    render(<DicomViewerDropbox isShow onLoadFiles={jest.fn()} />);
+    choose(filesInput(), [
+      fileOf(buildTar([{ name: 'IM1', data: slice('1', 1) }]), 'study.tar.xz'),
+    ]);
+    expect(await screen.findByText('Archive 1 (TAR.XZ) could not be opened')).toBeTruthy();
+    expect(screen.getByText(/does not match the archive content/)).toBeTruthy();
+  });
+
+  it('names failed archives by position and format, never by file or entry name', async () => {
+    // Synthetic names shaped like patient identifiers.
+    const phi = 'DOE^JANE_MRN-0042';
+    render(<DicomViewerDropbox isShow onLoadFiles={jest.fn()} />);
+    choose(filesInput(), [
+      fileOf(buildZip([{ name: `${phi}/IM1`, data: slice('1', 1), crc: 42 }]), `${phi}.zip`),
+      fileOf(
+        gzipSync(buildTar([{ name: `${phi}/IM1`, type: '2', linkName: `${phi}/IM2` }])),
+        `${phi}.tar.gz`
+      ),
+      fileOf(buildTar([{ name: 'IM1', data: slice('1', 1) }]), `${phi}.tar.xz`),
+    ]);
+
+    const alerts = await screen.findAllByTestId('local-import-failed-archive');
+    expect(alerts.map((a) => a.querySelector('.MuiAlertTitle-root')?.textContent)).toEqual([
+      'Archive 1 (ZIP) could not be opened',
+      'Archive 2 (TAR.GZ) could not be opened',
+      'Archive 3 (TAR.XZ) could not be opened',
+    ]);
+    for (const alert of alerts) expect(alert.textContent).not.toMatch(/DOE|JANE|MRN|0042/);
+  });
+
+  it('cancels a running .tar.xz import and retries it', async () => {
+    const onLoadFiles = jest.fn();
+    render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
+
+    choose(filesInput(), [fileOf(TAR_STUDY_XZ, 'study.tar.xz')]);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByText('Import cancelled.')).toBeTruthy();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    // Three Series: offered for choice, none opened directly.
+    expect(await screen.findAllByTestId('local-import-series')).toHaveLength(3);
+    expect(onLoadFiles).not.toHaveBeenCalled();
+  });
+
   it('shows skipped files instead of a silent success', async () => {
     const onLoadFiles = jest.fn();
     render(<DicomViewerDropbox isShow onLoadFiles={onLoadFiles} />);
@@ -157,7 +236,7 @@ describe('DicomViewerDropbox', () => {
     choose(filesInput(), [
       fileOf(buildZip([{ name: 'IM1', data: slice('1', 1), flags: 1 }]), 'locked.zip'),
     ]);
-    expect(await screen.findByText('locked.zip could not be opened')).toBeTruthy();
+    expect(await screen.findByText('Archive 1 (ZIP) could not be opened')).toBeTruthy();
     expect(screen.getByText(/encrypted/)).toBeTruthy();
   });
 
@@ -228,7 +307,7 @@ describe('DicomViewerDropbox', () => {
       ),
     ]);
 
-    expect(await screen.findByText('study.zip could not be opened')).toBeTruthy();
+    expect(await screen.findByText('Archive 1 (ZIP) could not be opened')).toBeTruthy();
     expect(screen.queryAllByTestId('local-import-series')).toHaveLength(0);
     expect(screen.getByText(/No DICOM images that can be displayed/)).toBeTruthy();
     expect(onLoadFiles).not.toHaveBeenCalled();

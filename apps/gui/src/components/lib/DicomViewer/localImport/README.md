@@ -1,17 +1,20 @@
 # Local DICOM import (standalone `/dwv` viewer)
 
-Opens local DICOM files, folders and ZIP archives **in the browser only**.
-Nothing is uploaded, persisted or logged; the patient import workflow
-(`modules/archiveUpload`, server-side extraction) is separate and unchanged.
-The import UI is shown only by the standalone viewer (`<DicomViewer isClean />`);
-Series review (remote URLs) never shows it.
+Opens local DICOM files, folders, ZIP and TAR-family archives **in the
+browser only**. Nothing is uploaded, persisted or logged; the patient import
+workflow (`modules/archiveUpload`, server-side extraction) is separate and
+unchanged. The import UI is shown only by the standalone viewer
+(`<DicomViewer isClean />`); Series review (remote URLs) never shows it.
 
 ```text
-Choose files / Choose folder / drop  ──>  localImport.sources   (FileList, webkitRelativePath,
-                                                                 webkitGetAsEntry + readEntries loop)
-                                     ──>  localImport.pipeline  (sniff content: DICOM / ZIP / other)
-                       ZIP archives  ──>  localImport.zip       (central directory checks, bounded inflate)
-                    DICOM candidates ──>  localImport.dicom     (header up to Pixel Data, dicom-parser)
+Choose files / Choose folder / drop  ──>  localImport.sources    (FileList, webkitRelativePath,
+                                                                  webkitGetAsEntry + readEntries loop)
+                                     ──>  localImport.pipeline   (sniff content: DICOM / archive / other;
+                                                                  TAR family: name and content must agree)
+                       ZIP archives  ──>  localImport.zip        (central directory checks, bounded inflate)
+                 TAR-family archives ──>  localImport.tar        (headers, PAX/GNU names, path checks)
+          .tar.gz / .tar.bz2 / .tar.xz ──>  localImport.decompress (bounded stream decompression)
+                    DICOM candidates ──>  localImport.dicom      (header up to Pixel Data, dicom-parser)
                                      ──>  groupSeries           (Study + Series Instance UID, then
                                                                  stacks dwv can load completely)
                     one stack only   ──>  dwv App.loadFiles()
@@ -26,11 +29,12 @@ Choose files / Choose folder / drop  ──>  localImport.sources   (FileList, w
   ("too large to check") instead of reading the whole file.
 - dwv only passes files without an extension or with `.dcm` to its DICOM
   loader; other names (e.g. `IM0001.IMA`) get `.dcm` appended. Bytes are
-  never modified or copied (stored ZIP entries are slices of the archive).
+  never modified (stored ZIP entries and files of a plain TAR are slices of
+  the archive, not copies).
 - Pictures and videos chosen or dropped as files (MIME `image/*`,
   `video/*`) are listed separately and open with dwv's own image/video
   loaders, as before (also above the DICOM file size limit: the import
-  never reads them). They are not taken from ZIP archives. DWV state
+  never reads them). They are not taken from archives. DWV state
   (`.json`) files are not supported here: dwv applies them to already
   loaded data only.
 
@@ -113,20 +117,124 @@ previous one (late events of the replaced load are ignored).
 
 | Limit | Default | When reached |
 | --- | --- | --- |
-| Files found (folders + ZIP entries) | 20,000 | import stops |
-| Path depth / length | 32 / 1,024 chars | import stops |
-| Single DICOM file (on disk or extracted) | 512 MB | file skipped (in a ZIP: archive rejected) |
-| ZIP archive size | 2 GB | import stops |
-| ZIP entries | 20,000 | import stops |
-| Bytes inflated from ZIPs (held in memory) | 512 MB | import stops |
-| Overall ZIP expansion ratio (above 64 MB) | 100:1 | archive rejected |
+| Files found (folders + archive entries) | 20,000 | import stops |
+| Path depth / length (after PAX / GNU names) | 32 / 1,024 chars | import stops |
+| Single DICOM file (on disk or extracted) | 512 MB | file skipped (in an archive: archive rejected) |
+| Archive file size (ZIP or TAR family) | 2 GB | import stops |
+| TAR stream after decompression (`.tar.gz` / `.bz2` / `.xz`) | 2 GB | import stops |
+| Archive entries (files, directories, links) | 20,000 | import stops |
+| Bytes copied out of archives (inflated ZIP entries, files of compressed TARs; held in memory) | 512 MB | import stops |
+| Expansion ratio above 64 MB (ZIP: declared; compressed TAR: while decompressing) | 100:1 | archive rejected |
+| PAX extended header / GNU long name record | 1 MB / 64 KB | archive rejected |
+| xz dictionary (LZMA2) | 64 MiB | archive rejected (unsupported) |
 | DICOM header read | 16 MB | file skipped |
+
+## TAR-family archives
+
+The same extensions as the server (`ARCHIVE_EXTENSIONS` in
+`libs/constants`): `.tar`, `.tar.gz` / `.tgz`, `.tar.bz2` / `.tbz2`,
+`.tar.xz` / `.txz` (case-insensitive), and `.zip`.
+
+### Detection
+
+- A file whose **name** has a TAR-family extension is opened only when its
+  **content** agrees (as on the server): a TAR header with a valid checksum
+  for `.tar`, the gzip (`1f 8b 08`), bzip2 (`BZh1`–`BZh9` followed by a
+  block or end marker) or xz (`fd 37 7a 58 5a 00`) signature for the others.
+  Otherwise the archive is reported ("does not match the archive content",
+  or "not a valid … archive" for anything else, e.g. an empty file).
+- gzip, bzip2, xz or TAR content **without** a TAR-family name (`.gz`,
+  `.bz2`, no extension…) is reported as not opened, with the supported
+  extensions. Such a file may hide images, so its source is marked
+  incomplete.
+- ZIP archives keep being recognised by content alone (as before).
+- After decompression, the stream must be a TAR archive: the first block
+  must be a valid header (or the end-of-archive marker), so a valid gzip,
+  bzip2 or xz file of something else is rejected as damaged.
+
+### Decoders (`localImport.decompress`)
+
+| Format | Library | Why |
+| --- | --- | --- |
+| TAR headers | own reader (`localImport.tar`) | TAR is a simple block container; full control of checksums, PAX/GNU records and path checks before any entry is used. No codec is implemented here. |
+| gzip | `fflate` `Gunzip` (already used for ZIP) | Streaming, browser-native JavaScript. fflate does not verify the gzip trailer, so the CRC-32 and size of **every member** are verified here, and reserved header flags are rejected. |
+| bzip2 | `unbzip2-stream/lib/bzip2.js` + `bit_iterator.js` (already a dependency; the server's bzip2 decoder) | Pure JavaScript block decoder without Node streams or `Buffer` (the package's Node stream wrapper is not used). Verifies block and stream CRCs. Driven one block at a time. |
+| xz | `xz-decompress` (already a dependency; the server's xz decoder) | xz-embedded compiled to WebAssembly (inlined, no network), a web `ReadableStream`. Verifies CRC-32/CRC-64 checks, supports multi-stream files and padding, rejects trailing data, limits the LZMA2 dictionary to 64 MiB. |
+
+All three are loaded on first use (separate chunks: ~7 KB bzip2, ~21 KB xz).
+No Node-only module (`fs`, `stream`, `Buffer`, `zlib`, `tar-stream`) is in
+the browser bundle; `xz-decompress`'s optional `stream/web` import resolves
+to Vite's empty browser stub and is only reached where `ReadableStream`
+does not exist.
+
+### Security checks
+
+- **Headers:** every 512-byte header must have a valid checksum (unsigned,
+  or signed as old tools wrote), numeric fields must be octal (or GNU
+  base-256, never negative). POSIX ustar (with the `prefix` field), GNU
+  (`ustar  `) and old v7 headers are read.
+- **Names:** the effective name is the PAX `path`, else the GNU long name
+  (`L`), else the header name (with the ustar prefix). It is validated
+  **after** these are applied, by the same check as ZIP names: no control
+  characters (C0, C1), text direction overrides, absolute, drive-letter,
+  UNC or `..` paths, then the depth and length limits. Directory and link
+  names are validated too. Unsafe names are never shown (the message names
+  the problem only).
+- **PAX:** records must be well-formed (`"<length> key=value\n"`, exact
+  lengths); a NUL in a value is rejected; a PAX `size` replaces the header
+  size. A global PAX header (`g`) may carry comments (e.g. `git archive`)
+  but not `path`, `linkpath` or `size`. Two PAX headers (or two long
+  names) for one entry, or one without an entry, are rejected. A key
+  repeated within one PAX header (`path`, `size` or any other, same or
+  different value) rejects the archive as unsafe: tools differ in which
+  value they use, so the name or size read here could differ from another
+  tool's.
+- **Entry types:** regular files (`0`, NUL, `7`) are read; directories
+  (`5`, GNU `D`) and GNU volume labels (`V`) are skipped. Hard and symbolic
+  links, character and block devices and FIFOs are never followed or
+  created: they reject the archive **whatever their name**, also when
+  named like OS metadata (`__MACOSX/…`, `.DS_Store`) or `DICOMDIR`. Only
+  regular files with such names are skipped as junk. GNU sparse files (`S`, `GNU.sparse.*`), multi-volume
+  (`M`), non-UTF-8 PAX names and any other type reject the archive as
+  unsupported.
+- **Structure:** an archive must end with the end-of-archive marker (one
+  or two zero blocks); only zero bytes may follow it (nothing hidden after
+  it). A TAR cut off at an entry boundary therefore counts as truncated.
+- **Duplicate paths** (after normalisation, e.g. `a/./b`, `a//b`, `a\b`)
+  and **nested archives** (ZIP, TAR, gzip, bzip2, xz inside, by content)
+  reject the archive. The latter also applies to ZIP archives now.
+- **Decompression bombs:** the decompressed size is checked while it is
+  produced (gzip: per 16 KB input step; bzip2: every 64 KB inside a block;
+  xz: per 64 KB output chunk): above 64 MB, more than 100× the archive size
+  rejects the archive; more than 2 GB stops the import.
+
+### Differences from server ingestion
+
+- The browser limits are lower (see the table) and the TAR stream must fit
+  in 2 GB after decompression.
+- The server skips links that stay inside the archive; the browser rejects
+  any archive with a link, whatever its name (a link may stand for an image
+  that would then be missing).
+- A key repeated within one PAX header rejects the archive.
+- The browser requires the end-of-archive marker and zero bytes after it,
+  and verifies the gzip trailer of every member.
+- Like the server, xz files with a SHA-256 check or a dictionary above
+  64 MiB are not opened (same xz decoder).
+
+### Not supported
+
+Encrypted or split archives, RAR, 7z, `.tar.zst`, `.tar.lz`, `.tar.Z`;
+gzip/bzip2/xz files that are not TAR archives (e.g. `IM1.dcm.gz`); sparse,
+multi-volume and link entries; archives inside archives (never unpacked).
 
 ### Incomplete imports
 
 A Series is never presented as complete when images of it may be missing.
 
-- **ZIP archives are all or nothing.** An entry that inflates beyond its
+- **Archives (ZIP and TAR family) are all or nothing.** A ZIP's central
+  directory is checked before anything is extracted; a TAR is read in order,
+  so a problem may be found after valid files were kept: they are undone
+  (below). An entry that inflates beyond its
   declared size, overlapping entries, traversal/absolute/drive paths,
   encrypted, signed or split archives, damaged ZIP64 records and end records
   that do not describe the central directory exactly (contradictory entry
@@ -140,7 +248,27 @@ A Series is never presented as complete when images of it may be missing.
   archive is kept, even entries extracted before the problem was found
   (instances, SOP Instance UIDs, paths, counters, memory budget), and the
   reason is shown. Other files and archives are not affected. Files that
-  are no images (README, reports, OS metadata) do not reject an archive.
+  are no images (README, reports, OS metadata) do not reject an archive;
+  OS metadata and DICOMDIR files are skipped even when they cannot be read,
+  but a link, device, FIFO or unsupported entry (ZIP: also an unsupported
+  compression method) rejects the archive whatever its name. In a ZIP the
+  Unix file type is checked before the name: an entry whose name ends in
+  `/` or `\` (or with the Unix directory type) is skipped as a directory
+  only when it is not a link or special file and holds no data. The
+  declared size of 0 is not trusted alone: the entry must have no
+  compressed bytes, or be a deflate stream of at most 2 bytes (the empty
+  stream zip tools write, too short to produce any byte). A stored entry
+  whose sizes differ is rejected as damaged; any other "directory" with
+  data rejects the archive as an unsupported entry.
+  A rejected archive is shown as "Archive 2 (TAR.GZ) could not be opened"
+  with a static reason: neither the archive's file name nor the name of the
+  entry at fault appears in the message (names may identify the patient).
+  The path is kept internally only, to flag the Series of its folder or
+  selection.
+  For a TAR, any damaged, truncated, unsafe or unsupported part (see
+  [TAR-family archives](#tar-family-archives)) rejects it the same way.
+  A rejected archive keeps no Blob of it: the instances that held them are
+  dropped.
 - **Folders:** a file that cannot be read cannot be assigned to a Series
   (its header is unknown), and the viewer does not guess. The file is
   listed, and every Series from the same source (the chosen or dropped
@@ -148,22 +276,36 @@ A Series is never presented as complete when images of it may be missing.
   images", as is every Series of a source containing a rejected archive.
 - Such Series, parts and failed archives never open automatically.
 
-TAR, RAR and 7z are not unpacked.
+RAR and 7z are not unpacked.
 
-### Responsiveness
+### Responsiveness and cancellation
 
-Work is done in small async steps (1 MB reads, 16 KB inflate steps, a pause
-every 8 MB inflated and every 200 files), so the page stays responsive and
-Cancel takes effect quickly. Cancel, Start over and leaving the page abort
-the import and drop all references to the found files.
+Work is done in small async steps (1 MB reads, 16 KB inflate steps, 256 KB
+xz input steps, one bzip2 block at a time, a pause every 8 MB decompressed
+and every 200 files or TAR headers), so the page stays responsive and
+Cancel takes effect quickly: it is checked after every decompressed chunk
+and before every header. A bzip2 block (at most ~46 MB of output, typically
+~1 MB) is decoded without a pause. Cancel, Start over and leaving the page
+abort the import and drop all references to the found files; an abandoned
+decoder is released (the xz decoder also frees its single-use lock, so a
+Retry decodes again). Progress names an archive by its position and format
+("Extracting archive 2 (TAR.XZ)… 40%"), not by its file name.
 
 ### Memory
 
-- Inflated ZIP entries are kept (as Blobs) for the whole import result so
-  that other Series can be opened without importing again: up to 512 MB.
-  Inflated output is moved into Blob parts every 4 MB, so an entry is not
-  held twice while it is extracted. Files from folders are not read into
-  memory (only their headers, one at a time).
+- Inflated ZIP entries and files of compressed TARs are kept (as Blobs) for
+  the whole import result so that other Series can be opened without
+  importing again: up to 512 MB. Their output is moved into Blob parts
+  every 4 MB, so a file is not held twice while it is extracted. A TAR
+  entry's first 512 bytes are checked first: files that are not DICOM are
+  skipped without being copied. Files of a plain `.tar`, stored ZIP entries
+  and files from folders are not read into memory (only their headers, one
+  at a time).
+- Decompression overhead on top: up to ~16 MB of gzip output per step, up
+  to ~46 MB of output for one bzip2 block plus its 3.6 MB work buffer and
+  5 MB of compressed read-ahead, and for xz the WebAssembly memory with a
+  dictionary of up to 64 MiB (WebAssembly memory is not returned to the
+  browser until the page is closed).
 - dwv's own memory comes on top: it reads the files of the opened stack and
   holds the decoded image (roughly rows × columns × 2 bytes per slice for
   CT). `App.reset()` only empties the display, so the viewer removes every
@@ -172,9 +314,11 @@ the import and drop all references to the found files.
   stack on screen is held. Files dwv no longer tracks after an early
   `loadend` may still be read once; they cannot recreate removed data (dwv
   reports them as stale errors, which are ignored).
-- A large Series from a large ZIP can therefore need well over 1 GB;
+- A large Series from a large archive can therefore need well over 1 GB;
   devices with little memory may still run out. Decompression runs on the
-  main thread (no Worker).
+  main thread (no Worker): a Worker would add a second copy of the data
+  (or transfer bookkeeping) and build changes, while bounded steps already
+  keep the page responsive.
 
 ## Browser support
 
@@ -183,3 +327,10 @@ the import and drop all references to the found files.
   picker, the button is hidden with a hint; without the entries API, dropped
   files are used as they are and an unreadable dropped folder points to
   **Choose folder**.
+- TAR-family archives: `.tar.xz` needs WebAssembly and web streams
+  (`ReadableStream`): Chromium-based browsers (Chrome, Edge, Brave), Firefox
+  and Safari support both. `.tar`, `.tar.gz` and `.tar.bz2` use plain
+  JavaScript. A browser without them reports `.tar.xz` archives as
+  unsupported instead of opening them.
+- The file picker has no `accept` filter, so extensionless DICOM files and
+  every archive type can be chosen.

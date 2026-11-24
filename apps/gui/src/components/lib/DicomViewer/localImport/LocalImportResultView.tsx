@@ -126,14 +126,17 @@ export const LocalImportResultView: FC<LocalImportResultViewProps> = ({
 
       {!result.series.length && !result.mediaFiles.length && (
         <Alert severity="error">
-          No DICOM images that can be displayed were found. Choose a folder or ZIP archive that
+          No DICOM images that can be displayed were found. Choose a folder or an archive that
           contains DICOM image files.
         </Alert>
       )}
 
+      {/* Archives are named by position and format: file names may identify the patient. */}
       {result.failedArchives.map((archive) => (
-        <Alert severity="error" key={archive.path}>
-          <AlertTitle>{archive.path} could not be opened</AlertTitle>
+        <Alert severity="error" key={archive.index} data-testid="local-import-failed-archive">
+          <AlertTitle>
+            Archive {archive.index} ({archive.format}) could not be opened
+          </AlertTitle>
           {archive.message}
         </Alert>
       ))}
