@@ -33,7 +33,7 @@ verify_rule() {
     return 1
   }
   if [[ -f "$ufw_defaults" ]] && grep -Eq '^[[:space:]]*IPV6=yes[[:space:]]*$' "$ufw_defaults"; then
-    grep -Eq '^4460/tcp \\(v6\\)[[:space:]]+ALLOW OUT[[:space:]]+Anywhere \\(v6\\)([[:space:]]|$)' <<< "$status" || {
+    grep -Eq '^4460/tcp \(v6\)[[:space:]]+ALLOW OUT[[:space:]]+Anywhere \(v6\)([[:space:]]|$)' <<< "$status" || {
       echo "FAIL: missing outbound TCP 4460 IPv6 allow rule" >&2
       return 1
     }
