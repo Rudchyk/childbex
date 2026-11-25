@@ -152,3 +152,28 @@ Do not place production application secrets or model data in GitHub Actions.
 - Proposed, repository-owned Nginx snippets: `ops/nginx/conf.d/99-ratelimit.conf` and `ops/nginx/snippets/childbex-dicom-location.conf`.
 - Controlled deployment, verification and rollback: [`docs/operations/dicom-rate-limit.md`](../docs/operations/dicom-rate-limit.md).
 - The main vhost is still server-local/Certbot-managed. These snippets are **not** installed automatically and do not affect `app` or `ml` releases. See #29 and broader ops-source-of-truth work #9.
+
+## Keycloak release monitoring (manual deployment)
+
+- ChildBEx owns the dedicated release checker, systemd service/timer and
+  project-specific Prometheus rules under `ops/keycloak/` and `ops/prometheus/rules/`.
+- **Not installed by app/ML release workflows.** Production Keycloak release paths
+  and existing Node Exporter textfile collector must be independently verified.
+- Step-by-step staging, validation and scoped deployment to both ChildBEx and the
+  shared Prometheus server: [Keycloak release monitoring runbook](../docs/operations/keycloak-release-monitoring.md).
+- New stable versions trigger only a `warning / maintenance` email; there is
+  **no automatic Keycloak upgrade**.
+
+## Node Exporter collector selection (Issue #64, manual deployment)
+
+- `ops/systemd/node_exporter-collectors.conf` is an opt-in drop-in for the existing
+  Node Exporter service. It excludes eleven non-applicable/blocked collectors.
+- Keep `conntrack` active (two connection-table gauges), the Tailscale-only
+  `100.117.155.53:9100` listener and the existing textfile collector.
+- Preserve `ProtectClock=yes` and the separate Keycloak release-monitoring metrics.
+- `bash ops/tests/test-node-exporter-collectors.sh` is run in the Ops CI job.
+- **Not automatically installed** by app or ML deploy. A reviewed, separately
+  approved restart and Prometheus verification are required.
+- This change does **not** resolve the Node Exporter/Tailscale boot race (#65).
+- Preflight, controlled installation and rollback:
+  [Node Exporter collector selection runbook](../docs/operations/node-exporter-collectors.md).

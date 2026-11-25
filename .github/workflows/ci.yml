@@ -93,3 +93,12 @@ jobs:
           bash ops/tests/test-origin-ssl-monitoring.sh
           bash -n ops/install/install-metrics-tailnet-proxy.sh
           bash ops/tests/test-metrics-tailnet-proxy.sh
+          bash -n ops/install/install-keycloak-release-monitor.sh
+          bash -n ops/install/install-keycloak-release-rules.sh
+          python3 -B ops/keycloak/release-check.py --self-test
+          # Prevent reintroducing explicit root identity; root is the service default.
+          if grep -Eq '^[[:space:]]*(User|Group)[[:space:]]*=[[:space:]]*root' ops/keycloak/childbex-keycloak-release-check.service; then
+            echo 'ERROR: explicit root user/group breaks Keycloak version checker sandbox' >&2
+            exit 1
+          fi
+          bash ops/tests/test-node-exporter-collectors.sh
