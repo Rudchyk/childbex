@@ -20,7 +20,7 @@ systemctl cat node_exporter.service
 systemctl is-active node_exporter.service
 systemctl show node_exporter.service -p ExecStart -p ProtectClock -p DropInPaths
 /usr/local/bin/node_exporter --version
-/usr/local/bin/node_exporter --help | grep -E -- '--(no-collector|collector)\.(timex|bcachefs|nfs)'
+/usr/local/bin/node_exporter --help 2>&1 | grep -F 'collector.timex'
 sudo test ! -e /etc/systemd/system/node_exporter.service.d/90-childbex-collectors.conf
 sudo test ! -L /etc/systemd/system/node_exporter.service.d/90-childbex-collectors.conf
 ```
