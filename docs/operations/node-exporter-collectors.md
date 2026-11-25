@@ -21,8 +21,8 @@ systemctl is-active node_exporter.service
 systemctl show node_exporter.service -p ExecStart -p ProtectClock -p DropInPaths
 /usr/local/bin/node_exporter --version
 /usr/local/bin/node_exporter --help 2>&1 | grep -F 'collector.timex'
-sudo test ! -e /etc/systemd/system/node_exporter.service.d/90-childbex-collectors.conf
-sudo test ! -L /etc/systemd/system/node_exporter.service.d/90-childbex-collectors.conf
+sudo test ! -e /etc/systemd/system/node_exporter.service.d/zz-childbex-collectors.conf
+sudo test ! -L /etc/systemd/system/node_exporter.service.d/zz-childbex-collectors.conf
 ```
 
 **STOP on drift or unexpected systemd drop-ins.** The target system must still use the documented `/usr/local/bin/node_exporter`, `--web.listen-address=100.117.155.53:9100`, `--collector.textfile.directory=/var/lib/node_exporter/textfile_collector`, and `ProtectClock=yes`. Do not overwrite an existing override.
@@ -35,14 +35,14 @@ A Node Exporter restart briefly interrupts telemetry; no server reboot is necess
 sudo install -d -o root -g root -m 0755 /etc/systemd/system/node_exporter.service.d
 sudo install -o root -g root -m 0644 \
   ops/systemd/node_exporter-collectors.conf \
-  /etc/systemd/system/node_exporter.service.d/90-childbex-collectors.conf
+  /etc/systemd/system/node_exporter.service.d/zz-childbex-collectors.conf
 sudo systemctl daemon-reload
 sudo systemctl restart node_exporter.service
 systemctl is-active node_exporter.service
 systemctl cat node_exporter.service
 ```
 
-The `ExecStart=` reset **overrides** the previous `textfile.conf` command, so the repository file intentionally repeats both original essential options. Recheck all deployed drop-ins, especially if #65 was implemented in the meantime.
+The `ExecStart=` reset **overrides** the previous `textfile.conf` command, so the repository file intentionally repeats both original essential options. The drop-in filename **must sort after `textfile.conf`**: systemd applies drop-ins lexicographically; an earlier `90-*.conf` would silently be overridden by the existing `textfile.conf`. The test checks this required filename. Recheck all deployed drop-ins, especially if #65 was implemented in the meantime.
 
 From `shared`, check:
 
@@ -61,9 +61,9 @@ Verify the production file still matches the reviewed Git version. **Stop if it 
 ```bash
 sudo cmp -s \
   ops/systemd/node_exporter-collectors.conf \
-  /etc/systemd/system/node_exporter.service.d/90-childbex-collectors.conf \
+  /etc/systemd/system/node_exporter.service.d/zz-childbex-collectors.conf \
   || { echo 'STOP: collector override differs from Git'; exit 1; }
-sudo rm -- /etc/systemd/system/node_exporter.service.d/90-childbex-collectors.conf
+sudo rm -- /etc/systemd/system/node_exporter.service.d/zz-childbex-collectors.conf
 sudo systemctl daemon-reload
 sudo systemctl restart node_exporter.service
 systemctl is-active node_exporter.service
