@@ -102,3 +102,4 @@ jobs:
             exit 1
           fi
           bash ops/tests/test-node-exporter-collectors.sh
+          bash ops/tests/test-node-exporter-socket-activation.sh

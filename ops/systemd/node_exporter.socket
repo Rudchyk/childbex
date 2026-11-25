@@ -1,0 +1,20 @@
+# ChildBEx Issue #65 — native Node Exporter systemd socket activation.
+# FreeBind allows binding this exact Tailnet address before tailscale0 appears.
+# No global ip_nonlocal_bind; no wildcard listener; no socket proxy.
+[Unit]
+Description=ChildBEx Node Exporter metrics (Tailscale-only socket)
+Documentation=https://github.com/Rudchyk/childbex/issues/65
+
+[Socket]
+ListenStream=100.117.155.53:9100
+FreeBind=yes
+Accept=no
+NoDelay=yes
+Backlog=64
+
+# Source filter on the listening socket; keep existing Tailscale ACL/UFW rules.
+IPAddressDeny=any
+IPAddressAllow=100.78.90.38/32
+
+[Install]
+WantedBy=sockets.target

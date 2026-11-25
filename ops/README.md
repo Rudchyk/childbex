@@ -177,3 +177,17 @@ Do not place production application secrets or model data in GitHub Actions.
 - This change does **not** resolve the Node Exporter/Tailscale boot race (#65).
 - Preflight, controlled installation and rollback:
   [Node Exporter collector selection runbook](../docs/operations/node-exporter-collectors.md).
+
+## Node Exporter native socket activation (Issue #65, manual rollout)
+
+- `ops/systemd/node_exporter.socket` uses `FreeBind=yes` on exactly
+  `100.117.155.53:9100` with default-deny and only the shared Prometheus IP.
+- `ops/systemd/node_exporter-socket-activation.conf` installs as
+  `zzzz-childbex-socket.conf`, after the Issue #64 collector and textfile
+  overrides; it retains all 11 exclusions, textfile metrics and hardening.
+- `bash ops/tests/test-node-exporter-socket-activation.sh` runs in Ops CI.
+- `ops/install/install-node-exporter-socket-activation.sh` supports guarded
+  `--check|--install|--verify|--rollback`; it is **manual-only**.
+- Cutover requires separately authorized Node Exporter restart; testing after
+  reboot requires a **second** authorization. No app/ML deploy touches this.
+- [Runbook](../docs/operations/node-exporter-socket-activation.md).
