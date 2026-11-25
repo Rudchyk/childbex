@@ -12,6 +12,10 @@ CONF="$ROOT/ops/systemd/node_exporter-collectors.conf"
 grep -Fq -- '--web.listen-address=100.117.155.53:9100' "$CONF"
 grep -Fq -- '--collector.textfile.directory=/var/lib/node_exporter/textfile_collector' "$CONF"
 
+# Must apply AFTER textfile.conf (which also resets ExecStart).
+grep -Fq -- '# Install as /etc/systemd/system/node_exporter.service.d/zz-childbex-collectors.conf.' "$CONF"
+[[ 'zz-childbex-collectors.conf' > 'textfile.conf' ]]
+
 expected=(bcachefs bonding fibrechannel infiniband ipvs nfs nfsd nvme tapestats timex zfs)
 actual="$(grep -oE -- '--no-collector\.[a-z0-9]+' "$CONF" | LC_ALL=C sort -u)"
 expected_list="$(printf '%s\n' "${expected[@]}" | sed 's/^/--no-collector./' | LC_ALL=C sort -u)"
