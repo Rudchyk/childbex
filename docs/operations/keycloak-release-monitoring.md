@@ -1,6 +1,6 @@
 # ChildBEx Keycloak: stable release availability alert
 
-Status: **proposed / Git-only**. This PR does **not** install, run or enable anything on production. Apply only after explicit review, preflight and operator approval.
+Status as of **2026-11-25**: **production monitoring is already active** (deployed in separate, operator-approved steps on 2026-10-16). The six-hour checker is enabled; scheduled runs succeeded repeatedly on 2026-11-24 and 2026-11-25, including after a reboot, with `Result=success` and `ExecMainStatus=0`. At 2026-11-25 06:43 EET, the checker reported `installed=26.8.2 latest=26.8.2 update_available=0`. Four alert rules on central `shared` Prometheus were checked in October, and a genuine earlier Keycloak update alert was delivered by email. This PR records the configuration in Git; **merging does not deploy, reinstall, or restart Keycloak or monitoring services**. The rollout steps below remain for disaster recovery or a new deployment; they should **not** be blindly rerun on the already-configured server.
 
 Reference implementation: [shared-infrastructure PR #18](https://github.com/Rudchyk/shared-infrastructure/pull/18), proven manually against the shared Keycloak 26.8.1. This is an independent ChildBEx deployment; its application and ML services are out of scope.
 

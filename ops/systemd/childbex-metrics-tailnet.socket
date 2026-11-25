@@ -1,0 +1,33 @@
+# Repository-owned (Issue #24). Installed only by
+# ops/install/install-metrics-tailnet-proxy.sh, never by the main ops installer.
+#
+# Owns the ChildBEx app metrics address on the tailnet so that Nginx never
+# binds a Tailscale address: Nginx listens on 127.0.0.1:9200 only, and
+# childbex-metrics-tailnet.service forwards accepted connections there.
+#
+# FreeBind= lets this one socket bind before Tailscale has assigned
+# 100.117.155.53 (IP_FREEBIND on this socket only; the global
+# net.ipv4.ip_nonlocal_bind sysctl is not used). Connections are accepted
+# as soon as the address exists, so there is deliberately no ordering on
+# tailscaled.service, network-online.target or the tailscale0 device.
+
+[Unit]
+Description=ChildBEx app metrics on the Tailscale address (forwarded to local Nginx)
+Documentation=https://github.com/Rudchyk/childbex/blob/main/docs/operations/metrics-tailnet-proxy.md
+
+[Socket]
+ListenStream=100.117.155.53:9200
+FreeBind=yes
+# One proxy process serves all connections (socket-activated on demand).
+Accept=no
+NoDelay=yes
+Backlog=64
+
+# Only the shared monitoring server may connect (Prometheus scrape). This
+# cgroup/BPF filter needs runtime verification on the host (see the runbook);
+# the UFW rule for tailscale0 stays an independent layer.
+IPAddressDeny=any
+IPAddressAllow=100.78.90.38/32
+
+[Install]
+WantedBy=sockets.target

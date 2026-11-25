@@ -1,5 +1,5 @@
 import { FC, useCallback, useMemo, useState } from 'react';
-import { Box, Divider, Paper, Stack, Typography, useMediaQuery, useTheme } from '@mui/material';
+import { Box, Divider, Stack, Typography, useMediaQuery, useTheme } from '@mui/material';
 import type { PatientSeriesResponse } from '@libs/schemas';
 import {
   DicomViewer,
@@ -17,6 +17,15 @@ import { SeriesSliceList, type SliceRow } from './review/SeriesSliceList';
 import { BulkReviewActions } from './review/BulkReviewActions';
 import { useSliceSelection } from './review/sliceSelection';
 import { completionOf, countOwnVotes, opinionOf } from './review/reviewOpinions';
+import { ReviewSidePanel } from './review/ReviewSidePanel';
+import { ReviewProgress } from './review/ReviewProgress';
+import { SliceReviewFilter } from './review/SliceReviewFilter';
+import {
+  countByFilter,
+  matchesFilter,
+  sliceFilters,
+  type SliceFilter,
+} from './review/aggregateReview';
 
 interface SeriesImagesProps {
   data: PatientSeriesResponse;
@@ -24,18 +33,35 @@ interface SeriesImagesProps {
 
 type SeriesImage = PatientSeriesResponse['images'][number];
 
+/** Expanded side panel widths (side by side). */
+export const REVIEW_PANEL_WIDTH = 300;
+export const SLICE_PANEL_WIDTH = 270;
+/**
+ * From this breakpoint the panels sit next to the viewer; below it they are
+ * stacked under it, so the image keeps a usable width (at 1200px both
+ * expanded panels still leave the viewport about 560px).
+ */
+export const SIDE_BY_SIDE_BREAKPOINT = 'lg';
+
 interface SliceListPanelProps extends DicomViewerSidebarRenderProps {
   data: PatientSeriesResponse;
   /** Viewer source (file URL) -> image. */
   imagesBySource: Record<string, SeriesImage>;
   reviewerId?: string;
   canVote: boolean;
+  /** Below the viewport instead of next to it. */
+  stacked: boolean;
+  expanded: boolean;
+  onToggle: () => void;
 }
 
 /**
- * The selectable slice list next to the viewer: the active slice follows
- * the viewer; checkboxes select (never navigate); bulk actions apply the
- * current doctor's vote to the selection.
+ * The selectable slice list next to the viewer: the active slice is only
+ * ever the one the viewer reports on screen; a checkbox click selects and
+ * asks the viewer to show that slice; Select all and bulk actions never
+ * navigate; bulk actions apply the current doctor's vote to the selection.
+ * Always rendered (also while collapsed or loading), so the selection
+ * survives collapsing it.
  */
 const SliceListPanel: FC<SliceListPanelProps> = ({
   data,
@@ -45,6 +71,9 @@ const SliceListPanel: FC<SliceListPanelProps> = ({
   imagesBySource,
   reviewerId,
   canVote,
+  stacked,
+  expanded,
+  onToggle,
 }) => {
   // Top of the list = last slice (as the viewer's file list always showed).
   const rows = useMemo<SliceRow[]>(
@@ -61,46 +90,94 @@ const SliceListPanel: FC<SliceListPanelProps> = ({
                   instanceNumber: image.instanceNumber,
                   opinion: opinionOf(image, reviewerId),
                   reviewState: image.reviewState,
+                  reviewStateSource: image.reviewStateSource,
                 },
               ]
             : [];
         }),
     [items, imagesBySource, reviewerId]
   );
-  const ids = useMemo(() => rows.map(({ id }) => id), [rows]);
+  // Filtered by the aggregate state of all reviewers. Counts are of every
+  // presented image of the Series (canonical data), the list only of the
+  // slices the viewer loaded: a slice not loaded is counted, never listed.
+  const [filter, setFilter] = useState<SliceFilter>('all');
+  const seriesCounts = useMemo(
+    () => countByFilter(Object.values(imagesBySource)),
+    [imagesBySource]
+  );
+  const loadedCounts = useMemo(() => countByFilter(rows), [rows]);
+  const visibleRows = useMemo(
+    () => rows.filter(({ reviewState }) => matchesFilter(reviewState, filter)),
+    [rows, filter]
+  );
+  // Selection (and bulk votes) only ever cover the slices shown.
+  const ids = useMemo(() => visibleRows.map(({ id }) => id), [visibleRows]);
   const selection = useSliceSelection(ids);
+  const { clear } = selection;
+  const changeFilter = useCallback(
+    (value: SliceFilter) => {
+      setFilter(value);
+      clear();
+    },
+    [clear]
+  );
   const activeId = useMemo(() => {
     const source = items.find(({ imageUid }) => imageUid === currentImageId)?.source;
     return source ? imagesBySource[source]?.id : undefined;
   }, [items, currentImageId, imagesBySource]);
-
-  if (!rows.length) return null;
+  const filterBar = (
+    <SliceReviewFilter
+      value={filter}
+      onChange={changeFilter}
+      seriesCounts={seriesCounts}
+      loadedCounts={loadedCounts}
+    />
+  );
+  const filterLabel = sliceFilters.find(({ value }) => value === filter)?.label;
 
   return (
-    <Box
-      component={Paper}
-      elevation={3}
-      sx={{ position: 'fixed', top: '10%', bottom: '10%', right: 5, width: 270, zIndex: 50 }}
+    <ReviewSidePanel
+      id="series-slice-list"
+      title="Slices"
+      name="slice list"
+      side="right"
+      stacked={stacked}
+      width={SLICE_PANEL_WIDTH}
+      expanded={expanded}
+      onToggle={onToggle}
+      // Below the viewport: a bounded, scrollable list.
+      stackedHeight="60vh"
     >
-      <SeriesSliceList
-        rows={rows}
-        activeId={activeId}
-        selected={selection.selected}
-        onToggle={selection.toggle}
-        onToggleAll={selection.toggleAll}
-        onNavigate={jumpTo}
-        header={
-          canVote ? (
-            <BulkReviewActions
-              patientId={data.patient.id}
-              seriesId={data.series.id}
-              selectedIds={selection.selectedIds}
-              onSaved={selection.clear}
-            />
-          ) : null
-        }
-      />
-    </Box>
+      {rows.length ? (
+        <SeriesSliceList
+          rows={visibleRows}
+          toolbar={filterBar}
+          emptyMessage={`No slices in “${filterLabel}” among the ${rows.length} loaded.`}
+          activeId={activeId}
+          selected={selection.selected}
+          onToggle={selection.toggle}
+          onToggleAll={selection.toggleAll}
+          onNavigate={jumpTo}
+          header={
+            canVote ? (
+              <BulkReviewActions
+                patientId={data.patient.id}
+                seriesId={data.series.id}
+                selectedIds={selection.selectedIds}
+                onSaved={selection.clear}
+              />
+            ) : null
+          }
+        />
+      ) : (
+        <>
+          {filterBar}
+          <Typography variant="body2" color="text.secondary" p={1}>
+            No slices loaded yet.
+          </Typography>
+        </>
+      )}
+    </ReviewSidePanel>
   );
 };
 
@@ -130,8 +207,10 @@ export const sliceLabel = (
 const showsExactly = (
   result: DicomLoadResult | undefined,
   presentedSources: string[]
-) => {
-  if (!result || result.errorCount !== 0) return false;
+) => !!result && result.errorCount === 0 && showsAllImages(result, presentedSources);
+
+/** Every presented file once and nothing else, whatever errors came. */
+const showsAllImages = (result: DicomLoadResult, presentedSources: string[]) => {
   const loaded = new Set(result.loadedSources);
   return (
     result.sliceCount === presentedSources.length &&
@@ -150,7 +229,12 @@ const showsExactly = (
  */
 export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
   const theme = useTheme();
-  const matches = useMediaQuery(theme.breakpoints.down('sm'));
+  // Read at the first render (no flip after mount). Only props change with
+  // it, never the tree: the viewer and the panels stay mounted.
+  const sideBySide = useMediaQuery(theme.breakpoints.up(SIDE_BY_SIDE_BREAKPOINT), {
+    noSsr: true,
+  });
+  const stacked = !sideBySide;
   const { userId, isDoctor, isAdmin } = useAuth();
   const canVote = isDoctor || isAdmin;
   const presented = useMemo(
@@ -183,13 +267,22 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
   );
   const [loadResult, setLoadResult] = useState<DicomLoadResult>();
   const fullyLoaded = showsExactly(loadResult, Object.keys(itemsMapping));
+  // Still not complete (no review without intact DICOM details), but not
+  // reported as missing images either.
+  const onlyMetadataErrors =
+    !!loadResult &&
+    loadResult.metadataErrorCount > 0 &&
+    loadResult.errorCount === loadResult.metadataErrorCount &&
+    showsAllImages(loadResult, Object.keys(itemsMapping));
   const disabledReason = !presented.length
     ? 'No images to review'
     : !loadResult
       ? 'Waiting until every image of the series is loaded'
-      : !fullyLoaded
-        ? 'Not every image of the series could be shown'
-        : undefined;
+      : onlyMetadataErrors
+        ? 'Every image is shown, but DICOM metadata errors were reported (e.g. duplicate or missing Instance Numbers)'
+        : !fullyLoaded
+          ? 'Not every image of the series could be shown'
+          : undefined;
   // Only an image of this Series, at a known position in the loaded volume:
   // the header, the vote form and the vote request all use this one image.
   const currentImage = active.source ? itemsMapping[active.source] : undefined;
@@ -200,6 +293,12 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
   const partiallyLoaded =
     !!active.position && active.position.loadedCount < presented.length;
   const ownVotes = useMemo(() => countOwnVotes(presented, userId), [presented, userId]);
+  // Layout only, for this Series (never persisted): collapsing a panel
+  // hides it but keeps it mounted, with its unsaved input and selection.
+  const [reviewPanelOpen, setReviewPanelOpen] = useState(true);
+  const [slicePanelOpen, setSlicePanelOpen] = useState(true);
+  const toggleReviewPanel = useCallback(() => setReviewPanelOpen((open) => !open), []);
+  const toggleSlicePanel = useCallback(() => setSlicePanelOpen((open) => !open), []);
 
   const renderSidebar = useCallback(
     (props: DicomViewerSidebarRenderProps) => (
@@ -209,9 +308,44 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
         imagesBySource={itemsMapping}
         reviewerId={userId}
         canVote={canVote}
+        stacked={stacked}
+        expanded={slicePanelOpen}
+        onToggle={toggleSlicePanel}
       />
     ),
-    [data, itemsMapping, userId, canVote]
+    [data, itemsMapping, userId, canVote, stacked, slicePanelOpen, toggleSlicePanel]
+  );
+
+  const reviewPanel = (
+    <ReviewSidePanel
+      id="series-review-panel"
+      title="Review"
+      name="review panel"
+      side="left"
+      stacked={stacked}
+      width={REVIEW_PANEL_WIDTH}
+      expanded={reviewPanelOpen}
+      onToggle={toggleReviewPanel}
+    >
+      <Typography variant="subtitle1" px={1} pt={1} data-testid="review-header">
+        Review —{' '}
+        {currentLabel ??
+          (currentImage ? 'locating the slice on screen…' : 'no slice shown yet')}
+      </Typography>
+      {partiallyLoaded && (
+        <Typography variant="caption" color="warning.main" px={1} component="div">
+          Only {active.position?.loadedCount} of {presented.length} images
+          of this series are loaded.
+        </Typography>
+      )}
+      <Divider />
+      {!!currentImage && !!currentLabel && (
+        <PatientImageReview item={currentImage} targetLabel={currentLabel} />
+      )}
+      <Divider />
+      {/* Every known reviewer's own progress, from this Series' data only. */}
+      <ReviewProgress data={data} currentUserId={userId} canReview={canVote} />
+    </ReviewSidePanel>
   );
 
   return (
@@ -233,47 +367,28 @@ export const SeriesImages: FC<SeriesImagesProps> = ({ data }) => {
           items={presented.map(({ id }) => id)}
         />
       </Stack>
-      {!matches && (
-        <Box
-          component={Paper}
-          elevation={3}
-          sx={{
-            position: 'fixed',
-            top: '10%',
-            bottom: '10%',
-            left: 5,
-            width: 300,
-            zIndex: 50,
-          }}
-        >
-          <Box height="100%" overflow="auto">
-            <Typography variant="subtitle1" px={1} pt={1} data-testid="review-header">
-              Review —{' '}
-              {currentLabel ??
-                (currentImage ? 'locating the slice on screen…' : 'no slice shown yet')}
-            </Typography>
-            {partiallyLoaded && (
-              <Typography variant="caption" color="warning.main" px={1} component="div">
-                Only {active.position?.loadedCount} of {presented.length} images
-                of this series are loaded.
-              </Typography>
-            )}
-            <Divider />
-            {!!currentImage && !!currentLabel && (
-              <PatientImageReview item={currentImage} targetLabel={currentLabel} />
-            )}
-          </Box>
-        </Box>
-      )}
-      {!!sources.length && (
-        <DicomViewer
-          list={sources}
-          getRequestHeaders={keycloakAuthHeaders}
-          onCurrentItemChange={onCurrentItemChange}
-          onLoadResult={setLoadResult}
-          renderSidebar={renderSidebar}
-        />
-      )}
+      {/*
+        The panels take their own room on both sides of the viewer (no
+        overlay), so a collapsed panel gives its width to the viewport. Below
+        SIDE_BY_SIDE_BREAKPOINT they are stacked under the viewer. The review
+        panel is always the viewer's leading panel (it never moves to another
+        parent, so it is never remounted).
+      */}
+      <Box data-testid="series-review-workspace" data-layout={stacked ? 'stacked' : 'side'}>
+        {sources.length ? (
+          <DicomViewer
+            list={sources}
+            getRequestHeaders={keycloakAuthHeaders}
+            onCurrentItemChange={onCurrentItemChange}
+            onLoadResult={setLoadResult}
+            leadingPanel={reviewPanel}
+            renderSidebar={renderSidebar}
+            sidebarPlacement={stacked ? 'below' : 'beside'}
+          />
+        ) : (
+          reviewPanel
+        )}
+      </Box>
     </Stack>
   );
 };

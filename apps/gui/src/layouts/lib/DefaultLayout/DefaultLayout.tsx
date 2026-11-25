@@ -2,7 +2,12 @@
 
 import { ReactNode, FC } from 'react';
 import { Box, BoxProps, Container, ContainerProps, Stack } from '@mui/material';
-import { Header, Footer, Breadcrumbs } from '../../../components';
+import {
+  Header,
+  Footer,
+  Breadcrumbs,
+  BreadcrumbItem,
+} from '../../../components';
 
 export interface DefaultLayoutProps {
   children: ReactNode;
@@ -13,6 +18,8 @@ export interface DefaultLayoutProps {
   isHeader?: boolean;
   isFooter?: boolean;
   isContainer?: boolean;
+  /** The page's breadcrumb trail after Home (see Breadcrumbs). */
+  breadcrumbs?: BreadcrumbItem[];
 }
 
 export const DefaultLayout: FC<DefaultLayoutProps> = ({
@@ -21,6 +28,7 @@ export const DefaultLayout: FC<DefaultLayoutProps> = ({
   isFooter = true,
   isContainer = true,
   slotProps,
+  breadcrumbs,
 }) => {
   return (
     <Stack height="100%">
@@ -33,7 +41,7 @@ export const DefaultLayout: FC<DefaultLayoutProps> = ({
           sx={{ flexGrow: 1, ...slotProps?.ContainerProps?.sx }}
         >
           <Box py={2} height="100%" {...slotProps?.BoxProps}>
-            <Breadcrumbs />
+            <Breadcrumbs items={breadcrumbs} />
             {children}
           </Box>
         </Container>

@@ -12,6 +12,10 @@ for user in childbex-build nodeapp childbex-ml; do
   }
 done
 
+# Stop on unexpected Certbot hook drift BEFORE changing production files.
+bash "$REPO_ROOT/ops/install/install-certbot-hooks.sh" --check
+bash "$REPO_ROOT/ops/install/install-origin-ssl-monitoring.sh" --check
+
 install -d -o childbex-build -g childbex-deployers -m 2770 /srv/childbex/releases
 install -d -o childbex-build -g childbex-deployers -m 2770 /srv/childbex/ml-releases
 
@@ -29,5 +33,8 @@ install -o root -g root -m 0644   "$REPO_ROOT/ops/systemd/childbex-ml.service"  
 systemctl daemon-reload
 systemctl enable childbex-app.service childbex-ml.service
 
-echo "Installed ChildBEx production deploy scripts and systemd units."
+bash "$REPO_ROOT/ops/install/install-certbot-hooks.sh" --install
+bash "$REPO_ROOT/ops/install/install-origin-ssl-monitoring.sh" --install
+
+echo "Installed ChildBEx production deploy scripts, systemd units, Certbot hooks and origin SSL monitoring."
 echo "No deployment was triggered."

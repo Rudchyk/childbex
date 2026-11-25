@@ -14,7 +14,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import StraightenIcon from '@mui/icons-material/Straighten';
 import CropSquareIcon from '@mui/icons-material/CropSquare';
 import { DicomViewerErroredItems } from './DicomViewerErroredItems';
-import { DicomLoadErrorEvents } from './DicomViewer.types';
+import { DicomLoadError } from './DicomViewer.loadErrors';
 import { DicomViewerTags } from './DicomViewerTags';
 import CheckIcon from '@mui/icons-material/Check';
 import { green } from '@mui/material/colors';
@@ -35,11 +35,13 @@ interface DicomViewerToolsProps {
   canRunTool: (tool: string) => boolean;
   isDataLoaded: boolean;
   isLoadSuccessful: boolean;
-  loadErrorEvents: DicomLoadErrorEvents;
+  loadErrorEvents: DicomLoadError[];
   metaData: Record<string, unknown>;
   /** Calibration of lengths of the displayed image. */
   calibration?: LengthCalibration;
   onClean?: () => void;
+  /** Whether Clean is enabled (default: when data is loaded). */
+  canClean?: boolean;
 }
 
 const toolTitles: Record<string, string> = {
@@ -63,6 +65,7 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
   calibration,
   loadErrorEvents,
   onClean,
+  canClean = isDataLoaded,
 }) => {
   const handleToolChange = (
     event: React.MouseEvent<HTMLElement>,
@@ -171,7 +174,7 @@ export const DicomViewerTools: FC<DicomViewerToolsProps> = ({
           size="small"
           value="clean"
           title="Clean"
-          disabled={!isDataLoaded}
+          disabled={!canClean}
           onChange={onClean}
         >
           <HighlightOffIcon />

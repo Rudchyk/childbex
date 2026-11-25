@@ -34,7 +34,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # Nx 21 and Vite 7 support Node 24; Node 20 is EOL and crashes during ESM config loading.
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
@@ -88,10 +89,15 @@ jobs:
           bash -n ops/deploy/childbex-app-deploy
           bash -n ops/deploy/childbex-ml-deploy
           bash -n ops/install/install-production-deploy.sh
+          bash ops/tests/test-certbot-hooks.sh
+          bash ops/tests/test-origin-ssl-monitoring.sh
+          bash -n ops/install/install-metrics-tailnet-proxy.sh
+          bash ops/tests/test-metrics-tailnet-proxy.sh
           bash -n ops/install/install-keycloak-release-monitor.sh
           bash -n ops/install/install-keycloak-release-rules.sh
           python3 -B ops/keycloak/release-check.py --self-test
-          # Explicit User=root/Group=root prevented runuser from switching UID
-          # under systemd sandboxing on ChildBEx; prevent this regression.
-          ! grep -Eq '^(User|Group)=root
- ops/keycloak/childbex-keycloak-release-check.service
+          # Prevent reintroducing explicit root identity; root is the service default.
+          if grep -Eq '^[[:space:]]*(User|Group)[[:space:]]*=[[:space:]]*root([[:space:]]*|#.*) ops/keycloak/childbex-keycloak-release-check.service; then
+            echo 'ERROR: explicit root user/group breaks Keycloak version checker sandbox' >&2
+            exit 1
+          fi

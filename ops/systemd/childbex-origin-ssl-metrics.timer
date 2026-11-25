@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect ChildBEx origin TLS expiry metrics hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=10m
+Unit=childbex-origin-ssl-metrics.service
+
+[Install]
+WantedBy=timers.target

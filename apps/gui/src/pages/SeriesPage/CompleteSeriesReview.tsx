@@ -2,6 +2,7 @@ import { FC } from 'react';
 import { Button, Chip, Stack, Tooltip, Typography } from '@mui/material';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import { format } from 'date-fns';
+import pluralize from 'pluralize';
 import { defaultDateFormat } from '@libs/constants';
 import type { SeriesReviewCompletion } from '@libs/schemas';
 import { DialogAreYouSure } from '../../components';
@@ -21,6 +22,47 @@ interface CompleteSeriesReviewProps {
   /** The current reviewer's explicit votes among the presented images. */
   ownVotes: { abnormal: number; uncertain: number; normal: number; unmarked: number };
 }
+
+/**
+ * An outdated completion (the backend says it is not `current`): the label
+ * after its date, and the tooltip. Images not covered by it are new to the
+ * review; without any, the image set still changed (e.g. an image was
+ * removed or is no longer displayable), so nothing is called new.
+ */
+export const staleCompletionText = (uncoveredImageCount: number) =>
+  uncoveredImageCount > 0
+    ? {
+        label: `${uncoveredImageCount} new ${pluralize('image', uncoveredImageCount)} not reviewed`,
+        title:
+          `${uncoveredImageCount} ${pluralize('image', uncoveredImageCount)} ` +
+          `${uncoveredImageCount === 1 ? 'was' : 'were'} added after your completed review; ` +
+          `${uncoveredImageCount === 1 ? 'it is' : 'they are'} not Normal by default ` +
+          'until you complete the review again.',
+      }
+    : {
+        label: 'Image set changed since completion · review again',
+        title:
+          'The images of this series changed after your completed review, without ' +
+          'adding any image it does not cover (for example, an image was removed or ' +
+          'can no longer be displayed). Complete the review again to confirm it for ' +
+          'the current images.',
+      };
+
+const StaleCompletionChip: FC<
+  Pick<SeriesReviewCompletion, 'completedAt' | 'uncoveredImageCount'>
+> = ({ completedAt, uncoveredImageCount }) => {
+  const { label, title } = staleCompletionText(uncoveredImageCount);
+  return (
+    <Tooltip title={title}>
+      <Chip
+        size="small"
+        color="warning"
+        variant="outlined"
+        label={`Completed ${format(completedAt, defaultDateFormat)} · ${label}`}
+      />
+    </Tooltip>
+  );
+};
 
 /**
  * "Complete review": the current doctor reviewed the whole Series; every
@@ -67,14 +109,10 @@ export const CompleteSeriesReview: FC<CompleteSeriesReviewProps> = ({
         label={`You completed this review ${format(completion.completedAt, defaultDateFormat)}`}
       />
     ) : (
-      <Tooltip title="Images were added after your completed review; they are not normal by default until you complete the review again.">
-        <Chip
-          size="small"
-          color="warning"
-          variant="outlined"
-          label={`Completed ${format(completion.completedAt, defaultDateFormat)} · ${completion.uncoveredImageCount} new image(s) not reviewed`}
-        />
-      </Tooltip>
+      <StaleCompletionChip
+        completedAt={completion.completedAt}
+        uncoveredImageCount={completion.uncoveredImageCount}
+      />
     )
   ) : null;
 
@@ -109,8 +147,9 @@ export const CompleteSeriesReview: FC<CompleteSeriesReviewProps> = ({
           {ownVotes.uncertain} Not sure, {ownVotes.normal} Normal.
         </Typography>
         <Typography>
-          The other {ownVotes.unmarked} image(s) will count as Normal according
-          to your review. Other doctors' votes are not changed. You can still
+          The other {ownVotes.unmarked} {pluralize('image', ownVotes.unmarked)}{' '}
+          will count as Normal according to your review. Other doctors' votes
+          are not changed. You can still
           change any of your decisions later.
         </Typography>
       </DialogAreYouSure>

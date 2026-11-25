@@ -1,0 +1,24 @@
+[Unit]
+Description=Collect ChildBEx origin TLS certificate expiry metrics for Node Exporter
+Documentation=https://github.com/Rudchyk/childbex
+ConditionPathIsDirectory=/var/lib/node_exporter/textfile_collector
+
+[Service]
+Type=oneshot
+# Root reads Let's Encrypt's restricted live/ directory. No private key access.
+ExecStart=/usr/local/sbin/childbex-origin-ssl-metrics
+TimeoutStartSec=30s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/etc/letsencrypt /srv/secrets/auth.childbex.com
+ReadWritePaths=/var/lib/node_exporter/textfile_collector
+Nice=10

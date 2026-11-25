@@ -117,6 +117,36 @@ The SSH account should be a dedicated deployment identity with passwordless sudo
 
 Do not place production application secrets or model data in GitHub Actions.
 
+## Certbot renewal hooks (repository-owned)
+
+- Web (`app.childbex.com`, `childbex.com`) and auth (`auth.childbex.com`) deploy hooks live in `ops/certbot/renewal-hooks/deploy/`.
+- The existing production auth hook is mirrored without behavior changes. Its Keycloak-owned certificate copy remains separate from the web certificate reload hook.
+- The production ops installer now preflights and installs both hooks. For a Certbot-only change, use `sudo bash ops/install/install-certbot-hooks.sh --install` after `bash ops/install/install-certbot-hooks.sh --check`. Installed hook drift is a stop condition, not silently overwritten.
+- DNS-01 Cloudflare credentials and Let's Encrypt keys/certificates remain on the server **only**; no secrets are committed to Git.
+- Tests: `bash ops/tests/test-certbot-hooks.sh`. Procedure and rollback: [Certbot renewal runbook](../docs/operations/certbot-renewal.md).
+
+## Origin SSL monitoring (repository-owned)
+
+- `ops/monitoring/childbex-origin-ssl-metrics` reads the three deployed origin certificates and the Certbot auth source, exposing expiry/health to the existing Node Exporter textfile collector.
+- `ops/systemd/childbex-origin-ssl-metrics.{service,timer}` runs the collector hourly with a sandboxed oneshot.
+- `ops/install/install-origin-ssl-monitoring.sh` applies the collector and units after drift checks, also invoked from the main ops installer.
+- ChildBEx-owned alert rules: `ops/prometheus/rules/21-childbex-origin-ssl.yml`. These deploy **separately to shared**, where Prometheus and Blackbox remain centrally managed.
+- Tests: `bash ops/tests/test-origin-ssl-monitoring.sh`. Procedure and rollback: [Origin SSL runbook](../docs/operations/origin-ssl-monitoring.md).
+
+## Chrony NTS firewall egress (repository-owned exception)
+
+- `ops/install/install-chrony-nts-ufw.sh --verify|--install` checks/applies **outbound TCP 4460** for Chrony NTS key exchange; it does not change UDP 123, inbound firewall rules or the default UFW policy.
+- The rule is already enabled on ChildBEx production following the 2026-11-24 incident; normal operation requires **read-only verification only**.
+- The installer is opt-in and **not** called by app deploys or the main ops installer. Full UFW baseline ownership is tracked in issue #9.
+- Tests: `bash ops/tests/test-chrony-nts-ufw.sh`. Details, warnings about large clock corrections, and verification: [Chrony NTS UFW runbook](../docs/operations/chrony-nts-ufw.md).
+
+## App metrics over Tailscale (Issue #24, manual deployment)
+
+- Nginx serves the app metrics on `127.0.0.1:9200` only (`ops/nginx/conf.d/childbex-app-metrics.conf`), so it never binds a Tailscale address and starts whether or not Tailscale is ready.
+- `ops/systemd/childbex-metrics-tailnet.{socket,service}` own `100.117.155.53:9200` (systemd `FreeBind=yes`, allow `100.78.90.38/32` only) and forward to it with `systemd-socket-proxyd`. The Prometheus target, labels and backend Basic Auth are unchanged; UFW is not modified.
+- `ops/install/install-metrics-tailnet-proxy.sh --check|--verify|--install|--rollback` is opt-in and **not** called by the main ops installer. It stops on drift or port conflicts, backs up the original vhost and rolls back automatically on failure.
+- Tests: `bash ops/tests/test-metrics-tailnet-proxy.sh`. Procedure, verification from Shared, rollback and the controlled reboot that closes #24: [`docs/operations/metrics-tailnet-proxy.md`](../docs/operations/metrics-tailnet-proxy.md).
+
 ## Nginx DICOM rate limiting (manual deployment)
 
 - Proposed, repository-owned Nginx snippets: `ops/nginx/conf.d/99-ratelimit.conf` and `ops/nginx/snippets/childbex-dicom-location.conf`.
