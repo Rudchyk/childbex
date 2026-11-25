@@ -101,3 +101,4 @@ jobs:
             echo 'ERROR: explicit root user/group breaks Keycloak version checker sandbox' >&2
             exit 1
           fi
+          bash ops/tests/test-node-exporter-collectors.sh
