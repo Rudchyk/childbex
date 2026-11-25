@@ -1,0 +1,11 @@
+[Unit]
+Description=Check ChildBEx Keycloak stable release versions every six hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:37:00
+Persistent=true
+RandomizedDelaySec=10m
+Unit=childbex-keycloak-release-check.service
+
+[Install]
+WantedBy=timers.target
