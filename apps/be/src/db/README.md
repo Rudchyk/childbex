@@ -758,6 +758,45 @@ TEST_DATABASE_URL=postgres://user:pass@localhost:5432/childbex_migrations_test n
 
 Without `TEST_DATABASE_URL` they are reported as skipped.
 
+The same applies to every `*.integration.spec.ts` suite (review, dataset
+snapshots, hierarchy, deduplication, backfills, cleanup, cluster removal,
+unique SOP). Each derives its own database `<name>_<suffix>` from
+`TEST_DATABASE_URL` (created when missing) and recreates its `public` schema
+in every test, so suites never share data; the base database is used by the
+migration suite.
+
+#### Mandatory CI gate
+
+The `PostgreSQL integration` CI job runs all of them against a disposable
+PostgreSQL service with synthetic credentials, through
+`scripts/ci/postgres-integration-gate.js` (`be:test` with
+`--skip-nx-cache`; the verdict comes from Jest's JSON report, never from a
+cached or generic green target). The gate fails when `TEST_DATABASE_URL` is missing or not a local
+`*test*` database on port 5432, when the database is unreachable, when a
+suite on disk is missing from (or not in) its inventory, or when any suite
+has a failed or skipped test or zero passing tests. A new integration suite
+must be added to `REQUIRED_SUITES` in that script.
+
+To run the gate locally, use a **throwaway** server only — never a
+production or shared database, and never real patient data. With Docker (no
+host port is published; the tests run in a container sharing the server's
+network):
+
+```sh
+docker run -d --name childbex-pg-test -e POSTGRES_USER=childbex_ci \
+  -e POSTGRES_PASSWORD=childbex_ci_synthetic -e POSTGRES_DB=childbex_ci_test postgres:16
+docker run --rm --network container:childbex-pg-test -v "$PWD:/src:ro" \
+  -e TEST_DATABASE_URL=postgres://childbex_ci:childbex_ci_synthetic@localhost:5432/childbex_ci_test \
+  node:24 bash -c 'cp -r /src /work && cd /work && rm -rf node_modules dist &&
+    npm ci --legacy-peer-deps && node scripts/ci/postgres-integration-gate.js'
+docker rm -f childbex-pg-test
+```
+
+If port 5432 is free and a disposable local server listens there, run
+`node scripts/ci/postgres-integration-gate.js` with `TEST_DATABASE_URL` set
+directly. `node scripts/ci/postgres-integration-gate.js --self-test` checks
+the gate's own failure detection without a database.
+
 ## Production
 
 1. **Back up** the database (`pg_dump -Fc ...`) before every migration.

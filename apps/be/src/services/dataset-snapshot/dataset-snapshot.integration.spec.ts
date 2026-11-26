@@ -678,6 +678,87 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
     await expect(snapshots.finalizeSnapshot(snapshot.id, ADMIN)).resolves.toMatchObject({ status: 'FINALIZED' });
   });
 
+  /** Resolves once a backend waits for an (exclusive) advisory lock. */
+  const advisoryLockAwaited = async () => {
+    for (let i = 0; i < 300; i++) {
+      const [{ n }] = await rows(`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`);
+      if (Number(n)) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('The capture never waited for the review lock.');
+  };
+
+  it('lock-acquisition timeout: a mutation in flight past CAPTURE_LOCK_TIMEOUT fails the capture retryably; nothing kept locked', async () => {
+    expect(snapshots.CAPTURE_LOCK_TIMEOUT).toBe('15s');
+    const snapshot = await draft(SEED);
+    const release = gate();
+    const locked = gate();
+    // A label mutation that does not finish in time (holds the shared lock).
+    const inFlight = sequelize.transaction(async (transaction) => {
+      await review.acquireReviewMutationLock(transaction);
+      locked.open();
+      await release.opened;
+    });
+    await locked.opened;
+
+    const started = Date.now();
+    const outcome = snapshots.finalizeSnapshot(snapshot.id, ADMIN).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    await advisoryLockAwaited();
+    // While the capture waits, a new label mutation is refused at once (not queued).
+    const refused = Date.now();
+    await expect(review.castVote(imageId(2), reviewer('z'), { vote: Vote.ABNORMAL })).rejects.toMatchObject({
+      code: 'REVIEW_LOCKED',
+    });
+    const refusalMs = Date.now() - refused;
+
+    const error = await outcome;
+    const failedAfterMs = Date.now() - started;
+    expect(error).toMatchObject({ code: 'REVIEW_FREEZE_CHANGING' });
+    // lock_timeout bounds the lock WAIT only (verification before it is extra).
+    expect(failedAfterMs).toBeGreaterThanOrEqual(14_000);
+    console.info(
+      `[capture-timing] lock-acquisition timeout: REVIEW_FREEZE_CHANGING after ${failedAfterMs} ms ` +
+        `(CAPTURE_LOCK_TIMEOUT=${snapshots.CAPTURE_LOCK_TIMEOUT}); concurrent vote refused in ${refusalMs} ms`
+    );
+
+    // Failure released everything: nothing published, no freeze, votes go through.
+    expect((await snapshots.getSnapshot(snapshot.id)).status).toBe('DRAFT');
+    expect(await count('dataset_snapshot_items')).toBe(0);
+    expect(await count('review_freezes')).toBe(0);
+    const vote = review.castVote(imageId(2), reviewer('z'), { vote: Vote.NORMAL });
+    expect(await settlesWithin(vote, 1000)).toBe(true);
+    await vote;
+
+    release.open();
+    await inFlight;
+    await expect(snapshots.finalizeSnapshot(snapshot.id, ADMIN)).resolves.toMatchObject({ status: 'FINALIZED' });
+  });
+
+  it('controlled timing: the recorded capture window is reported; review opens again right after it', async () => {
+    const snapshot = await draft(SEED);
+    const started = Date.now();
+    const result = await snapshots.finalizeSnapshot(snapshot.id, ADMIN);
+    const totalMs = Date.now() - started;
+    const [window] = await rows(
+      `SELECT EXTRACT(EPOCH FROM ("unfrozenAt" - "frozenAt")) * 1000 AS ms FROM review_freezes WHERE id = $1`,
+      [result.reviewFreezeId]
+    );
+    const captureMs = Number(window.ms);
+    // Observed, not guaranteed: no upper bound is asserted.
+    expect(captureMs).toBeGreaterThanOrEqual(0);
+    expect(captureMs).toBeLessThanOrEqual(totalMs);
+    const vote = review.castVote(imageId(1), reviewer('z'), { vote: Vote.ABNORMAL });
+    expect(await settlesWithin(vote, 1000)).toBe(true);
+    await vote;
+    console.info(
+      `[capture-timing] uncontended capture window (lock held, label mutations refused): ${captureMs.toFixed(1)} ms; ` +
+        `whole finalization: ${totalMs} ms`
+    );
+  });
+
   it('provenance: conflicts are excluded with both opinions recorded, never turned into a clean label', async () => {
     // Case A: f completed patient 2's series (implicit NORMAL); b marks image 4 ABNORMAL.
     await review.castVote(imageId(4), reviewer('b'), { vote: Vote.ABNORMAL });

@@ -44,6 +44,55 @@ jobs:
       - name: Lint, test, build and typecheck
         run: NX_DAEMON=false NX_VERBOSE_LOGGING=true npx nx run-many -t lint test build typecheck --parallel=1 --outputStyle=stream --verbose
 
+  postgres-integration:
+    # Mandatory gate (#71): the backend integration suites skip without
+    # TEST_DATABASE_URL, so the Node / Nx job does not exercise them.
+    # scripts/ci/postgres-integration-gate.js fails on a missing/unreachable
+    # database, a missing suite, any skipped test or zero tests.
+    name: PostgreSQL integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        # Disposable, synthetic-only server for this job. Keep the major in
+        # line with production (check `pg_lsclusters` on the server).
+        image: postgres:16
+        env:
+          POSTGRES_USER: childbex_ci
+          POSTGRES_PASSWORD: childbex_ci_synthetic
+          POSTGRES_DB: childbex_ci_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U childbex_ci -d childbex_ci_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # Synthetic credentials of the service container above (not a secret).
+      TEST_DATABASE_URL: postgres://childbex_ci:childbex_ci_synthetic@localhost:5432/childbex_ci_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Self-test the gate
+        run: node scripts/ci/postgres-integration-gate.js --self-test
+
+      - name: Run PostgreSQL integration suites
+        run: node scripts/ci/postgres-integration-gate.js
+
   python:
     name: Python / LLM service
     runs-on: ubuntu-24.04
