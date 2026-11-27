@@ -60,6 +60,7 @@ import {
   type HiDpiLayout,
 } from './DicomViewer.display';
 import { refitKeepingView, type ContainerSize } from './DicomViewer.refit';
+import { keepRulerEndTicksHidden } from './DicomViewer.rulerTicks';
 
 /** What a custom slice list gets from the viewer. */
 export interface DicomViewerSidebarRenderProps {
@@ -783,6 +784,14 @@ export const DicomViewer: FC<DicomViewerProps> = ({
     };
     app.addEventListener('zoomchange', onViewChange);
     app.addEventListener('offsetchange', onViewChange);
+    // The Ruler is a thin line: no perpendicular end ticks over the edges
+    // of what is measured (Issue #68). dwv adds a draw layer on the first
+    // drawing of a stack.
+    app.addEventListener('drawlayeradd', () => {
+      for (const drawLayer of app.getDrawLayers()) {
+        keepRulerEndTicksHidden(drawLayer.getKonvaLayer());
+      }
+    });
     // No `app.onResize` on window resizes: the viewport's resize (window
     // resizes included) refits through the layout above, which keeps the
     // user's zoom/pan.

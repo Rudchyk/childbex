@@ -45,6 +45,8 @@ let mockViewLayers: unknown[] | undefined;
 let mockActiveViewLayer: unknown;
 /** dwv's active layer group, when a test needs more than `jumpTo`. */
 let mockLayerGroup: unknown;
+/** dwv's draw layers (`App#getDrawLayers`). */
+let mockDrawLayers: { getKonvaLayer: () => unknown }[] = [];
 const mockSetCurrentIndex = jest.fn();
 /** A volume of single-frame slices (dwv's slice count and total size). */
 const mockImageWithSlices = (count: number) => ({
@@ -106,6 +108,7 @@ jest.mock('dwv', () => ({
     getDataIds: () => [...mockDataIds],
     abortLoad: mockAbortLoad,
     getViewLayersByDataId: () => mockViewLayers,
+    getDrawLayers: () => mockDrawLayers,
   })),
   AppOptions: jest.fn().mockImplementation(() => {
     mockAppOptions = {};
@@ -195,6 +198,7 @@ beforeEach(() => {
   ];
   mockActiveViewLayer = undefined;
   mockLayerGroup = undefined;
+  mockDrawLayers = [];
   mockToolsProps = null;
   mockDropboxProps = null;
   mockSidebarProps = null;
@@ -1169,6 +1173,43 @@ describe('DicomViewer', () => {
 
       act(() => mockToolsProps?.onChangeTool('ZoomAndPan'));
       expect(mockSetTool).toHaveBeenLastCalledWith('ZoomAndPan');
+    });
+
+    it('draws the Ruler without end ticks on every draw layer dwv adds (Issue #68)', () => {
+      render(<DicomViewer list={urls} />);
+      /** A draw layer's Konva layer: a ruler and its two end ticks. */
+      const rulerLayer = () => {
+        const group = { name: () => 'ruler-group' };
+        const ticks = [0, 1].map(() => {
+          let visible = true;
+          return {
+            name: () => 'tick',
+            getParent: () => group,
+            visible: (value?: boolean) => (value === undefined ? visible : (visible = value)),
+          };
+        });
+        return {
+          ticks,
+          find: jest.fn(() => ticks),
+          on: jest.fn(),
+          off: jest.fn(),
+          batchDraw: jest.fn(),
+        };
+      };
+      const first = rulerLayer();
+      mockDrawLayers = [{ getKonvaLayer: () => first }];
+
+      act(() => mockListeners.drawlayeradd({ layerid: '1', dataid: '0' }));
+      expect(first.on).toHaveBeenCalledWith('beforeDraw.rulerEndTicks', expect.any(Function));
+      expect(first.ticks.map((tick) => tick.visible())).toEqual([false, false]);
+
+      // Another stack (or layer group): one listener per layer.
+      const second = rulerLayer();
+      mockDrawLayers = [...mockDrawLayers, { getKonvaLayer: () => second }];
+      act(() => mockListeners.drawlayeradd({ layerid: '2', dataid: '1' }));
+      expect(second.on).toHaveBeenCalledTimes(1);
+      expect(first.off).toHaveBeenLastCalledWith('beforeDraw.rulerEndTicks');
+      expect(second.ticks.map((tick) => tick.visible())).toEqual([false, false]);
     });
 
     it.each([
