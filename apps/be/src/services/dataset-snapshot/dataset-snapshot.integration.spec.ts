@@ -678,11 +678,23 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
     await expect(snapshots.finalizeSnapshot(snapshot.id, ADMIN)).resolves.toMatchObject({ status: 'FINALIZED' });
   });
 
-  /** Resolves once a backend waits for an (exclusive) advisory lock. */
-  const advisoryLockAwaited = async () => {
+  /**
+   * Locks on the review-freeze advisory key in THIS test database only
+   * (a bigint key is classid = high, objid = low 32 bits, objsubid = 1).
+   */
+  const reviewFreezeLocks = (where: string) =>
+    rows(
+      `SELECT mode, granted FROM pg_locks
+        WHERE locktype = 'advisory'
+          AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+          AND classid = $1 AND objid = $2 AND objsubid = 1 AND ${where}`,
+      [Math.floor(review.REVIEW_FREEZE_LOCK_KEY / 2 ** 32), review.REVIEW_FREEZE_LOCK_KEY % 2 ** 32]
+    );
+
+  /** Resolves once the capture waits for the exclusive review-freeze lock. */
+  const captureAwaitsReviewLock = async () => {
     for (let i = 0; i < 300; i++) {
-      const [{ n }] = await rows(`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`);
-      if (Number(n)) return;
+      if ((await reviewFreezeLocks(`mode = 'ExclusiveLock' AND NOT granted`)).length) return;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     throw new Error('The capture never waited for the review lock.');
@@ -699,41 +711,51 @@ describeWithDatabase('dataset snapshots (PostgreSQL)', () => {
       locked.open();
       await release.opened;
     });
-    await locked.opened;
+    let outcome: Promise<unknown> | undefined;
+    try {
+      await Promise.race([locked.opened, inFlight]); // fails fast if the mutation fails
 
-    const started = Date.now();
-    const outcome = snapshots.finalizeSnapshot(snapshot.id, ADMIN).then(
-      () => undefined,
-      (error: unknown) => error
-    );
-    await advisoryLockAwaited();
-    // While the capture waits, a new label mutation is refused at once (not queued).
-    const refused = Date.now();
-    await expect(review.castVote(imageId(2), reviewer('z'), { vote: Vote.ABNORMAL })).rejects.toMatchObject({
-      code: 'REVIEW_LOCKED',
-    });
-    const refusalMs = Date.now() - refused;
+      const started = Date.now();
+      outcome = snapshots.finalizeSnapshot(snapshot.id, ADMIN).then(
+        () => undefined,
+        (error: unknown) => error
+      );
+      await captureAwaitsReviewLock();
+      // While the capture waits, a new label mutation is refused at once (not queued).
+      const refused = Date.now();
+      await expect(review.castVote(imageId(2), reviewer('z'), { vote: Vote.ABNORMAL })).rejects.toMatchObject({
+        code: 'REVIEW_LOCKED',
+      });
+      const refusalMs = Date.now() - refused;
 
-    const error = await outcome;
-    const failedAfterMs = Date.now() - started;
-    expect(error).toMatchObject({ code: 'REVIEW_FREEZE_CHANGING' });
-    // lock_timeout bounds the lock WAIT only (verification before it is extra).
-    expect(failedAfterMs).toBeGreaterThanOrEqual(14_000);
-    console.info(
-      `[capture-timing] lock-acquisition timeout: REVIEW_FREEZE_CHANGING after ${failedAfterMs} ms ` +
-        `(CAPTURE_LOCK_TIMEOUT=${snapshots.CAPTURE_LOCK_TIMEOUT}); concurrent vote refused in ${refusalMs} ms`
-    );
+      const error = await outcome;
+      const failedAfterMs = Date.now() - started;
+      expect(error).toMatchObject({ code: 'REVIEW_FREEZE_CHANGING' });
+      // lock_timeout bounds the lock WAIT only (verification before it is extra).
+      expect(failedAfterMs).toBeGreaterThanOrEqual(14_000);
+      console.info(
+        `[capture-timing] lock-acquisition timeout: REVIEW_FREEZE_CHANGING after ${failedAfterMs} ms ` +
+          `(CAPTURE_LOCK_TIMEOUT=${snapshots.CAPTURE_LOCK_TIMEOUT}); concurrent vote refused in ${refusalMs} ms`
+      );
 
-    // Failure released everything: nothing published, no freeze, votes go through.
-    expect((await snapshots.getSnapshot(snapshot.id)).status).toBe('DRAFT');
-    expect(await count('dataset_snapshot_items')).toBe(0);
-    expect(await count('review_freezes')).toBe(0);
-    const vote = review.castVote(imageId(2), reviewer('z'), { vote: Vote.NORMAL });
-    expect(await settlesWithin(vote, 1000)).toBe(true);
-    await vote;
+      // Failure released everything: nothing published, no freeze, only the
+      // in-flight mutation's shared lock left, votes go through.
+      expect((await snapshots.getSnapshot(snapshot.id)).status).toBe('DRAFT');
+      expect(await count('dataset_snapshot_items')).toBe(0);
+      expect(await count('review_freezes')).toBe(0);
+      expect(await reviewFreezeLocks('true')).toEqual([{ mode: 'ShareLock', granted: true }]);
+      const vote = review.castVote(imageId(2), reviewer('z'), { vote: Vote.NORMAL });
+      expect(await settlesWithin(vote, 1000)).toBe(true);
+      await vote;
+    } finally {
+      // Even when an assertion failed: end the mutation and the finalization.
+      release.open();
+      await inFlight.catch(() => undefined);
+      await outcome;
+    }
+    // Both completed: no review-freeze lock is left in this database.
+    expect(await reviewFreezeLocks('true')).toEqual([]);
 
-    release.open();
-    await inFlight;
     await expect(snapshots.finalizeSnapshot(snapshot.id, ADMIN)).resolves.toMatchObject({ status: 'FINALIZED' });
   });
 

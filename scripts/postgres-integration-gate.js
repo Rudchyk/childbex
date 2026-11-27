@@ -5,10 +5,12 @@
  * TEST_DATABASE_URL is not set, so a green `nx run be:test` proves nothing
  * about them. This gate:
  *
- *   1. refuses an unsafe or missing TEST_DATABASE_URL (database name must
- *      contain "test", host must be local, port 5432 or unset);
- *   2. connects and prints the PostgreSQL server version (fails when the
- *      database is unreachable);
+ *   1. refuses an unsafe or missing TEST_DATABASE_URL: the database must be
+ *      exactly "childbex_test", the host local, the port 5432 or unset, and
+ *      no query parameters (they could change the connection) or fragment;
+ *   2. connects (fails when the database is unreachable) and checks what
+ *      the server reports: current_database() is childbex_test, on a
+ *      loopback address and port 5432; prints the PostgreSQL version;
  *   3. checks that the integration spec files on disk match the inventory
  *      below (a required suite removed, or a new one not listed, fails);
  *   4. runs the integration suites through the be:test Jest executor with
@@ -49,7 +51,10 @@ const REQUIRED_SUITES = [
   'apps/be/src/services/review.integration.spec.ts',
 ];
 
+/** The only allowed base test database (the suites derive "<it>_<suffix>"). */
+const TEST_DATABASE = 'childbex_test';
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1)$/;
 
 /** Problems with TEST_DATABASE_URL (empty when it is safe to use). */
 const checkDatabaseUrl = (value) => {
@@ -62,9 +67,21 @@ const checkDatabaseUrl = (value) => {
   }
   const problems = [];
   if (!/^postgres(ql)?:$/.test(url.protocol)) problems.push('TEST_DATABASE_URL must use postgres://.');
-  if (!/test/i.test(url.pathname.slice(1))) problems.push('TEST_DATABASE_URL must name a database containing "test".');
-  if (!LOCAL_HOSTS.has(url.hostname)) problems.push('TEST_DATABASE_URL must point at a local, disposable server.');
+  if (url.pathname !== `/${TEST_DATABASE}`) problems.push(`TEST_DATABASE_URL must name the database "${TEST_DATABASE}".`);
+  if (!LOCAL_HOSTS.has(url.hostname)) problems.push('TEST_DATABASE_URL must point at the local server.');
   if (url.port && url.port !== '5432') problems.push('TEST_DATABASE_URL must use port 5432 (DB_* has no port).');
+  // e.g. ?host=, ?port=, ?options=, ?sslmode= would override the URL.
+  if (value.includes('?')) problems.push('TEST_DATABASE_URL must not have query parameters.');
+  if (value.includes('#')) problems.push('TEST_DATABASE_URL must not have a fragment.');
+  return problems;
+};
+
+/** Problems with the connection the server reports (empty when it is the expected one). */
+const checkConnection = ({ database, address, port }) => {
+  const problems = [];
+  if (database !== TEST_DATABASE) problems.push(`Connected to database "${database}", not "${TEST_DATABASE}".`);
+  if (!LOOPBACK.test(address ?? '')) problems.push(`Connected to server address ${address ?? '(socket)'}, not loopback.`);
+  if (Number(port) !== 5432) problems.push(`Connected to server port ${port}, not 5432.`);
   return problems;
 };
 
@@ -153,13 +170,17 @@ const fail = (problems) => {
   process.exit(1);
 };
 
-const serverVersion = async (databaseUrl) => {
+/** What the server reports about the connection. */
+const serverConnection = async (databaseUrl) => {
   const { Client } = require('pg');
   const client = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 10_000 });
   try {
     await client.connect();
-    const { rows } = await client.query('SHOW server_version');
-    return rows[0].server_version;
+    const { rows } = await client.query(
+      `SELECT current_database() AS database, host(inet_server_addr()) AS address,
+              inet_server_port() AS port, current_setting('server_version') AS version`
+    );
+    return rows[0];
   } finally {
     await client.end().catch(() => undefined);
   }
@@ -170,9 +191,9 @@ const run = async () => {
   const urlProblems = checkDatabaseUrl(databaseUrl);
   if (urlProblems.length) fail(urlProblems);
 
-  let version;
+  let connection;
   try {
-    version = await serverVersion(databaseUrl);
+    connection = await serverConnection(databaseUrl);
   } catch (error) {
     // ECONNREFUSED arrives as an AggregateError with an empty message.
     const reason = [error.code, error.message, ...(error.errors ?? []).map((e) => e.message)]
@@ -180,7 +201,12 @@ const run = async () => {
       .join('; ');
     fail([`Test database is unreachable: ${reason}`]);
   }
-  console.log(`PostgreSQL server_version: ${version}`);
+  const connectionProblems = checkConnection(connection);
+  if (connectionProblems.length) fail(connectionProblems);
+  const { version } = connection;
+  console.log(
+    `PostgreSQL server_version: ${version}; connected to ${connection.database} at ${connection.address}:${connection.port}`
+  );
 
   const discovered = discoverSuites();
   const missing = inventoryProblems(discovered);
@@ -223,7 +249,7 @@ const run = async () => {
     [
       `### PostgreSQL integration gate: ${problems.length ? 'FAILED' : 'PASSED'}`,
       '',
-      `PostgreSQL ${version}; database ${new URL(databaseUrl).pathname.slice(1)}; commit ${currentCommit()}.`,
+      `PostgreSQL ${version}; database ${connection.database}; commit ${currentCommit()}.`,
       '',
       formatTable(rows),
     ].join('\n')
@@ -277,13 +303,32 @@ const selfTest = () => {
   assert.deepEqual(inventoryProblems(required, required), []);
   assert.match(inventoryProblems([required[0]], required).join(), /missing: .*b\.integration/);
   assert.match(inventoryProblems([...required, 'apps/be/src/c.integration.spec.ts'], required).join(), /not in the gate inventory/);
-  // Unsafe or missing database URLs.
-  assert.deepEqual(checkDatabaseUrl('postgres://u:p@localhost:5432/childbex_ci_test'), []);
-  assert.deepEqual(checkDatabaseUrl('postgres://u:p@127.0.0.1/childbex_ci_test'), []);
+  // Database URLs: only childbex_test on the local server, nothing that overrides the connection.
+  assert.deepEqual(checkDatabaseUrl('postgres://u:p@localhost:5432/childbex_test'), []);
+  assert.deepEqual(checkDatabaseUrl('postgresql://u:p@127.0.0.1/childbex_test'), []);
+  assert.deepEqual(checkDatabaseUrl('postgres://u:p@[::1]:5432/childbex_test'), []);
   assert.match(checkDatabaseUrl(undefined).join(), /not set/);
-  assert.match(checkDatabaseUrl('postgres://u:p@localhost:5432/app_childbex').join(), /containing "test"/);
-  assert.match(checkDatabaseUrl('postgres://u:p@db.example.org:5432/childbex_test').join(), /local/);
+  assert.match(checkDatabaseUrl('not a url').join(), /not a valid URL/);
+  assert.match(checkDatabaseUrl('mysql://u:p@localhost:5432/childbex_test').join(), /postgres:\/\//);
+  for (const database of [
+    'childbex', 'devchildbex', 'app_childbex', 'childbex_migrations_test', 'childbex_test_review',
+    'other_test', 'CHILDBEX_TEST', 'childbex%5Ftest', 'childbex_test/x', '',
+  ]) {
+    assert.match(checkDatabaseUrl(`postgres://u:p@localhost:5432/${database}`).join(), /must name the database "childbex_test"/, database);
+  }
+  assert.match(checkDatabaseUrl('postgres://u:p@db.example.org:5432/childbex_test').join(), /local server/);
   assert.match(checkDatabaseUrl('postgres://u:p@localhost:5433/childbex_test').join(), /port 5432/);
+  for (const query of ['?host=db.example.org', '?port=5433', '?options=-csearch_path%3Dx', '?sslmode=disable', '?dbname=childbex', '?']) {
+    assert.match(checkDatabaseUrl(`postgres://u:p@localhost:5432/childbex_test${query}`).join(), /query parameters/, query);
+  }
+  assert.match(checkDatabaseUrl('postgres://u:p@localhost:5432/childbex_test#x').join(), /fragment/);
+  // The connection the server reports.
+  assert.deepEqual(checkConnection({ database: 'childbex_test', address: '127.0.0.1', port: 5432 }), []);
+  assert.deepEqual(checkConnection({ database: 'childbex_test', address: '::1', port: 5432 }), []);
+  assert.match(checkConnection({ database: 'childbex', address: '::1', port: 5432 }).join(), /database "childbex"/);
+  assert.match(checkConnection({ database: 'childbex_test', address: '10.0.0.5', port: 5432 }).join(), /not loopback/);
+  assert.match(checkConnection({ database: 'childbex_test', address: null, port: 5432 }).join(), /\(socket\), not loopback/);
+  assert.match(checkConnection({ database: 'childbex_test', address: '127.0.0.1', port: 5433 }).join(), /port 5433/);
   // The real inventory matches the files on disk.
   assert.deepEqual(inventoryProblems(discoverSuites()), []);
   console.log('postgres-integration-gate self-test: OK');

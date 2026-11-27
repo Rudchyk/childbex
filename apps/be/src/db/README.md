@@ -793,9 +793,13 @@ are synthetic.
 
 `scripts/postgres-integration-gate.js` (behind the npm command):
 
-- refuses a missing `TEST_DATABASE_URL`, a database name without `test`, a
-  non-local host or a port other than 5432, and fails when the server is
-  unreachable;
+- refuses a missing `TEST_DATABASE_URL`, any database other than exactly
+  `childbex_test`, a non-local host, a port other than 5432 and any query
+  parameters (such as `?host=` or `?options=`, which would change the
+  connection) or fragment;
+- fails when the server is unreachable, or when the connection the server
+  reports is not `current_database() = childbex_test` on a loopback address
+  and port 5432;
 - fails when the integration suites on disk differ from its
   `REQUIRED_SUITES` inventory (add a new suite there);
 - runs them through `be:test` with `--skip-nx-cache`, one suite at a time,
