@@ -1,5 +1,5 @@
 /**
- * Mandatory PostgreSQL integration test gate (Issue #71).
+ * Local PostgreSQL integration test gate (Issue #71).
  *
  * The backend integration suites skip themselves (describe.skip) when
  * TEST_DATABASE_URL is not set, so a green `nx run be:test` proves nothing
@@ -17,21 +17,21 @@
  *   5. fails unless every required suite ran with > 0 passing tests and no
  *      failed, skipped, pending or todo tests.
  *
- * Usage:
- *   TEST_DATABASE_URL=postgres://u:p@localhost:5432/childbex_ci_test \
- *     node scripts/ci/postgres-integration-gate.js
- *   node scripts/ci/postgres-integration-gate.js --self-test
+ * Usage (see apps/be/src/db/README.md, "Tests"):
+ *   TEST_DATABASE_URL=postgres://u:p@localhost:5432/childbex_test \
+ *     npm run be:test:integration
+ *   npm run be:test:integration -- --self-test
  *
- * Never point TEST_DATABASE_URL at a production or shared database: the
- * suites drop and recreate the `public` schema of "<name>" and of
- * "<name>_<suffix>" databases they create.
+ * Never point TEST_DATABASE_URL at a development, production or shared
+ * database: the suites drop and recreate the `public` schema of "<name>"
+ * and of the "<name>_<suffix>" databases (created when missing).
  */
-const { spawnSync } = require('node:child_process');
-const { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } = require('node:fs');
+const { execFileSync, spawnSync } = require('node:child_process');
+const { mkdtempSync, readFileSync, readdirSync, rmSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const ROOT = path.resolve(__dirname, '..', '..');
+const ROOT = path.resolve(__dirname, '..');
 const SPEC_ROOT = 'apps/be/src';
 
 /** Every PostgreSQL-dependent suite; all are required. */
@@ -136,9 +136,16 @@ const formatTable = (rows) => {
   ].join('\n');
 };
 
-const summarize = (markdown) => {
-  console.log(markdown);
-  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`);
+const summarize = (markdown) => console.log(markdown);
+
+const currentCommit = () => {
+  try {
+    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+    const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).trim();
+    return dirty ? `${sha} + uncommitted changes` : sha;
+  } catch {
+    return 'unknown';
+  }
 };
 
 const fail = (problems) => {
@@ -216,7 +223,7 @@ const run = async () => {
     [
       `### PostgreSQL integration gate: ${problems.length ? 'FAILED' : 'PASSED'}`,
       '',
-      `PostgreSQL ${version}; commit ${process.env.GITHUB_SHA ?? 'local'}.`,
+      `PostgreSQL ${version}; database ${new URL(databaseUrl).pathname.slice(1)}; commit ${currentCommit()}.`,
       '',
       formatTable(rows),
     ].join('\n')

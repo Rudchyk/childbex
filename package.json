@@ -24,6 +24,7 @@
     "be:project:web": "nx show project be --web",
     "be:prod": "node dist/apps/be/main.js",
     "be:test": "nx run be:test",
+    "be:test:integration": "node scripts/postgres-integration-gate.js",
     "be:migrate": "nx run be:migrate --skip-nx-cache",
     "be:migrate:status": "nx run be:migrate-status --skip-nx-cache",
     "be:migrate:down": "nx run be:migrate-down --skip-nx-cache",
