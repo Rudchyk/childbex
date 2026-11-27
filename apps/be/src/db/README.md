@@ -758,6 +758,59 @@ TEST_DATABASE_URL=postgres://user:pass@localhost:5432/childbex_migrations_test n
 
 Without `TEST_DATABASE_URL` they are reported as skipped.
 
+The same applies to every `*.integration.spec.ts` suite (review, dataset
+snapshots, hierarchy, deduplication, backfills, cleanup, cluster removal,
+unique SOP). Each derives its own database `<name>_<suffix>` from
+`TEST_DATABASE_URL` (created when missing) and recreates its `public` schema
+in every test, so suites never share data; the base database is used by the
+migration suite.
+
+#### Local PostgreSQL integration gate
+
+The PostgreSQL integration tests are run **locally**, not in CI (the CI
+`Node / Nx` job reports them as skipped). Run all of them with one command:
+
+```sh
+# bash
+TEST_DATABASE_URL=postgres://user:pass@localhost:5432/childbex_test npm run be:test:integration
+```
+
+```powershell
+# PowerShell
+$env:TEST_DATABASE_URL = 'postgres://user:pass@localhost:5432/childbex_test'
+npm run be:test:integration
+```
+
+Test database: use the dedicated **`childbex_test`** on the local server.
+The suites use `childbex_test` itself (migrations) and
+`childbex_test_backfill`, `_cleanup`, `_cluster_removal`, `_datasets`,
+`_dedup`, `_hierarchy`, `_navigation`, `_review`, `_review_backfill` and
+`_unique` (created on first run when missing). Between runs their `public`
+schema is empty. Never use the development database (`childbex`, or the
+`DB_NAME` of `.env.local`), a production or shared database, or real
+patient data: every test drops and recreates `public`, and all fixtures
+are synthetic.
+
+`scripts/postgres-integration-gate.js` (behind the npm command):
+
+- refuses a missing `TEST_DATABASE_URL`, any database other than exactly
+  `childbex_test`, a non-local host, a port other than 5432 and any query
+  parameters (such as `?host=` or `?options=`, which would change the
+  connection) or fragment;
+- fails when the server is unreachable, or when the connection the server
+  reports is not `current_database() = childbex_test` on a loopback address
+  and port 5432;
+- fails when the integration suites on disk differ from its
+  `REQUIRED_SUITES` inventory (add a new suite there);
+- runs them through `be:test` with `--skip-nx-cache`, one suite at a time,
+  and judges only Jest's JSON report: it fails on any failed or skipped
+  test, a suite with zero passing tests, or zero tests in total;
+- prints the PostgreSQL version, the database, the commit and the passed /
+  failed / skipped counts per suite.
+
+`npm run be:test:integration -- --self-test` checks the gate's own failure
+detection without a database.
+
 ## Production
 
 1. **Back up** the database (`pg_dump -Fc ...`) before every migration.
